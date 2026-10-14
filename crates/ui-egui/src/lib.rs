@@ -3552,6 +3552,33 @@ mod tests {
         assert_eq!(h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body), "Kilns");
     }
 
+    /// #1669: with Shift held, Backspace still erases (#707) and Delete cuts the selection, doing
+    /// nothing without one, as in Word for Windows. (Windows sends Shift+Delete as a Cut; macOS and
+    /// Linux send the key, which reached no command.)
+    #[test]
+    fn shift_delete_cuts_the_selection_and_shift_backspace_erases() {
+        let mut h = harness(app());
+        for _ in 0..6 {
+            h.step();
+        }
+        let key = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        let body = |h: &egui_kittest::Harness<WordApp>| h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body);
+        h.event(egui::Event::Text("Kilns fire clay".into()));
+        h.step();
+        h.event(key(egui::Key::Backspace, egui::Modifiers::SHIFT));
+        h.step();
+        assert_eq!(body(&h), "Kilns fire cla");
+        h.event(key(egui::Key::Home, egui::Modifiers::NONE));
+        h.event(key(egui::Key::Delete, egui::Modifiers::SHIFT));
+        h.step();
+        assert_eq!(body(&h), "Kilns fire cla", "no selection: nothing to cut");
+        h.state_mut().run("select.text", json!({"text": "fire "})).unwrap();
+        h.event(key(egui::Key::Delete, egui::Modifiers::SHIFT));
+        h.step();
+        assert_eq!(body(&h), "Kilns cla");
+        assert_eq!(h.state().session.clipboard_text, "fire ", "cut, not just deleted");
+    }
+
     /// #819: Alt+Q opens Search with its box focused, as in Word: the Q isn't typed into the
     /// document, and what is typed next goes into the search box.
     #[cfg(not(target_os = "macos"))]

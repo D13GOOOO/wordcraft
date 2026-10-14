@@ -1,6 +1,6 @@
 # Typing parity with Word
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** trivial (sample-text formulas on Enter, #1067; previously trivial: Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864); previously minor: Correct TWo INitial CApitals, cAPS LOCK and table-cell capitals, #544; previously trivial: complex-script caret and Backspace, #604; Move Paragraph Up/Down, Promote/Demote, Go Back and Alt+X keys, #343) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-14 · **Change:** trivial (Shift+Delete cuts the selection on every platform, #1669; previously trivial: sample-text formulas on Enter, #1067; previously trivial: Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864); previously minor: Correct TWo INitial CApitals, cAPS LOCK and table-cell capitals, #544; previously trivial: complex-script caret and Backspace, #604; Move Paragraph Up/Down, Promote/Demote, Go Back and Alt+X keys, #343) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
 
 What Word does when you type, observed black-box (same keystrokes typed into Word and
 WordCraft, results read back paragraph by paragraph) and pinned by tests in
@@ -71,6 +71,7 @@ Windows/Linux keys are given first, macOS second.
 | Outline view: Alt+Shift+Plus / Minus, Alt+Shift+1–9, Alt+Shift+A | Expand / Collapse the heading (one level at a time); Show Level 1–9; show all levels. The caret never stays in hidden text: it moves on to the next shown paragraph | `outline_show_level_filters_paragraphs` |
 | Shift+F5 | Go Back: the caret cycles through the last four places edited, most recent first | `shift_f5_goes_back_through_the_last_edits` |
 | Alt+X (no macOS default) | the hex code before the caret (up to six digits, `U+` optional) or the selected code becomes its character; otherwise the character before the caret becomes its code (`é` ↔ `00E9`); one undo step | `alt_x_toggles_between_a_character_and_its_code` |
+| Shift+Backspace / Shift+Delete | Shift+Backspace erases like Backspace (#707). Shift+Delete cuts the selection to the clipboard and does nothing without one (Word for Windows, observed 2026-10-14). Windows delivers Shift+Delete as a Cut; macOS and Linux deliver the key, which did nothing (#1669) | `shift_delete_cuts_the_selection_and_shift_backspace_erases` |
 
 ## AutoCorrect and AutoFormat as you type
 
@@ -184,6 +185,7 @@ Word.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Shift+Delete cuts the selection, and does nothing without one, on macOS and Linux too, as in Word for Windows (#1669); Shift+Backspace already erased (#707) |
 | 2026-10-12 | trivial | Sample-text formulas on Enter (#1067), exact matching, bounded parameters, original English and one-step undo |
 | 2026-10-12 | trivial | Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864) |
 | 2026-10-12 | minor | AutoCorrect: Correct TWo INitial CApitals, accidental cAPS LOCK, capitalize first letter of table cells (#544) |

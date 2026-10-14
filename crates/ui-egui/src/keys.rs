@@ -150,6 +150,13 @@ fn shift_variant_params(id: &str) -> Option<Value> {
     }
 }
 
+/// Shift+Delete, which cuts the selection and does nothing without one, as in Word for Windows
+/// (#1669). On Windows the windowing layer already sends it as a Cut; elsewhere it arrives as the
+/// key, and no shortcut was bound to it.
+fn is_shift_delete(key: Key, m: Modifiers) -> bool {
+    key == Key::Delete && m.shift && !m.command && !m.ctrl && !m.alt && !m.mac_cmd
+}
+
 /// Shift+F10 opens the context menu, as the Menu key does (#821). (The Menu key itself doesn't
 /// reach the app: the windowing layer drops it.)
 fn is_context_menu_key(key: Key, m: Modifiers) -> bool {
@@ -366,6 +373,14 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
                     let _ = app.run("insert.closeHeader", json!({}));
                     continue;
                 }
+                if is_shift_delete(key, modifiers) {
+                    if !app.session.sel.is_collapsed()
+                        && let Ok(r) = app.run("edit.cut", json!({}))
+                    {
+                        crate::system_clipboard::put_result(app, ctx, &r);
+                    }
+                    continue;
+                }
                 app.canvas.swallow_text = dispatch(app, key, modifiers) && modifiers.alt;
             }
             _ => {}
@@ -431,6 +446,16 @@ mod tests {
         assert!(!is_paste_release(Key::V, m(false, false, false)), "a plain V");
         assert!(is_paste_special_release(Key::V, m(true, false, true)), "Mod+Alt+V opens Paste Special");
         assert!(!is_paste_special_release(Key::V, m(true, true, true)) && !is_paste_special_release(Key::V, m(true, false, false)));
+    }
+
+    #[test]
+    fn shift_delete_is_only_shift_and_delete() {
+        let m = |shift, ctrl, alt| egui::Modifiers { shift, ctrl, command: ctrl, alt, ..Default::default() };
+        assert!(is_shift_delete(Key::Delete, m(true, false, false)));
+        assert!(!is_shift_delete(Key::Delete, m(false, false, false)), "Delete alone erases");
+        assert!(!is_shift_delete(Key::Delete, m(true, true, false)), "Ctrl+Shift+Delete");
+        assert!(!is_shift_delete(Key::Delete, m(true, false, true)), "Alt+Shift+Delete");
+        assert!(!is_shift_delete(Key::Backspace, m(true, false, false)), "Shift+Backspace erases (#707)");
     }
 
     #[test]
