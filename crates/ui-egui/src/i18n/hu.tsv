@@ -1148,15 +1148,6 @@
 	Gallery	Galéria
 	Sketchbook	Vázlatfüzet
 	Studio	Stúdió
-	Letter   8.50" × 11.00"	Letter   8,50" × 11,00"
-	Legal   8.50" × 14.00"	Legal   8,50" × 14,00"
-	Executive   7.25" × 10.50"	Executive   7,25" × 10,50"
-	Statement   5.50" × 8.50"	Statement   5,50" × 8,50"
-	Tabloid   11.00" × 17.00"	Tabloid   11,00" × 17,00"
-	B4 (JIS)   10.12" × 14.33"	B4 (JIS)   10,12" × 14,33"
-	B5 (JIS)   7.17" × 10.12"	B5 (JIS)   7,17" × 10,12"
-	Envelope #10   4.12" × 9.50"	Boríték #10   4,12" × 9,50"
-	Envelope DL   4.33" × 8.66"	Boríték DL   4,33" × 8,66"
 	Plain Table 1	Egyszerű táblázat 1
 	Grid Table 1 Light	Rácsos táblázat 1, világos
 	Grid Table 4 – Blue	Rácsos táblázat 4 – kék
@@ -1762,6 +1753,7 @@
 	Selected Fields	Kijelölt mezők
 	Toggle Field Codes	Mezőkódok átváltása
 	Toggle Unicode Character	Unicode-karakter átváltása
+	Type Character Code	Karakterkód beírása
 	Trademark Sign	Védjegy jele
 	Unlink Fields	Mezők leválasztása
 	Unlock Fields	Mezők feloldása
@@ -2195,6 +2187,7 @@
 	Hyphenation Options…	Elválasztási beállítások…
 	Hyphenation zone:	Elválasztási zóna:
 	Italian	Olasz
+	Croatian	Horvát
 	Japanese	Japán
 	Korean	Koreai
 	Limit consecutive hyphens to:	Egymást követő elválasztások legfeljebb:
@@ -2471,11 +2464,10 @@
 	Select Table Cells by Clicking	Táblázatcellák kijelölése kattintással
 	Insert Row or Column by Clicking	Sor vagy oszlop beszúrása kattintással
 	Move Table by Dragging	Táblázat áthelyezése húzással
-	AutoFit Column by Double-Clicking	Oszlop automatikus igazítása dupla kattintással
+	AutoFit Column by Double-Clicking	Oszlop automatikus méretezése dupla kattintással
 	Insert Caption…	Felirat beszúrása…
 	Table Properties…	Táblázat tulajdonságai…
 	Search	Keresés
-	Title Bar	Címsor
 	Privacy Options	Adatvédelmi beállítások
 	Trust Center	Adatvédelmi központ
 	Privacy for this document	A dokumentum adatvédelme
@@ -2483,3 +2475,31 @@
 	Leave out the date and time of comments and tracked changes when saving	Mentéskor a megjegyzések és a követett módosítások dátumának és idejének elhagyása
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	A szerkesztett dokumentum megtartja a neveket és a dátumokat; csak a mentett fájlból maradnak ki.
 	Privacy Settings	Jelenlegi adatvédelmi beállítások
+	Full Screen	Teljes képernyő
+	Full\nScreen	Teljes\nképernyő
+	Use the browser's full screen (F11)	Használja a böngésző teljes képernyős módját (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} hüvelyk
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	A Kutatássegédhez online szolgáltatás kell; a WordCraft a dokumentumait offline tartja.
+	These settings will be used for new documents.	Ezek a beállítások az új dokumentumokra lesznek érvényesek.
+	can't split at the first row	a táblázat nem osztható fel az első sornál
+	select two or more cells to merge	jelöljön ki legalább két cellát az egyesítéshez
+	there is no ink to replay	nincs visszajátszható tinta
+	there's no citation after the caret	a kurzor után nincs forráshivatkozás
+	this item is already at the top level	ez az elem már a legfelső szinten van
+	Envelope #10	Boríték #10
+	Envelope DL	Boríték DL
+	Reading Mode	Olvasó mód
+	Column width	Oszlopszélesség
+	Text size	Szövegméret
+	Edit Document	Dokumentum szerkesztése
+	Go to what:	Ugrás ide:
+	Type +2 or -1 to move from the page you are on.	Írd be: +2 vagy -1, ha az aktuális oldalhoz képest szeretnél lépni.
+	Suggested	Javaslatok
+	Set Proofing Language…	Nyelvi ellenőrzés nyelvének beállítása…
+	Language Preferences…	Nyelvi beállítások…
+	Title Bar	Címsáv

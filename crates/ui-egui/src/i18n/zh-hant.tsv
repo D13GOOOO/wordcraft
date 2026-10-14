@@ -1410,6 +1410,7 @@
 	Demote	降級
 	Go Back	返回上次編輯位置
 	Toggle Unicode Character	切換 Unicode 字元
+	Type Character Code	輸入字元碼
 	Toggle Field Codes	切換功能變數代碼
 	Edit Field Code	編輯功能變數代碼
 	Unlink Fields	取消功能變數連結
@@ -2030,6 +2031,7 @@
 	Hyphenation Options…	斷字選項…
 	Hyphenation zone:	斷字區：
 	Italian	義大利文
+	Croatian	克羅埃西亞文
 	Japanese	日文
 	Korean	韓文
 	Limit consecutive hyphens to:	連續斷字數上限：
@@ -2086,3 +2088,30 @@
 	Leave out the date and time of comments and tracked changes when saving	儲存時不包含註解和追蹤修訂的日期與時間
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	正在編輯的文件會保留名稱和日期；只有儲存的檔案不包含它們。
 	Privacy Settings	目前的隱私設定
+	Full Screen	全螢幕
+	Full\nScreen	全螢幕
+	Use the browser's full screen (F11)	請使用瀏覽器的全螢幕模式 (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} 英寸
+	{name}   {height} × {width} mm	{name}   {height} × {width} 公釐
+	{width} × {height} mm	{width} × {height} 公釐
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}，{columns} × {rows}，{size}（{paper}）
+	Researcher needs an online service; WordCraft keeps your documents offline.	研究工具需要連線；WordCraft 會將您的文件保留在本機。
+	These settings will be used for new documents.	這些設定將用於新文件。
+	can't split at the first row	無法在第一列處分割表格
+	select two or more cells to merge	請選取兩個以上的儲存格進行合併
+	there is no ink to replay	沒有可重播的筆跡
+	there's no citation after the caret	插入點之後沒有引文
+	this item is already at the top level	此項目已位於最高層級
+	Envelope #10	10 號信封
+	Envelope DL	DL 信封
+	Reading Mode	閱讀模式
+	Column width	欄寬
+	Text size	文字大小
+	Edit Document	編輯文件
+	Go to what:	移至目標：
+	Type +2 or -1 to move from the page you are on.	輸入 +2 或 -1 可從目前頁面向後或向前移動。
+	Suggested	建議
+	Set Proofing Language…	設定校訂語言…
+	Language Preferences…	語言喜好設定…

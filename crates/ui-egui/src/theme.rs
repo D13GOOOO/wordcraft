@@ -336,9 +336,10 @@ impl Tokens {
             input: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             input_border: Color32::from_rgb(0x7A, 0x7A, 0x7A),
             group_label: Color32::from_rgb(0xA0, 0xA0, 0xA0),
-            ruler: Color32::from_rgb(0x2E, 0x2E, 0x2E),
-            ruler_margin: Color32::from_rgb(0x45, 0x45, 0x45),
-            ruler_tick: Color32::from_rgb(0xA0, 0xA0, 0xA0),
+            // The text area is lighter than the margins, as in the light theme (#1148).
+            ruler: Color32::from_rgb(0x45, 0x45, 0x45),
+            ruler_margin: Color32::from_rgb(0x2E, 0x2E, 0x2E),
+            ruler_tick: Color32::from_rgb(0xB4, 0xB4, 0xB4),
             status_bar: Color32::from_rgb(0x1F, 0x1F, 0x1F),
             selection: Color32::from_rgba_unmultiplied(0x7A, 0x93, 0xF0, 0x55),
             find_highlight: Color32::from_rgba_unmultiplied(0xC8, 0xA8, 0x00, 0x70),
@@ -706,6 +707,18 @@ mod tests {
                 let r = contrast(t.input_border, bg);
                 assert!(r >= 3.0, "dark={}: input_border on {name} is {r:.2}:1", t.dark);
             }
+        }
+    }
+
+    /// #1148: on both rulers the text area is lighter than the margins in both themes, as in the
+    /// light theme, and the numbers drawn on it still reach 4.5:1.
+    #[test]
+    fn ruler_text_area_is_lighter_than_its_margins() {
+        let lum = |c: egui::Color32| contrast(c, egui::Color32::BLACK);
+        for t in [super::Tokens::light(), super::Tokens::dark()] {
+            assert!(lum(t.ruler) > lum(t.ruler_margin), "dark={}: ruler text area is darker than its margins", t.dark);
+            let r = contrast(t.ruler_tick, t.ruler);
+            assert!(r >= 4.5, "dark={}: ruler numbers on the text area are {r:.2}:1", t.dark);
         }
     }
 

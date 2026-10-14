@@ -267,6 +267,9 @@ pub fn paste_text(s: &mut Session, text: &str) -> Result<(), CmdError> {
 
 fn insert_text(s: &mut Session, text: &str, enter: bool) -> Result<(), CmdError> {
     let mut props = s.typing_props();
+    if s.sel.is_collapsed() {
+        s.sel = crate::Selection::caret(s.doc.past_field_ends(&s.sel.focus));
+    }
     // Content controls: a placeholder is replaced, locked ones refuse.
     if let Some(p) = controls::prepare_edit(s)? {
         props = p;

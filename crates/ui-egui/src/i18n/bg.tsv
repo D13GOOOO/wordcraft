@@ -1349,6 +1349,7 @@
 	Demote	Понижаване на нивото
 	Go Back	Връщане назад
 	Toggle Unicode Character	Превключване на Unicode знак
+	Type Character Code	Въвеждане на код на знак
 	Toggle Field Codes	Превключване на кодовете на полетата
 	Edit Field Code	Редактиране на кода на полето
 	Unlink Fields	Прекъсване на връзката на полетата
@@ -1717,6 +1718,7 @@
 	Hyphenation Options…	Опции за сричкопренасяне…
 	Hyphenation zone:	Зона на сричкопренасяне:
 	Italian	Италиански
+	Croatian	Хърватски
 	Japanese	Японски
 	Korean	Корейски
 	Limit consecutive hyphens to:	Ограничаване на последователните пренасяния до:
@@ -2027,8 +2029,6 @@
 	AaBbCcDd	АаБбВвГг
 	All - Linear	Всички – линеен формат
 	All - Professional	Всички – професионален формат
-	B4 (JIS)   10.12" × 14.33"	B4 (JIS)   10.12" × 14.33"
-	B5 (JIS)   7.17" × 10.12"	B5 (JIS)   7.17" × 10.12"
 	Body text in a short paragraph to show spacing.	Основен текст в кратък абзац, който показва разстоянията.
 	Book Title	Заглавие на книга
 	CONFIDENTIAL	ПОВЕРИТЕЛНО
@@ -2049,9 +2049,6 @@
 	Emphasis	Акцент
 	Endnote Reference	Препратка към бележка в края
 	Endnote Text	Текст на бележка в края
-	Envelope #10   4.12" × 9.50"	Плик №10   4.12" × 9.50"
-	Envelope DL   4.33" × 8.66"	Плик DL   4.33" × 8.66"
-	Executive   7.25" × 10.50"	Executive   7.25" × 10.50"
 	Footnote Reference	Препратка към бележка под линия
 	Footnote Text	Текст на бележка под линия
 	GB/T 7714	GB/T 7714
@@ -2073,8 +2070,6 @@
 	Intense Reference	Изразена препратка
 	Justification of a display equation	Подравняване на уравнение на отделен ред
 	Keywords	Ключови думи
-	Legal   8.50" × 14.00"	Legal   8.50" × 14.00"
-	Letter   8.50" × 11.00"	Letter   8.50" × 11.00"
 	Level 1	Ниво 1
 	Level 2	Ниво 2
 	Level 3	Ниво 3
@@ -2094,7 +2089,6 @@
 	SIST02	SIST02
 	Show the equation in the line of text	Показване на уравнението в реда на текста
 	Show the equation on a line of its own	Показване на уравнението на отделен ред
-	Statement   5.50" × 8.50"	Statement   5.50" × 8.50"
 	Strong	Удебелен
 	Subject	Тема
 	Subtitle	Подзаглавие
@@ -2102,7 +2096,6 @@
 	Subtle Reference	Лека препратка
 	TOC Heading	Заглавие на съдържание
 	Table Grid	Мрежа на таблица
-	Tabloid   11.00" × 17.00"	Tabloid   11.00" × 17.00"
 	Turabian	Turabian
 	Type equations in LaTeX	Въвеждане на уравнения в LaTeX
 	Type equations in the linear format (UnicodeMath)	Въвеждане на уравнения в линеен формат (UnicodeMath)
@@ -2474,3 +2467,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Без дата и час на коментарите и проследените промени при запазване
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Документът, който редактирате, запазва имената и датите; само записаният файл ги пропуска.
 	Privacy Settings	Текущи настройки за поверителност
+	Full Screen	Цял екран
+	Full\nScreen	Цял\nекран
+	Use the browser's full screen (F11)	Използвайте режима на цял екран на браузъра (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} инча
+	{name}   {height} × {width} mm	{name}   {height} × {width} мм
+	{width} × {height} mm	{width} × {height} мм
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Изследователят изисква онлайн услуга, а WordCraft пази документите ви офлайн.
+	These settings will be used for new documents.	Тези настройки ще се използват за новите документи.
+	can't split at the first row	таблицата не може да се раздели на първия ред
+	select two or more cells to merge	изберете две или повече клетки за обединяване
+	there is no ink to replay	няма мастило за възпроизвеждане
+	there's no citation after the caret	след курсора няма цитиране
+	this item is already at the top level	този елемент вече е на най-горното ниво
+	Envelope #10	Плик №10
+	Envelope DL	Плик DL
+	Reading Mode	Режим за четене
+	Column width	Ширина на колоната
+	Text size	Размер на текста
+	Edit Document	Редактиране на документа
+	Go to what:	Отиване до:
+	Type +2 or -1 to move from the page you are on.	Въведете +2 или -1, за да се преместите спрямо текущата страница.
+	Suggested	Предложения
+	Set Proofing Language…	Задаване на езика за проверка…
+	Language Preferences…	Езикови предпочитания…

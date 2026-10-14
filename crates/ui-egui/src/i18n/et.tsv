@@ -1418,6 +1418,7 @@
 	Demote	Langeta taset
 	Go Back	Mine tagasi
 	Toggle Unicode Character	Lülita Unicode-märk
+	Type Character Code	Sisesta märgikood
 	Toggle Field Codes	Lülita väljakoodid sisse/välja
 	Edit Field Code	Redigeeri väljakoodi
 	Unlink Fields	Eemalda väljade link
@@ -2063,6 +2064,7 @@
 	Hyphenation Options…	Poolitussätted…
 	Hyphenation zone:	Poolitusala:
 	Italian	Itaalia
+	Croatian	Horvaadi
 	Japanese	Jaapani
 	Korean	Korea
 	Limit consecutive hyphens to:	Järjestikuseid poolitusi kuni:
@@ -2119,3 +2121,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Jäta salvestamisel välja kommentaaride ja jälitatud muudatuste kuupäev ja kellaaeg
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Redigeeritav dokument säilitab nimed ja kuupäevad; need jäetakse välja ainult salvestatud failist.
 	Privacy Settings	Praegused privaatsussätted
+	Full Screen	Täisekraan
+	Full\nScreen	Täis-\nekraan
+	Use the browser's full screen (F11)	Kasutage brauseri täisekraani (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} tolli
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Uurija vajab võrguteenust; WordCraft hoiab teie dokumendid võrguühenduseta.
+	These settings will be used for new documents.	Neid sätteid kasutatakse uute dokumentide puhul.
+	can't split at the first row	tabelit ei saa esimese rea kohalt tükeldada
+	select two or more cells to merge	valige ühendamiseks kaks või rohkem lahtrit
+	there is no ink to replay	esitamiseks pole käsikirja
+	there's no citation after the caret	kursori järel pole viidet
+	this item is already at the top level	see üksus on juba ülemisel tasemel
+	Envelope #10	Ümbrik nr 10
+	Envelope DL	Ümbrik DL
+	Reading Mode	Lugemisrežiim
+	Column width	Veeru laius
+	Text size	Teksti suurus
+	Edit Document	Redigeeri dokumenti
+	Go to what:	Mine:
+	Type +2 or -1 to move from the page you are on.	Sisesta +2 või -1, et liikuda praegusest leheküljest edasi või tagasi.
+	Suggested	Soovitused
+	Set Proofing Language…	Määra õigekeelsuskontrolli keel…
+	Language Preferences…	Keele-eelistused…

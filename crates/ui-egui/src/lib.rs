@@ -421,6 +421,12 @@ pub struct WordApp {
     pub frame_ms: f64,
     /// The window title last sent; a viewport command schedules a repaint, so only send changes.
     sent_title: String,
+    /// Full screen as last asked of the window, and as the window last reported it (#980).
+    sent_full_screen: bool,
+    seen_full_screen: Option<bool>,
+    /// Nothing else (a dialog, menu, keytips, the File tab) is open to take Escape this frame, so
+    /// Escape may leave full screen. Read before anything handles the frame's keys.
+    escape_free: bool,
     pub quit_requested: bool,
     pub autosave: bool,
     pub word_count: (u64, usize),
@@ -522,6 +528,9 @@ impl WordApp {
             applied_animations: None,
             frame_ms: 0.0,
             sent_title: String::new(),
+            sent_full_screen: false,
+            seen_full_screen: None,
+            escape_free: false,
             quit_requested: false,
             autosave: true,
             word_count: (0, 0),
@@ -642,9 +651,14 @@ impl WordApp {
             return Ok(json!({"pending": name}));
         }
         if self.session.dirty && discards_document(id, &params) {
-            let name =
-                self.session.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| self.title_stem());
-            self.dialog = Some(dialogs::Dialog::SaveChanges { name, then: id.to_string(), params, document: self.session.document_id() });
+            let name = self.prompt_name();
+            self.dialog = Some(dialogs::Dialog::SaveChanges {
+                name,
+                then: id.to_string(),
+                params,
+                document: self.session.document_id(),
+                message: String::new(),
+            });
             return Ok(json!({"pending": "saveChanges"}));
         }
         // The ribbon and context-menu Paste commands send no text: read the system clipboard's, as
@@ -834,7 +848,10 @@ impl WordApp {
                     file_dialogs::Asked::Busy => Ok(json!({"done": false})),
                 };
             }
-            SaveChoice::Save => self.save_for_prompt(),
+            SaveChoice::Save => match self.save_for_prompt() {
+                Ok(saved) => saved,
+                Err(error) => return Err(self.save_failed(&error, then, params, document)),
+            },
         };
         if !go {
             return Ok(json!({"done": false}));
@@ -861,13 +878,33 @@ impl WordApp {
     /// Save before New/Open/Close (and the mailings that replace the document): true once the
     /// document is safely written. A save in a format that doesn't keep everything (a page
     /// image, plain text) writes a copy and leaves the document unsaved, so it doesn't count:
-    /// the command is cancelled and the document stays.
-    fn save_for_prompt(&mut self) -> bool {
-        let saved = match self.execute("file.save", json!({})) {
-            Ok(v) => v.get("saved").and_then(Value::as_bool) == Some(true) || v.get("downloaded").is_some(),
-            Err(_) => false,
-        };
-        self.safely_saved(saved)
+    /// the command is cancelled and the document stays. A save that fails (no permission, the
+    /// file locked by another app, a missing folder) is the save's error ([`Self::save_failed`]
+    /// tells the user).
+    fn save_for_prompt(&mut self) -> Result<bool, String> {
+        let v = self.execute("file.save", json!({}))?;
+        let saved = v.get("saved").and_then(Value::as_bool) == Some(true) || v.get("downloaded").is_some();
+        Ok(self.safely_saved(saved))
+    }
+
+    /// The document's name as the Save Changes prompt shows it: its file's name, else its title.
+    fn prompt_name(&self) -> String {
+        self.session.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| self.title_stem())
+    }
+
+    /// Save (or Save As) from the Save Changes prompt failed (#1445): say so plainly on the status
+    /// bar and in the prompt, which comes back for Save again, Don't Save or Cancel, with the
+    /// held-back command (`then`) still waiting. Nothing closes and nothing is discarded. Returns
+    /// the message, the prompt answer's error.
+    pub(crate) fn save_failed(&mut self, error: &str, then: String, params: Value, document: u64) -> String {
+        let name = self.prompt_name();
+        let message = i18n::fmt(tl!("Couldn't save {name}, so it is still open and nothing was lost: {error}"), &[("name", &name), ("error", error)]);
+        log::error!("save from the Save Changes prompt failed: {error}");
+        self.status(message.clone());
+        if document == self.session.document_id() {
+            self.dialog = Some(dialogs::Dialog::SaveChanges { name, then, params, document, message: message.clone() });
+        }
+        message
     }
 
     /// Whether a save before New/Open/Close counts: it happened, and kept everything.
@@ -1577,6 +1614,7 @@ impl WordApp {
             return;
         }
         let t = theme::Tokens::get(&ctx);
+        self.escape_free = self.dialog.is_none() && !self.ui.backstage && self.ui.keytips == keytips::Phase::Off && !egui::Popup::is_any_open(&ctx);
         // Keytips are read before layout so the frame paints the new state; badges paint after
         // the ribbon so they sit on top of it.
         crate::keytips::logic(self, &ctx);
@@ -1619,9 +1657,32 @@ impl WordApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.sent_title = title;
         }
+        self.sync_full_screen(&ctx);
         self.frame_ms = now_ms() - t0;
         // Typing and formatting land here, after `logic` has reported.
         self.report_dirty();
+    }
+
+    /// Carry View › Full Screen (`view.fullScreen`, F11) to the window, and follow the window
+    /// when the system takes it in or out of full screen (the macOS title bar button, the window
+    /// manager). Leaving full screen gives the window back its earlier size and place: the system
+    /// keeps them, and [`window_geometry`] never saves a full-screen size (#980).
+    fn sync_full_screen(&mut self, ctx: &egui::Context) {
+        let seen = ctx.input(|i| i.viewport().fullscreen);
+        if seen != self.seen_full_screen {
+            self.seen_full_screen = seen;
+            if let Some(on) = seen
+                && on != self.session.view.full_screen
+            {
+                self.session.view.full_screen = on;
+                self.sent_full_screen = on;
+            }
+        }
+        let want = self.session.view.full_screen;
+        if want != self.sent_full_screen {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(want));
+            self.sent_full_screen = want;
+        }
     }
 
     /// A click on the window's chrome (ribbon tabs and empty ribbon space, galleries, check
@@ -1646,6 +1707,9 @@ impl WordApp {
         let on_chrome = ctx.layer_id_at(pos).is_none_or(|l| l.order == egui::Order::Background);
         if on_chrome && ctx.memory(|m| m.focused().is_none()) && !egui::Popup::is_any_open(ctx) {
             self.canvas.want_focus = true;
+            // The canvas reads keys before it takes focus back (#1107), so it counts as focused
+            // now: a keystroke in the very next frame reaches the page instead of being dropped.
+            self.canvas.focused = true;
             ctx.request_repaint();
         }
     }
@@ -2912,6 +2976,14 @@ mod tests {
         a.session.doc.plain_text(wordcraft_doc::StoryRef::Body)
     }
 
+    /// The reason the Save Changes prompt shows (a failed save), if that prompt is open.
+    fn prompt_message(a: &WordApp) -> Option<String> {
+        match &a.dialog {
+            Some(dialogs::Dialog::SaveChanges { message, .. }) => Some(message.clone()),
+            _ => None,
+        }
+    }
+
     fn prompt(a: &WordApp) -> Option<&'static str> {
         a.dialog.as_ref().map(|d| d.name())
     }
@@ -3053,6 +3125,114 @@ mod tests {
         assert!(a.quit_requested);
         assert!(a.close_requested(), "the close that follows goes ahead");
         assert!(body_text(&a).contains(UNSAVED), "nothing was replaced on the way out");
+    }
+
+    /// #1445: the window's X on an edited document with a file → Save writes the file and lets
+    /// the window close.
+    #[test]
+    fn window_close_save_writes_the_file_and_quits() {
+        let dir = scratch("close-save");
+        let path = docx_on_disk(&dir, "Draft");
+        let mut a = app();
+        a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
+        a.run("text.insert", json!({"text": "Revised "})).unwrap();
+        assert!(!a.close_requested());
+        assert_eq!(prompt(&a), Some("saveChanges"));
+        a.run("ui.saveChanges", json!({"answer": "save"})).unwrap();
+        let on_disk = wordcraft_engine::io::open_path(&path).unwrap().plain_text(wordcraft_doc::StoryRef::Body);
+        assert!(on_disk.contains("Revised Draft"), "the edit is on disk: {on_disk:?}");
+        assert!(a.quit_requested, "the app may close");
+        assert!(a.close_requested(), "the close that follows goes ahead");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1445: when Save in the close prompt can't write the file, the prompt's answer is an error
+    /// that says so plainly, the status bar shows it, and the document stays open, still edited.
+    #[test]
+    fn window_close_save_that_fails_says_so_and_keeps_the_document() {
+        let dir = scratch("close-save-fails");
+        let folder = dir.join("folder");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = docx_on_disk(&folder, "Draft");
+        let mut a = app();
+        a.run("file.open", json!({"path": path.to_string_lossy()})).unwrap();
+        a.run("text.insert", json!({"text": "Revised "})).unwrap();
+        // The document's folder is gone and a file has its name: nothing can be written there.
+        std::fs::remove_dir_all(&folder).unwrap();
+        std::fs::write(&folder, b"not a folder").unwrap();
+        assert!(!a.close_requested());
+        a.status_msg = None;
+        let err = a.run("ui.saveChanges", json!({"answer": "save"})).unwrap_err();
+        assert!(err.contains("Couldn't save contract.docx") && err.contains("still open"), "{err}");
+        assert!(a.status_msg.as_ref().is_some_and(|(m, _)| *m == err), "the status bar says why: {:?}", a.status_msg);
+        assert!(!a.quit_requested, "nothing closes");
+        assert!(a.session.dirty && body_text(&a).contains("Revised Draft"), "nothing was discarded");
+        assert_eq!(a.session.path.as_deref(), Some(path.as_path()));
+        // The prompt comes back with the reason in it: Save again, Don't Save or Cancel.
+        assert_eq!(prompt(&a), Some("saveChanges"), "the prompt is open again");
+        assert_eq!(prompt_message(&a).as_deref(), Some(err.as_str()), "the prompt says why");
+        assert!(a.run("ui.saveChanges", json!({"answer": "save"})).is_err(), "Save again fails again");
+        assert_eq!(prompt(&a), Some("saveChanges"));
+        a.run("ui.saveChanges", json!({"answer": "cancel"})).unwrap();
+        assert_eq!(prompt(&a), None);
+        assert!(!a.close_requested(), "the next close asks again");
+        assert_eq!(prompt_message(&a).as_deref(), Some(""), "a fresh prompt, no old reason");
+        a.run("ui.saveChanges", json!({"answer": "dontSave"})).unwrap();
+        assert!(a.quit_requested, "Don't Save still closes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1445: a new document → close → Save → Save As to a place that can't be written: the
+    /// same plain error, the prompt back with the reason, nothing closed or discarded.
+    #[test]
+    fn window_close_save_as_that_fails_says_so_and_keeps_the_document() {
+        let dir = scratch("close-save-as-fails");
+        let blocker = dir.join("folder");
+        std::fs::write(&blocker, b"not a folder").unwrap();
+        let picked = blocker.join("novel.docx").to_string_lossy().to_string();
+        let mut a = typed();
+        a.services.pick_save = Some(Box::new(move |_| Some(picked.clone())));
+        assert!(!a.close_requested());
+        a.status_msg = None;
+        let err = a.run("ui.saveChanges", json!({"answer": "save"})).unwrap_err();
+        assert!(err.contains("Couldn't save") && err.contains("still open"), "{err}");
+        assert!(a.status_msg.as_ref().is_some_and(|(m, _)| *m == err), "the status bar says why: {:?}", a.status_msg);
+        assert!(!a.quit_requested, "nothing closes");
+        assert!(a.session.dirty && body_text(&a).contains(UNSAVED), "nothing was discarded");
+        assert_eq!(a.session.path, None);
+        assert_eq!(prompt(&a), Some("saveChanges"), "the prompt is open again");
+        assert_eq!(prompt_message(&a).as_deref(), Some(err.as_str()), "the prompt says why");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #1445: the prompt that comes back after a failed save shows the reason on screen.
+    #[test]
+    fn save_prompt_shows_why_the_save_failed() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = typed();
+        a.run("file.close", json!({})).unwrap();
+        let reason = "Couldn't save Draft, so it is still open and nothing was lost: disk full";
+        if let Some(dialogs::Dialog::SaveChanges { message, .. }) = &mut a.dialog {
+            *message = reason.into();
+        }
+        let mut fonts = false;
+        let mut h = egui_kittest::Harness::builder().build_ui_state(
+            move |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                if fonts {
+                    dialogs::show(app, &ctx);
+                } else {
+                    theme::install_fonts_for(&ctx, false);
+                    fonts = true;
+                }
+            },
+            a,
+        );
+        for _ in 0..3 {
+            h.step();
+        }
+        assert!(h.query_by_label(reason).is_some(), "the reason is in the prompt");
+        assert!(h.query_by_label("Save").is_some(), "Save again is offered");
     }
 
     /// Enter activates the focused prompt button; it means Save only when no button has focus.
@@ -3283,6 +3463,53 @@ mod tests {
                 assert_eq!(printed.get(), 1, "the button printed");
             }
         }
+    }
+
+    /// #1156: the Print page's preview fills the pane beside the settings, zooms from its own
+    /// bar, scrolls both ways once the page outgrows the pane, and One Page fits it again.
+    #[test]
+    fn the_print_preview_fills_the_pane_zooms_and_scrolls_both_ways() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{By, Queryable};
+        let mut a = app();
+        a.run("file.print", json!({})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(4);
+        let page = |h: &egui_kittest::Harness<'_, WordApp>| h.get(By::new().role(Role::Image)).rect();
+        let fit = page(&h);
+        assert!(fit.height() > 650.0, "the page fills the pane's height: {fit:?}");
+        assert!(h.query(By::new().role(Role::Label).label("Page 1 of 1")).is_some(), "the page indicator stays");
+
+        for _ in 0..5 {
+            h.get_by_label("Zoom In").click();
+            h.run_steps(2);
+        }
+        let zoomed = page(&h);
+        assert!(zoomed.width() > fit.width() * 1.4 && zoomed.height() > 900.0, "zoomed in: {zoomed:?}");
+
+        h.input_mut().events.push(egui::Event::PointerMoved(zoomed.center()));
+        h.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(-120.0, -120.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(20);
+        let moved = page(&h);
+        assert!(moved.min.x < zoomed.min.x - 50.0, "scrolls sideways: {zoomed:?} -> {moved:?}");
+        assert!(moved.min.y < zoomed.min.y - 50.0, "scrolls down: {zoomed:?} -> {moved:?}");
+
+        h.get_by_label("One Page").click();
+        h.run_steps(4);
+        let again = page(&h);
+        assert!((again.height() - fit.height()).abs() < 1.0, "One Page fits the page again: {fit:?} vs {again:?}");
     }
 
     /// File › Options shows Make WordCraft the default… only when the host can do it (#295), and
@@ -3743,8 +3970,9 @@ mod tests {
 
         a.run("file.new", json!({})).unwrap();
         a.status_msg = None;
-        let r = a.run("ui.saveChanges", json!({"answer": "save"})).unwrap();
-        assert_eq!(r["done"], false, "the New was cancelled");
+        // A failed save is an error, not a quiet Cancel (#1445); the New doesn't run.
+        let err = a.run("ui.saveChanges", json!({"answer": "save"})).unwrap_err();
+        assert!(err.contains("still open") && err.contains("blocked by the browser"), "{err}");
         assert!(body_text(&a).contains(UNSAVED));
         assert!(a.session.dirty);
         let msg = a.status_msg.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
@@ -4318,6 +4546,126 @@ mod tests {
         let commands = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
         out.drop_without_applying_deltas();
         commands
+    }
+
+    /// #980: F11 and View › Full Screen (`view.fullScreen`) take the window to full screen; a
+    /// second F11 or Escape brings it back.
+    #[test]
+    fn f11_and_escape_toggle_full_screen() {
+        use egui::ViewportCommand::Fullscreen;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app(),
+        );
+        for _ in 0..6 {
+            h.step();
+        }
+        let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        // Run frames and return the full-screen requests the window got.
+        let sent = |h: &mut egui_kittest::Harness<WordApp>| {
+            let mut out = Vec::new();
+            for _ in 0..2 {
+                h.step();
+                out.extend(h.output().viewport_output.values().flat_map(|v| v.commands.iter()).filter(|c| matches!(c, Fullscreen(_))).cloned());
+            }
+            out
+        };
+        assert_eq!(sent(&mut h), vec![], "a normal window to start with");
+        h.event(key(egui::Key::F11));
+        assert_eq!(sent(&mut h), vec![Fullscreen(true)], "F11");
+        assert!(h.state().session.view.full_screen);
+        h.event(key(egui::Key::F11));
+        assert_eq!(sent(&mut h), vec![Fullscreen(false)], "F11 again");
+        assert!(!h.state().session.view.full_screen);
+        // The command (ribbon, command search, agents), then Escape.
+        assert_eq!(h.state_mut().run("view.fullScreen", json!({})).unwrap(), json!({"value": true}));
+        assert_eq!(sent(&mut h), vec![Fullscreen(true)], "the command");
+        h.event(key(egui::Key::Escape));
+        assert_eq!(sent(&mut h), vec![Fullscreen(false)], "Escape");
+        // Escape in a normal window doesn't touch the window.
+        h.event(key(egui::Key::Escape));
+        assert_eq!(sent(&mut h), vec![]);
+        // Escape closing a dialog leaves full screen alone.
+        h.state_mut().run("view.fullScreen", json!({"value": true})).unwrap();
+        h.state_mut().run("ui.dialog", json!({"name": "zoom"})).unwrap();
+        assert_eq!(sent(&mut h), vec![Fullscreen(true)]);
+        h.event(key(egui::Key::Escape));
+        assert_eq!(sent(&mut h), vec![]);
+        assert!(h.state().dialog.is_none(), "Escape closed the dialog");
+        assert!(h.state().session.view.full_screen, "and only that");
+    }
+
+    /// #980: in full screen, Escape with text selected collapses the selection (as in a normal
+    /// window) and leaves full screen alone; the next Escape, with nothing selected, leaves it.
+    #[test]
+    fn escape_collapses_a_selection_before_leaving_full_screen() {
+        use egui::ViewportCommand::Fullscreen;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app(),
+        );
+        for _ in 0..6 {
+            h.step();
+        }
+        let esc = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        let sent = |h: &mut egui_kittest::Harness<WordApp>| {
+            let mut out = Vec::new();
+            for _ in 0..2 {
+                h.step();
+                out.extend(h.output().viewport_output.values().flat_map(|v| v.commands.iter()).filter(|c| matches!(c, Fullscreen(_))).cloned());
+            }
+            out
+        };
+        h.state_mut().canvas.focused = true;
+        h.state_mut().run("text.insert", json!({"text": "Hello world"})).unwrap();
+        h.state_mut().run("select.all", json!({})).unwrap();
+        h.state_mut().run("view.fullScreen", json!({"value": true})).unwrap();
+        assert_eq!(sent(&mut h), vec![Fullscreen(true)]);
+        assert!(!h.state().session.sel.is_collapsed());
+        h.event(esc.clone());
+        assert_eq!(sent(&mut h), vec![], "Escape with a selection stays in full screen");
+        assert!(h.state().session.sel.is_collapsed(), "and collapses the selection");
+        assert!(h.state().session.view.full_screen);
+        h.event(esc);
+        assert_eq!(sent(&mut h), vec![Fullscreen(false)], "Escape with nothing selected leaves");
+        assert!(!h.state().session.view.full_screen);
+    }
+
+    /// #980: the window leaving full screen by other means (the window manager, the macOS title
+    /// bar button) turns View › Full Screen off, and entering it turns it on.
+    #[test]
+    fn full_screen_follows_the_window() {
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let frame = |a: &mut WordApp, fullscreen: Option<bool>| {
+            let mut input = egui::RawInput::default();
+            input.viewports.entry(egui::ViewportId::ROOT).or_default().fullscreen = fullscreen;
+            let mut out = ctx.run_ui(input, |ui| a.sync_full_screen(ui.ctx()));
+            let sent = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
+            out.drop_without_applying_deltas();
+            sent.into_iter().filter(|c| matches!(c, egui::ViewportCommand::Fullscreen(_))).collect::<Vec<_>>()
+        };
+        assert!(frame(&mut a, Some(false)).is_empty());
+        let sent = frame(&mut a, Some(true));
+        assert!(sent.is_empty(), "the window went full screen: nothing to ask: {sent:?}");
+        assert!(a.session.view.full_screen);
+        assert!(frame(&mut a, Some(false)).is_empty());
+        assert!(!a.session.view.full_screen, "and came back");
+        // Asked for: sent once; the window is slow to report it, which doesn't undo the request.
+        a.run("view.fullScreen", json!({})).unwrap();
+        assert_eq!(frame(&mut a, Some(false)), vec![egui::ViewportCommand::Fullscreen(true)]);
+        assert!(frame(&mut a, Some(false)).is_empty());
+        assert!(a.session.view.full_screen);
+        assert!(frame(&mut a, Some(true)).is_empty());
+        assert!(a.session.view.full_screen);
     }
 
     /// #311: with System, egui's theme preference stays System, so the native window is never
