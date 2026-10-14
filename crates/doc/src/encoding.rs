@@ -249,8 +249,11 @@ pub fn oem_byte(code_page: u16, b: u8) -> char {
 /// The single-byte Windows code pages [`windows_byte`] decodes (1252 included).
 pub const SINGLE_BYTE_CODE_PAGES: [u16; 10] = [874, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258];
 
+/// Mac OS Roman, RTF's `\mac` character set.
+pub const MAC_ROMAN_CODE_PAGE: u16 = 10000;
+
 /// One byte of a single-byte code page as a char: a Windows one in [`SINGLE_BYTE_CODE_PAGES`] or
-/// Mac OS Roman (10000); any other code page reads as Windows-1252.
+/// Mac OS Roman ([`MAC_ROMAN_CODE_PAGE`]); any other code page reads as Windows-1252.
 pub fn windows_byte(code_page: u16, b: u8) -> char {
     let table: &[u16; 128] = match code_page {
         874 => &CP874,
@@ -262,7 +265,7 @@ pub fn windows_byte(code_page: u16, b: u8) -> char {
         1256 => &CP1256,
         1257 => &CP1257,
         1258 => &CP1258,
-        10000 => &MAC_ROMAN,
+        MAC_ROMAN_CODE_PAGE => &MAC_ROMAN,
         _ => return cp1252(b),
     };
     if b < 0x80 {
@@ -271,12 +274,25 @@ pub fn windows_byte(code_page: u16, b: u8) -> char {
     table.get(usize::from(b - 0x80)).and_then(|u| char::from_u32(u32::from(*u))).unwrap_or('\u{FFFD}')
 }
 
+/// Whether [`code_page_byte`] decodes `code_page`: a Windows one ([`SINGLE_BYTE_CODE_PAGES`]), an
+/// OEM (DOS) one ([`OEM_CODE_PAGES`]) or Mac OS Roman. Document formats (RTF) name all three.
+pub fn is_byte_code_page(code_page: u16) -> bool {
+    SINGLE_BYTE_CODE_PAGES.contains(&code_page) || OEM_CODE_PAGES.contains(&code_page) || code_page == MAC_ROMAN_CODE_PAGE
+}
+
+/// A byte of 8-bit document text in `code_page` (see [`is_byte_code_page`]) as a char. Below 0x80
+/// it is ASCII in every code page (text, so an OEM page's glyphs for control codes don't apply).
+pub fn code_page_byte(code_page: u16, b: u8) -> char {
+    if b >= 0x80 && OEM_CODE_PAGES.contains(&code_page) { oem_byte(code_page, b) } else { windows_byte(code_page, b) }
+}
+
 /// The code page of an RTF or Word font charset (`\fcharset`): 204 Russian → 1251, 238 Eastern
-/// European → 1250, 77 Mac → 10000… `None` for the ANSI and default charsets (the document's code
-/// page applies), symbol fonts and the double-byte East Asian charsets.
+/// European → 1250, 77 Mac → 10000, 254 PC → 437… `None` for the ANSI and default charsets (the
+/// document's code page applies), symbol fonts and the double-byte East Asian charsets.
 pub fn charset_code_page(charset: i32) -> Option<u16> {
     Some(match charset {
-        77 => 10000,
+        77 => MAC_ROMAN_CODE_PAGE,
+        254 => 437,
         161 => 1253,
         162 => 1254,
         163 => 1258,
@@ -306,6 +322,7 @@ mod tests {
         // Mac OS Roman (#1653): accents, the euro sign at 0xDB, typographic quotes.
         assert_eq!(decode(10000, &[0x80, 0x8E, 0xDB, 0xF1, 0xF2, 0xF3, 0xD2, 0xD3, 0x41]), "Äé€ÒÚÛ“”A");
         assert_eq!(charset_code_page(77), Some(10000));
+        assert_eq!(charset_code_page(254), Some(437));
         assert_eq!(charset_code_page(204), Some(1251));
         assert_eq!(charset_code_page(0), None);
         for cp in SINGLE_BYTE_CODE_PAGES {
@@ -313,6 +330,20 @@ mod tests {
                 let _ = windows_byte(cp, b);
             }
         }
+    }
+
+    /// #1653: one decoder for document text in any code page RTF names: Windows, DOS or Mac.
+    #[test]
+    fn document_text_in_windows_dos_and_mac_code_pages() {
+        let decode = |cp: u16, bytes: &[u8]| bytes.iter().map(|&b| code_page_byte(cp, b)).collect::<String>();
+        assert_eq!(decode(437, &[0x82, 0xA0, 0x41, 0x01]), "éáA\u{1}", "DOS text; ASCII stays ASCII");
+        assert_eq!(decode(850, &[0x9D, 0xE9]), "ØÚ");
+        assert_eq!(decode(10000, &[0x8E]), "é");
+        assert_eq!(decode(1251, &[0xC4]), "Д");
+        for cp in [437, 850, 866, 1250, 1252, 10000] {
+            assert!(is_byte_code_page(cp), "{cp}");
+        }
+        assert!(!is_byte_code_page(932) && !is_byte_code_page(0) && !SINGLE_BYTE_CODE_PAGES.contains(&10000));
     }
 
     #[test]
