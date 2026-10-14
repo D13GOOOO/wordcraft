@@ -2483,3 +2483,5 @@ preview	Title	Örnek
 	Leave out the date and time of comments and tracked changes when saving	Kaydederken açıklamaların ve izlenen değişikliklerin tarih ve saatini dahil etme
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Düzenlediğiniz belge adları ve tarihleri korur; yalnızca kaydedilen dosya bunları içermez.
 	Privacy Settings	Geçerli gizlilik ayarları
+	{name}   {height} × {width} in	{name}   {height}" × {width}"
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm

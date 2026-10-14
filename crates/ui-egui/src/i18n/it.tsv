@@ -2078,6 +2078,28 @@
 	Ukrainian	Ucraino
 	{language} is now the document's default language.	{language} è ora la lingua predefinita del documento.
 
+# Strings the interface audit found missing (2026-10-14): envelope sizes, status and command messages, the Reading Mode bar
+	{name}   {height} × {width} in	{name}   {height}" × {width}"
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	Column width	Larghezza colonna
+	Croatian	Croato
+	Edit Document	Modifica documento
+	Go to what:	Vai a:
+	Reading Mode	Modalità di lettura
+	Researcher needs an online service; WordCraft keeps your documents offline.	Ricercatore richiede un servizio online; WordCraft tiene i tuoi documenti offline.
+	Suggested	Suggeriti
+	Text size	Dimensione testo
+	These settings will be used for new documents.	Queste impostazioni verranno usate per i nuovi documenti.
+	Type +2 or -1 to move from the page you are on.	Digita +2 o -1 per spostarti dalla pagina in cui ti trovi.
+	bad parameters: `path` (string) is required	parametri non validi: `path` (stringa) obbligatorio
+	bad parameters: no comment here	parametri non validi: nessun commento qui
+	bad parameters: select a citation or give `entry`	parametri non validi: seleziona una citazione o indica `entry`
+	can't split at the first row	impossibile dividere alla prima riga
+	select two or more cells to merge	seleziona due o più celle da unire
+	there is no ink to replay	non c'è inchiostro da riprodurre
+	there's no citation after the caret	non c'è alcuna citazione dopo il cursore
+	this item is already at the top level	questo elemento è già al livello più alto
+
 # Equation gallery, built-in styles, paper sizes, animation settings and the file browser added on main
 	1×2 Empty Matrix	Matrice vuota 1×2
 	1×3 Empty Matrix	Matrice vuota 1×3
@@ -2468,4 +2490,4 @@ preview	Title	Esempio
 	Remove my name from comments, changes and file properties when saving	Rimuovi il mio nome da commenti, modifiche e proprietà del file al salvataggio
 	Leave out the date and time of comments and tracked changes when saving	Ometti data e ora di commenti e revisioni al salvataggio
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Il documento che stai modificando conserva nomi e date; solo il file salvato li omette.
-	Privacy Settings	Impostazioni di privacy attuali
+	Privacy Settings	Impostazioni di privacy

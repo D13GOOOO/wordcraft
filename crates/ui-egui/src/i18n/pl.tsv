@@ -2478,3 +2478,5 @@ preview	Title	Tytuł
 	Leave out the date and time of comments and tracked changes when saving	Pomiń datę i godzinę komentarzy i śledzonych zmian przy zapisywaniu
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Edytowany dokument zachowuje nazwiska i daty; pomija je tylko zapisany plik.
 	Privacy Settings	Bieżące ustawienia prywatności
+	{name}   {height} × {width} in	{name}   {height}" × {width}"
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm

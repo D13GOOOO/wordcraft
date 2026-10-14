@@ -2483,3 +2483,5 @@
 	Leave out the date and time of comments and tracked changes when saving	Mentéskor a megjegyzések és a követett módosítások dátumának és idejének elhagyása
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	A szerkesztett dokumentum megtartja a neveket és a dátumokat; csak a mentett fájlból maradnak ki.
 	Privacy Settings	Jelenlegi adatvédelmi beállítások
+	{name}   {height} × {width} in	{name}   {height}" × {width}"
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm

@@ -526,16 +526,17 @@ fn envelopes_ui(app: &mut WordApp, ui: &mut Ui, f: &mut EnvelopeForm) -> bool {
     cancel
 }
 
-/// `DL  110 × 220 mm` / `#10  4.13 × 9.5 in`: metric sizes in millimetres, the others in inches.
+/// `DL  110 × 220 mm` / `#10  4.13 × 9.5 in`: metric sizes in millimetres, the others in inches,
+/// in the interface language with the region's decimal separator (`4,13`).
 pub(crate) fn envelope_label(name: &str, w: f32, h: f32) -> String {
     let short = name.strip_prefix("Envelope ").unwrap_or(name);
-    if short.starts_with('#') || short == "Monarch" {
-        let i = |pt: f32| ((pt / 72.0) * 100.0).round() / 100.0;
-        format!("{short}   {} × {} in", i(h), i(w))
+    let num = |n: f32| n.to_string().replace('.', &crate::options::decimal().to_string());
+    let (template, size): (&str, fn(f32) -> f32) = if short.starts_with('#') || short == "Monarch" {
+        (tl!("{name}   {height} × {width} in"), |pt: f32| ((pt / 72.0) * 100.0).round() / 100.0)
     } else {
-        let mm = |pt: f32| (pt * 25.4 / 72.0).round();
-        format!("{short}   {} × {} mm", mm(h), mm(w))
-    }
+        (tl!("{name}   {height} × {width} mm"), |pt: f32| (pt * 25.4 / 72.0).round())
+    };
+    crate::i18n::fmt(template, &[("name", short), ("height", &num(size(h))), ("width", &num(size(w)))])
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -739,6 +740,24 @@ mod tests {
         assert_eq!(secs.len(), 2);
         assert!((secs[0].1.page_w - 623.6).abs() < 0.1);
         assert!(a.session.doc.plain_text(wordcraft_doc::StoryRef::Body).contains("Thanks."));
+    }
+
+    /// The envelope sizes are in the interface language with the region's decimal separator (the
+    /// untranslated-text audit found `#10   4.13 × 9.5 in` drawn in English).
+    #[test]
+    fn envelope_sizes_follow_the_interface_language_and_region() {
+        let size = |name: &str| ENVELOPE_SIZES.iter().find(|s| s.0 == name).map(|(n, w, h)| envelope_label(n, *w, *h)).unwrap();
+        assert_eq!(size("Envelope #10"), "#10   4.13 × 9.5 in");
+        assert_eq!(size("Envelope DL"), "DL   110 × 220 mm");
+        let mut a = app();
+        a.run("file.options", json!({"region": "it-IT"})).unwrap();
+        crate::options::sync(&a);
+        crate::i18n::set_current(crate::i18n::Lang::from_code("it").unwrap());
+        assert_eq!(size("Envelope #10"), "#10   4,13\" × 9,5\"");
+        assert_eq!(size("Envelope DL"), "DL   110 × 220 mm");
+        crate::i18n::set_current(crate::i18n::Lang::EN);
+        a.run("file.options", json!({"region": "en-US"})).unwrap();
+        crate::options::sync(&a);
     }
 
     /// #407: Labels builds a new document of the chosen sheet, or a single label.
