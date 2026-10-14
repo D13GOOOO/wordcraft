@@ -697,6 +697,9 @@ impl WordApp {
         if let Some(r) = self.ui_command(id, &params) {
             return r;
         }
+        if id == "file.close" {
+            return self.close_document(&params);
+        }
         if id == "file.autosave" {
             return self.set_autosave(&params);
         }
@@ -890,8 +893,27 @@ impl WordApp {
         if self.quit_requested || !self.session.dirty || !self.has_document() {
             return true;
         }
-        let _ = self.run("file.close", json!({}));
+        // `quit`: once the prompt is answered the window closes too, not just the document.
+        let _ = self.run("file.close", json!({"quit": true}));
         false
+    }
+
+    /// File › Close (Mod+W, Mod+F4) closes the document and keeps the window, as Word does
+    /// (#1712): it shows no page, as after Esc on the Start screen (#1129), and File › New or Open
+    /// goes on from there. `{"quit": true}`, from the window's close button, quits instead. With no
+    /// document open there is nothing to close.
+    fn close_document(&mut self, params: &Value) -> Result<Value, String> {
+        if params.get("quit").and_then(Value::as_bool) == Some(true) {
+            self.quit_requested = true;
+            return Ok(json!({"quit": true}));
+        }
+        if !self.has_document() {
+            return Ok(json!({"closed": false}));
+        }
+        self.execute("file.new", json!({}))?;
+        self.no_document = Some(self.session.document_id());
+        self.ui.backstage = false;
+        Ok(json!({"closed": true}))
     }
 
     fn after_command(&mut self, id: &str) {
@@ -3017,25 +3039,32 @@ mod tests {
         assert!(body_text(&a).contains(UNSAVED));
     }
 
-    /// Mod+W ran `file.close`, which quit at once.
+    /// Mod+W ran `file.close`, which quit at once; then it asked first, but still quit the whole
+    /// app. #1712: as in Word, it closes the document and the window stays, showing no page, until
+    /// File › New or Open.
     #[test]
-    fn close_asks_before_quitting() {
+    fn close_asks_then_closes_the_document_and_keeps_the_window() {
         let mut a = typed();
         a.run("file.close", json!({})).unwrap();
         assert_eq!(prompt(&a), Some("saveChanges"));
-        assert!(!a.quit_requested);
         a.run("ui.saveChanges", json!({"answer": "cancel"})).unwrap();
-        assert!(!a.quit_requested);
+        assert!(a.has_document() && body_text(&a).contains(UNSAVED), "Cancel keeps the document");
 
         a.run("file.close", json!({})).unwrap();
         a.run("ui.saveChanges", json!({"answer": "dontSave"})).unwrap();
-        assert!(a.quit_requested);
+        assert!(!a.quit_requested, "the window stays");
+        assert!(!a.has_document() && !a.session.dirty && !a.ui.backstage, "no document, no page");
+        assert!(a.close_requested(), "closing the empty window asks nothing");
+        a.run("file.close", json!({})).unwrap();
+        assert!(!a.quit_requested && !a.has_document(), "nothing left to close");
+        a.run("file.new", json!({})).unwrap();
+        assert!(a.has_document(), "File › New goes on from there");
 
         // A clean document closes straight away.
         let mut clean = app();
         clean.run("file.close", json!({})).unwrap();
         assert_eq!(prompt(&clean), None);
-        assert!(clean.quit_requested);
+        assert!(!clean.quit_requested && !clean.has_document());
     }
 
     /// The window's close button quit at once; now it asks (the host cancels the close on false).
@@ -3060,7 +3089,7 @@ mod tests {
     #[test]
     fn enter_answers_with_the_focused_button() {
         use egui_kittest::kittest::Queryable;
-        for (focus, quits, saves) in [(Some("Cancel"), false, false), (Some("Don't Save"), true, false), (None, true, true)] {
+        for (focus, closes, saves) in [(Some("Cancel"), false, false), (Some("Don't Save"), true, false), (None, true, true)] {
             let dir = scratch(&format!("enter-{}", focus.map_or(0, str::len)));
             let path = docx_on_disk(&dir, "Draft");
             let before = std::fs::read(&path).unwrap();
@@ -3097,7 +3126,7 @@ mod tests {
             }
             let a = h.state();
             assert_eq!(prompt(a), None, "{focus:?}: answered");
-            assert_eq!(a.quit_requested, quits, "{focus:?}: quit");
+            assert_eq!(!a.has_document(), closes, "{focus:?}: closed");
             assert_eq!(std::fs::read(&path).unwrap() != before, saves, "{focus:?}: file written");
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -3108,7 +3137,7 @@ mod tests {
     #[test]
     fn arrow_keys_choose_the_save_prompt_answer() {
         use egui_kittest::kittest::Queryable;
-        for (arrows, focused, quits, saves) in [
+        for (arrows, focused, closes, saves) in [
             (vec![egui::Key::ArrowLeft], "Save", true, true),
             (vec![egui::Key::ArrowRight], "Don't Save", true, false),
             (vec![egui::Key::ArrowRight, egui::Key::ArrowRight, egui::Key::ArrowRight], "Cancel", false, false),
@@ -3150,7 +3179,7 @@ mod tests {
             }
             let a = h.state();
             assert_eq!(prompt(a), None, "{arrows:?}: answered");
-            assert_eq!(a.quit_requested, quits, "{arrows:?}: quit");
+            assert_eq!(!a.has_document(), closes, "{arrows:?}: closed");
             assert_eq!(std::fs::read(&path).unwrap() != before, saves, "{arrows:?}: file written");
             let _ = std::fs::remove_dir_all(&dir);
         }
@@ -3745,7 +3774,7 @@ mod tests {
         a.services.pick_save = Some(Box::new(move |_| Some(picked.clone())));
         a.run("file.close", json!({})).unwrap();
         a.run("ui.saveChanges", json!({"answer": "save"})).unwrap();
-        assert!(a.quit_requested);
+        assert!(!a.has_document(), "closed once saved");
         let saved = wordcraft_engine::io::open_path(&path).unwrap();
         assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains(UNSAVED));
         let _ = std::fs::remove_dir_all(&dir);

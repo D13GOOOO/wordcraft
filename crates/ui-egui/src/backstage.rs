@@ -627,17 +627,17 @@ mod tests {
         h.get_by_label("Close").click();
         h.run_steps(4);
         assert!(matches!(h.state().dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })), "unsaved changes ask first");
-        assert!(!h.state().quit_requested);
+        assert!(h.state().has_document());
 
         h.state_mut().run("ui.saveChanges", json!({"answer": "cancel"})).unwrap();
         h.run_steps(4);
-        assert!(!h.state().quit_requested, "Cancel keeps the document open");
+        assert!(h.state().has_document(), "Cancel keeps the document open");
         assert!(h.state().ui.backstage && h.state().ui.backstage_page == "info", "Cancel leaves the Backstage as it was");
 
         h.get_by_label("Close").click();
         h.run_steps(4);
         h.state_mut().run("ui.saveChanges", json!({"answer": "dontSave"})).unwrap();
-        assert!(h.state().quit_requested, "Don't Save closes");
+        assert!(!h.state().has_document() && !h.state().quit_requested, "Don't Save closes the document, not the window (#1712)");
     }
 
     /// A document without unsaved changes closes without a prompt.
@@ -657,7 +657,7 @@ mod tests {
         h.get_by_label("Close").click();
         h.run_steps(1);
         assert!(h.state().dialog.is_none(), "no prompt");
-        assert!(h.state().quit_requested);
+        assert!(!h.state().has_document() && !h.state().quit_requested);
     }
 
     #[test]
