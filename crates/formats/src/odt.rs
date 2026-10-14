@@ -945,6 +945,10 @@ struct Body<'a> {
     depth: usize,
     frame: Option<(Option<f32>, Option<f32>, Option<Vec<u8>>, String)>,
     in_desc: bool,
+    /// The text of the drawing shape being skipped, a line per paragraph in it ...
+    shape_text: Option<String>,
+    /// ... and the paragraphs it became, which follow the paragraph the shape sits in.
+    after_para: Vec<FBlock>,
 }
 
 impl Body<'_> {
@@ -1009,6 +1013,7 @@ impl Body<'_> {
         }
         let cont = std::mem::take(&mut self.para_cont);
         let level = p.list.map(|l| l.level);
+        let after = std::mem::take(&mut self.after_para);
         let c = self.container();
         if cont
             && let Some(FBlock::Para(prev)) = c.last_mut()
@@ -1017,9 +1022,26 @@ impl Body<'_> {
         {
             prev.push_text("\n", &Fmt::default());
             prev.inlines.extend(p.inlines);
+            c.extend(after);
             return;
         }
         c.push(FBlock::Para(p));
+        c.extend(after);
+    }
+
+    /// A skipped drawing shape ended: its text, a paragraph per line, follows the paragraph the
+    /// shape sits in (or comes here, for a shape outside any paragraph).
+    fn shape_done(&mut self, text: &str) {
+        let paras = text.split('\n').map(str::trim).filter(|l| !l.is_empty()).map(|l| {
+            let mut p = Para::default();
+            p.push_text(l, &Fmt::default());
+            FBlock::Para(p)
+        });
+        if self.para.is_some() {
+            self.after_para.extend(paras);
+        } else {
+            self.container().extend(paras);
+        }
     }
 
     fn push_text(&mut self, t: &str) {
@@ -1036,6 +1058,17 @@ impl Body<'_> {
     }
 
     fn text(&mut self, t: &str) {
+        if self.skip > 0
+            && let Some(s) = &mut self.shape_text
+        {
+            for c in t.chars() {
+                let c = if c.is_whitespace() { ' ' } else { c };
+                if c != ' ' || !(s.is_empty() || s.ends_with([' ', '\n'])) {
+                    s.push(c);
+                }
+            }
+            return;
+        }
         if self.skip > 0 || !self.in_text {
             return;
         }
@@ -1078,6 +1111,14 @@ impl Body<'_> {
             return;
         }
         if self.skip > 0 {
+            // Each paragraph in a skipped shape is a line of its text.
+            if matches!(local(q), "p" | "h")
+                && let Some(s) = &mut self.shape_text
+                && !s.is_empty()
+                && !s.ends_with('\n')
+            {
+                s.push('\n');
+            }
             self.skip += 1;
             return;
         }
@@ -1096,6 +1137,17 @@ impl Body<'_> {
             | "index-title-template"
             | "table-of-content-source" => {
                 self.skip = 1;
+            }
+            // Drawing shapes anchored in the text aren't imported. Skipped whole, the paragraphs
+            // inside them can't end the paragraph they sit in, which lost its text after the shape
+            // (#1654); their own text follows that paragraph instead. Groups and frames are read
+            // on, for the pictures in them.
+            "custom-shape" | "rect" | "line" | "polyline" | "polygon" | "regular-polygon" | "path" | "circle" | "ellipse" | "connector"
+            | "measure" | "caption"
+                if q.starts_with("draw:") =>
+            {
+                self.skip = 1;
+                self.shape_text = Some(String::new());
             }
             "p" | "h" if !self.in_desc => {
                 let h = if local(q) == "h" { Some(get(a, "text:outline-level").and_then(|v| v.parse::<u8>().ok()).unwrap_or(1)) } else { None };
@@ -1215,6 +1267,11 @@ impl Body<'_> {
         }
         if self.skip > 0 {
             self.skip -= 1;
+            if self.skip == 0
+                && let Some(text) = self.shape_text.take()
+            {
+                self.shape_done(&text);
+            }
             return;
         }
         if !self.in_text {
@@ -1367,6 +1424,8 @@ pub fn parse(bytes: &[u8]) -> Result<Flow, String> {
         depth: 0,
         frame: None,
         in_desc: false,
+        shape_text: None,
+        after_para: Vec::new(),
     };
     events(&content, |ev| match ev {
         Ev::Start(q, a) => {
@@ -1519,6 +1578,23 @@ mod tests {
             let f = fmt(p);
             assert!(f.bold && f.color == Some(Rgb(255, 0, 0)) && f.size == Some(24.0), "{}: {f:?}", p.text());
         }
+    }
+
+    /// #1654: a shape anchored in a paragraph (LibreOffice writes a `text:p` inside a
+    /// `draw:custom-shape`, empty or not) no longer ends that paragraph, so the text after the
+    /// shape is kept; the shape's own text follows the paragraph, a paragraph per line.
+    #[test]
+    fn text_after_a_drawing_shape_stays_in_its_paragraph() {
+        let draw =
+            r#"xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0""#;
+        let shape = r#"<draw:custom-shape text:anchor-type="paragraph" svg:width="20mm" svg:height="80mm"><text:p>In the   shape</text:p><draw:enhanced-geometry draw:type="rectangle"/></draw:custom-shape>"#;
+        let two = r#"<draw:ellipse svg:width="9mm" svg:height="9mm"><text:p>One</text:p><text:p/><text:p>Two</text:p></draw:ellipse>"#;
+        let content = format!(
+            r#"<office:document-content {NS_T} {draw}><office:body><office:text><text:p>Before {shape}after the shape,<draw:rect svg:width="5mm" svg:height="5mm"/> and on.</text:p><text:p>Next{two}</text:p>{two}</office:text></office:body></office:document-content>"#
+        );
+        let f = parse(&package(&content, None)).unwrap();
+        let texts: Vec<String> = paras(&f).iter().map(|p| p.text()).collect();
+        assert_eq!(texts, ["Before after the shape, and on.", "In the shape", "Next", "One", "Two", "One", "Two"]);
     }
 
     #[test]
