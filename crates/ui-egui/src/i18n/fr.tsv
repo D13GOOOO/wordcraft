@@ -1344,6 +1344,7 @@
 	Demote	Abaisser le niveau
 	Go Back	Revenir en arrière
 	Toggle Unicode Character	Basculer le caractère Unicode
+	Type Character Code	Saisir un code de caractère
 	Toggle Field Codes	Basculer les codes de champ
 	Edit Field Code	Modifier le code de champ
 	Unlink Fields	Dissocier les champs
@@ -1828,6 +1829,7 @@
 	Hyphenation Options…	Options de césure…
 	Hyphenation zone:	Zone de césure :
 	Italian	Italien
+	Croatian	Croate
 	Japanese	Japonais
 	Korean	Coréen
 	Limit consecutive hyphens to:	Limiter les césures consécutives à :
@@ -2093,3 +2095,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Omettre la date et l’heure des commentaires et des modifications suivies à l’enregistrement
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Le document en cours de modification garde les noms et les dates ; seul le fichier enregistré les omet.
 	Privacy Settings	Paramètres de confidentialité actuels
+	Full Screen	Plein écran
+	Full\nScreen	Plein\nécran
+	Use the browser's full screen (F11)	Utilisez le plein écran du navigateur (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} po
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Chercheur nécessite un service en ligne ; WordCraft garde vos documents hors ligne.
+	These settings will be used for new documents.	Ces paramètres seront utilisés pour les nouveaux documents.
+	can't split at the first row	impossible de fractionner le tableau à la première ligne
+	select two or more cells to merge	sélectionnez au moins deux cellules à fusionner
+	there is no ink to replay	il n’y a pas d’encre à rejouer
+	there's no citation after the caret	il n’y a pas de citation après le curseur
+	this item is already at the top level	cet élément est déjà au niveau supérieur
+	Envelope #10	Enveloppe n° 10
+	Envelope DL	Enveloppe DL
+	Reading Mode	Mode Lecture
+	Column width	Largeur de colonne
+	Text size	Taille du texte
+	Edit Document	Modifier le document
+	Go to what:	Atteindre :
+	Type +2 or -1 to move from the page you are on.	Tapez +2 ou -1 pour vous déplacer à partir de la page actuelle.
+	Suggested	Suggestions
+	Set Proofing Language…	Définir la langue de vérification…
+	Language Preferences…	Préférences linguistiques…

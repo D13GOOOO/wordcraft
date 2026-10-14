@@ -309,6 +309,10 @@ fn split_rows(s: &mut Session, l: &DocLayout, page: usize, y: f32, (xa, xb): (f3
     if t.rows.len() >= MAX_ROWS {
         return Err(CmdError::Failed("the table has too many rows".into()));
     }
+    // An exact height leaves out the row's bottom margin (its cells' largest), which the layout
+    // adds below it: take it off each half so the two rows draw where the line went.
+    let row_bottom =
+        t.rows.get(r).map_or(0.0, |row| (0..row.cells.len()).map(|ci| wordcraft_layout::cell_margins(&s.doc, t, r, ci)[2]).fold(0.0f32, f32::max));
     let crossed_set: std::collections::BTreeSet<usize> = cells.iter().map(|c| c.1).collect();
     let merged = |ci: &usize| t.rows.get(r).and_then(|row| row.cells.get(*ci)).is_some_and(|c| c.props.vmerge != VMerge::None);
     if crossed_set.iter().any(merged) {
@@ -320,9 +324,10 @@ fn split_rows(s: &mut Session, l: &DocLayout, page: usize, y: f32, (xa, xb): (f3
     new_row.props.header = false;
     if top.is_finite() && bottom.is_finite() && bottom > top {
         let rule = if row.props.height_rule == HeightRule::Exact { HeightRule::Exact } else { HeightRule::AtLeast };
-        row.props.height = Some((y - top).clamp(1.0, 1584.0));
+        let less = if rule == HeightRule::Exact { row_bottom } else { 0.0 };
+        row.props.height = Some((y - top - less).clamp(1.0, 1584.0));
         row.props.height_rule = rule;
-        new_row.props.height = Some((bottom - y).clamp(1.0, 1584.0));
+        new_row.props.height = Some((bottom - y - less).clamp(1.0, 1584.0));
         new_row.props.height_rule = rule;
     }
     for (ci, cell) in row.cells.iter_mut().enumerate() {
@@ -525,6 +530,32 @@ mod tests {
         assert!(s.run("table.draw", &json!({"page": 0, "x0": x0, "y0": y0, "x1": x0 + 5.0, "y1": y0 + 5.0})).is_err());
         assert!(s.run("table.draw", &json!({"page": 9, "x0": 1, "y0": 1, "x1": 100, "y1": 100})).is_err());
         assert!(s.run("table.draw", &json!({})).is_err());
+    }
+
+    /// A line drawn through an exact-height row splits it into two exact rows that draw where
+    /// the line went: the bottom margin the layout adds below each isn't counted twice.
+    #[test]
+    fn a_line_through_an_exact_row_keeps_its_drawn_height() {
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("insert.table", &json!({"rows": 2, "cols": 2})).unwrap();
+        let t = s.doc.body.iter_mut().find_map(|b| match std::sync::Arc::make_mut(b) {
+            Block::Table(t) => Some(t),
+            _ => None,
+        });
+        let t = t.unwrap();
+        t.props.cell_margins = Some([4.0, 5.4, 4.0, 5.4]);
+        t.rows[0].props.height = Some(60.0);
+        t.rows[0].props.height_rule = HeightRule::Exact;
+        s.touch();
+        let (a, b) = (cell_rect(&mut s, 0, 0), cell_rect(&mut s, 0, 1));
+        assert!((a.h - 64.0).abs() < 0.5, "an exact 60pt row with a 4pt bottom margin: {a:?}");
+        let y = a.y + 25.0;
+        s.run("table.draw", &json!({"page": 0, "x0": b.x + 1.0, "y0": y, "x1": b.right() - 1.0, "y1": y})).unwrap();
+        let t = first_table(&s);
+        assert_eq!((t.rows[0].props.height_rule, t.rows[1].props.height_rule), (HeightRule::Exact, HeightRule::Exact));
+        let (top, low) = (cell_rect(&mut s, 0, 1), cell_rect(&mut s, 1, 1));
+        assert!((top.h - 25.0).abs() < 0.5 && (top.y - a.y).abs() < 0.01, "{top:?}");
+        assert!((low.bottom() - a.bottom()).abs() < 0.5, "the pair keeps the row's height: {low:?} vs {a:?}");
     }
 
     /// Erasing a horizontal border merges the cells into one laid-out cell (#640): the lower

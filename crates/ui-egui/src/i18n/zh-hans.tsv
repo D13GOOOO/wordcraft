@@ -1421,6 +1421,7 @@
 	Demote	降级
 	Go Back	返回上次编辑位置
 	Toggle Unicode Character	切换 Unicode 字符
+	Type Character Code	输入字符代码
 	Toggle Field Codes	切换域代码
 	Edit Field Code	编辑域代码
 	Unlink Fields	取消域链接
@@ -2041,6 +2042,7 @@
 	Hyphenation Options…	断字选项…
 	Hyphenation zone:	断字区：
 	Italian	意大利语
+	Croatian	克罗地亚语
 	Japanese	日语
 	Korean	韩语
 	Limit consecutive hyphens to:	连续断字数限制：
@@ -2097,3 +2099,30 @@
 	Leave out the date and time of comments and tracked changes when saving	保存时不包含批注和修订的日期与时间
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	正在编辑的文档保留姓名和日期；只有保存的文件中不包含它们。
 	Privacy Settings	当前隐私设置
+	Full Screen	全屏
+	Full\nScreen	全屏
+	Use the browser's full screen (F11)	请使用浏览器的全屏模式 (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} 英寸
+	{name}   {height} × {width} mm	{name}   {height} × {width} 毫米
+	{width} × {height} mm	{width} × {height} 毫米
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}，{columns} × {rows}，{size}（{paper}）
+	Researcher needs an online service; WordCraft keeps your documents offline.	研究工具需要在线服务；WordCraft 会将你的文档保留在本地。
+	These settings will be used for new documents.	这些设置将用于新文档。
+	can't split at the first row	无法在第一行处拆分表格
+	select two or more cells to merge	请选择两个或更多单元格进行合并
+	there is no ink to replay	没有可重播的墨迹
+	there's no citation after the caret	插入点后没有引文
+	this item is already at the top level	此项已位于最高级别
+	Envelope #10	10 号信封
+	Envelope DL	DL 信封
+	Reading Mode	阅读模式
+	Column width	栏宽
+	Text size	文字大小
+	Edit Document	编辑文档
+	Go to what:	定位目标：
+	Type +2 or -1 to move from the page you are on.	输入 +2 或 -1 可从当前页向后或向前移动。
+	Suggested	建议
+	Set Proofing Language…	设置校对语言…
+	Language Preferences…	语言首选项…

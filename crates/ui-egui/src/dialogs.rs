@@ -355,7 +355,8 @@ pub enum Dialog {
     /// "Do you want to save changes?" before a user's New, Open, Close, Envelopes, Labels or
     /// Finish & Merge replaces the document (see [`WordApp::run`]); `then` runs once it is
     /// answered (`ui.saveChanges`), and only while the document it asked about
-    /// (`Session::document_id`) is still the one open.
+    /// (`Session::document_id`) is still the one open. `message`: why the last Save failed, shown
+    /// in the prompt when it comes back after that failure (#1445); empty otherwise.
     SaveChanges {
         name: String,
         then: String,
@@ -363,6 +364,8 @@ pub enum Dialog {
         params: Value,
         #[serde(skip)]
         document: u64,
+        #[serde(default)]
+        message: String,
     },
     /// Mailings › Select Recipients / Edit Recipient List: a table of recipients to type or
     /// edit (field names on top), or a file to load instead (#240).
@@ -2345,9 +2348,14 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, cancel) = buttons(ui, tl!("Close"));
             ok || cancel
         }
-        Dialog::SaveChanges { name, .. } => {
+        Dialog::SaveChanges { name, message, .. } => {
             ui.label(egui::RichText::new(crate::i18n::fmt(tl!("Do you want to save changes to {name}?"), &[("name", name)])).font(semibold(15.0)));
             ui.label(tl!("Your changes will be lost if you don't save them."));
+            // Why the last Save failed (#1445): the prompt came back so the user can't miss it.
+            if !message.is_empty() {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(message.as_str()).color(ui.visuals().error_fg_color));
+            }
             ui.add_space(8.0);
             let buttons = ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

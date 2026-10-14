@@ -926,7 +926,7 @@ fn polish_covers_every_key_of_every_other_catalog() {
     // Hungarian and Bulgarian also name the citation styles, and Bulgarian has a few one-line
     // pieces of gallery labels. Polish matches every other catalog, including the style names and
     // equation gallery Russian translates.
-    for other in Lang::all().filter(|l| *l != Lang::EN && !matches!(l.code(), "pl" | "it" | "hu" | "bg")) {
+    for other in Lang::all().filter(|l| *l != Lang::EN && !matches!(l.code(), "pl" | "it" | "hu" | "bg" | "vi")) {
         let mut missing: Vec<String> = keys(other.0.source).difference(&polish).cloned().collect();
         missing.sort();
         assert!(missing.is_empty(), "pl lacks {}'s {missing:?}", other.code());
@@ -1210,4 +1210,91 @@ fn bundled_interface_fonts_cover_bulgarian_without_system_fallbacks() {
         }
     }
     assert!(!lang("bg").uses_cjk());
+}
+
+#[test]
+fn vietnamese_locales_and_saved_preference_work_without_changing_the_document() {
+    let vi = lang("vi");
+    for tag in ["vi", "vi-VN", "vi_VN.UTF-8", "VI-vi", "vi-Latn-VN", "vi-US"] {
+        assert_eq!(lang_from_tag(tag), Some(vi), "{tag}");
+    }
+    assert_eq!(first_supported([UNSUPPORTED, "vi-VN", "en-US"]), Some(vi));
+    let mut app = crate::WordApp::new(wordcraft_engine::Session::new(wordcraft_engine::sample::sample_document()), Default::default());
+    let before = serde_json::to_value(&app.session.doc).unwrap();
+    let result = app.run("ui.language", serde_json::json!({"value": "VI"})).unwrap();
+    assert_eq!(result["effective"], "vi");
+    assert_eq!(app.ui.language, "vi");
+    assert!(result["available"].as_array().unwrap().iter().any(|l| l["code"] == "vi" && l["name"] == "Tiếng Việt"));
+    assert_eq!(serde_json::to_value(&app.session.doc).unwrap(), before);
+    let saved = serde_json::to_string(&app.ui).unwrap();
+    let restored: crate::UiState = serde_json::from_str(&saved).unwrap();
+    assert_eq!(restored.language, "vi");
+    assert_eq!(Lang::from_pref(&restored.language), vi);
+    assert_eq!(vi.name(), "Tiếng Việt");
+}
+
+#[test]
+fn vietnamese_covers_existing_catalog_keys_with_an_explicit_preview_fallback() {
+    use std::collections::HashSet;
+    let vi = lang("vi");
+    let (entries, errors) = parse_entries(vi.0.source);
+    assert!(errors.is_empty(), "{errors:?}");
+    let vi_keys: HashSet<_> = entries.into_iter().map(|e| (e.context, e.source)).collect();
+    // The short plain title fits the preview too; this is the only deliberate context fallback.
+    let preview_title = ("preview".to_string(), "Title".to_string());
+    assert!(vi_keys.contains(&(String::new(), "Title".to_string())));
+    assert_eq!(trc(vi, "preview", "Title"), "Tiêu đề");
+    assert_eq!(trc(vi, "preview", "Title"), tr(vi, "Title"));
+    // Compare complete (context, source) keys so a contextual entry cannot hide a missing plain
+    // translation, or silently satisfy another context's key.
+    for other in Lang::all().filter(|l| *l != Lang::EN && l.code() != "vi") {
+        let (entries, errors) = parse_entries(other.0.source);
+        assert!(errors.is_empty(), "{}: {errors:?}", other.code());
+        let keys: HashSet<_> = entries.into_iter().map(|e| (e.context, e.source)).collect();
+        let mut missing: Vec<_> = keys.difference(&vi_keys).filter(|key| **key != preview_title).cloned().collect();
+        missing.sort();
+        assert!(missing.is_empty(), "vi lacks {}'s {missing:?}", other.code());
+    }
+}
+
+#[test]
+fn vietnamese_translations_preserve_templates_and_count_labels() {
+    let vi = lang("vi");
+    assert_eq!(tr(vi, "Home"), "Trang chủ");
+    assert_eq!(tr(vi, "Save"), "Lưu");
+    assert_eq!(tr(vi, "Spelling & Grammar"), "Chính tả & Ngữ pháp");
+    assert_eq!(tr(vi, "unknown future label"), "unknown future label");
+    assert_eq!(fmt(tr(vi, "Exported {path}"), &[("path", "draft-{words}.docx")]), "Đã xuất draft-{words}.docx");
+    // Count-neutral wording (`Từ: 21`): a Vietnamese noun stays unchanged after a number.
+    for count in [0, 1, 2, 11, 21, 101] {
+        let words = count.to_string();
+        assert_eq!(fmt(tr(vi, "{words} words"), &[("words", &words)]), format!("Từ: {count}"));
+        assert_eq!(fmt(tr(vi, "{selected} of {words} words"), &[("selected", "1"), ("words", &words)]), format!("Từ: 1 trên {count}"));
+    }
+}
+
+#[test]
+fn bundled_interface_fonts_cover_vietnamese_letters() {
+    let db = wordcraft_fonts::FontDb::with_font_dirs(Vec::new());
+    let (entries, errors) = parse_entries(lang("vi").0.source);
+    assert!(errors.is_empty(), "{errors:?}");
+    // Cover the catalog's Latin letters and combining marks, and all 134 non-ASCII Vietnamese
+    // letters even when a letter is not used by the current translations. U+1EA0..U+1EF9 contains
+    // the Vietnamese vowel/tone combinations; the other forms are in earlier Latin blocks.
+    let extra = "ÀàÁáÃãÈèÉéÌìÍíÒòÓóÕõÙùÚúÝýÂâĂăĐđÊêÔôƠơƯưĨĩŨũ";
+    let chars: std::collections::HashSet<char> = entries
+        .iter()
+        .flat_map(|e| e.translation.chars())
+        .filter(|c| ('\u{00C0}'..='\u{024F}').contains(c) || ('\u{0300}'..='\u{036F}').contains(c) || ('\u{1E00}'..='\u{1EFF}').contains(c))
+        .chain(extra.chars())
+        .chain('\u{1EA0}'..='\u{1EF9}')
+        .collect();
+    for (family, style) in [("Inter", "Regular"), ("Inter", "Medium"), ("Inter", "SemiBold"), ("JetBrains Mono", "Regular")] {
+        let face = db.face(family, style);
+        assert_eq!(face.family, family, "must use the bundled interface face");
+        for ch in &chars {
+            assert_ne!(face.glyph_for(*ch), 0, "{family} {style} lacks {ch:?}");
+        }
+    }
+    assert!(!lang("vi").uses_cjk());
 }
