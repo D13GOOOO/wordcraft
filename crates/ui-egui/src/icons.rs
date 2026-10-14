@@ -1313,6 +1313,30 @@ pub fn paint(p: &Painter, r: Rect, name: &str, c: Color32, accent: Color32) {
             pen.closed(&[(5.0, 8.5), (5.0, 17.0), (15.0, 17.0), (15.0, 8.5)], c);
             pen.frect(8.5, 12.0, 11.5, 17.0, a);
         }
+        // File (Backstage) side menu (#1714). Save As: the save disk with a pencil across its corner.
+        "saveAs" => {
+            pen.closed(&[(2.5, 2.5), (11.5, 2.5), (14.5, 5.5), (14.5, 14.5), (2.5, 14.5)], c);
+            pen.frect(5.0, 2.5, 10.5, 6.0, a);
+            pen.rect(5.0, 9.5, 12.0, 14.5, c);
+            pen.fill(&[(11.0, 17.0), (17.0, 11.0), (18.5, 12.5), (12.5, 18.5)], a);
+            pen.fill(&[(11.0, 17.0), (12.5, 18.5), (10.0, 19.5)], c);
+        }
+        // Export: a page with an arrow leaving it.
+        "export" => {
+            pen.page(2.5, 2.0, 12.5, 18.0);
+            pen.line_c(&[(7.5, 10.0), (18.0, 10.0)], a);
+            pen.line_c(&[(15.0, 7.0), (18.0, 10.0), (15.0, 13.0)], a);
+        }
+        // Options: a gear.
+        "options" => {
+            for k in 0..8 {
+                let t = k as f32 * std::f32::consts::FRAC_PI_4;
+                let at = |radius: f32, dt: f32| (10.0 + radius * (t + dt).cos(), 10.0 + radius * (t + dt).sin());
+                pen.fill(&[at(5.0, -0.28), at(8.2, -0.17), at(8.2, 0.17), at(5.0, 0.28)], c);
+            }
+            pen.circle(10.0, 10.0, 5.5, c);
+            pen.circle(10.0, 10.0, 2.2, a);
+        }
 
         // Outlining tab: arrows moving a paragraph between outline levels and along the outline.
         "outlinePromote" | "outlineDemote" => {

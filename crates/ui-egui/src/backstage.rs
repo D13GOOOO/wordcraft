@@ -6,17 +6,18 @@ use serde_json::json;
 use crate::theme::{APP_COLOR, Tokens, medium, regular, semibold};
 use crate::{WordApp, icons};
 
-const PAGES: [(&str, &str); 10] = [
-    ("home", "Home"),
-    ("new", "New"),
-    ("open", "Open"),
-    ("info", "Info"),
-    ("save", "Save"),
-    ("saveAs", "Save As"),
-    ("print", "Print"),
-    ("export", "Export"),
-    ("close", "Close"),
-    ("options", "Options"),
+/// The side menu: page id, label and icon (#1714).
+const PAGES: [(&str, &str, &str); 10] = [
+    ("home", "Home", "homeFolder"),
+    ("new", "New", "blankPage"),
+    ("open", "Open", "open"),
+    ("info", "Info", "info"),
+    ("save", "Save", "save"),
+    ("saveAs", "Save As", "saveAs"),
+    ("print", "Print", "print"),
+    ("export", "Export", "export"),
+    ("close", "Close", "close"),
+    ("options", "Options", "options"),
 ];
 
 pub fn show(app: &mut WordApp, ui: &mut Ui) {
@@ -63,7 +64,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                 app.canvas.want_focus = true;
             }
             ui.add_space(if mac { 12.0 } else { 6.0 });
-            for (id, label) in PAGES {
+            for (id, label, icon) in PAGES {
                 // No document open (#1129): Info, Save, Save As, Print and Export are greyed out.
                 let on = has_document || works_without_document(id);
                 let (r, resp) = ui.add_enabled_ui(on, |ui| ui.allocate_exact_size(vec2(200.0, 38.0), Sense::click())).inner;
@@ -74,12 +75,14 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                 } else if on && resp.hovered() {
                     ui.painter().rect_filled(r, 0.0, egui::Color32::from_white_alpha(26));
                 }
+                let ink = if on { egui::Color32::WHITE } else { egui::Color32::from_white_alpha(110) };
+                icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 31.0, r.center().y), vec2(18.0, 18.0)), icon, ink, ink);
                 ui.painter().text(
-                    pos2(r.min.x + 22.0, r.center().y),
+                    pos2(r.min.x + 52.0, r.center().y),
                     Align2::LEFT_CENTER,
                     tl!(label),
                     if active { semibold(14.0) } else { medium(14.0) },
-                    if on { egui::Color32::WHITE } else { egui::Color32::from_white_alpha(110) },
+                    ink,
                 );
                 if resp.clicked() {
                     match id {
@@ -415,6 +418,33 @@ mod tests {
 
     use super::matching_templates;
     use crate::{Services, WordApp};
+
+    /// #1714: every side-menu item has its own icon, a drawn one (an unknown name would fall back
+    /// to a tile with its first letter, the only icon here that draws text).
+    #[test]
+    fn every_side_menu_item_has_a_drawn_icon() {
+        let ctx = egui::Context::default();
+        let mut names = std::collections::HashSet::new();
+        for (id, _, icon) in super::PAGES {
+            assert!(names.insert(icon), "{id}: {icon} is used twice");
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let r = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(18.0, 18.0));
+                crate::icons::paint(ui.painter(), r, icon, egui::Color32::WHITE, egui::Color32::WHITE);
+            });
+            // The frame's font textures aren't uploaded anywhere here (cleared before any assert,
+            // so a failure doesn't panic again while the frame is dropped).
+            out.textures_delta.clear();
+            fn has_text(s: &egui::Shape) -> bool {
+                match s {
+                    egui::Shape::Text(_) => true,
+                    egui::Shape::Vec(v) => v.iter().any(has_text),
+                    _ => false,
+                }
+            }
+            assert!(!out.shapes.is_empty(), "{id}: {icon} draws nothing");
+            assert!(!out.shapes.iter().any(|s| has_text(&s.shape)), "{id}: {icon} is not a drawn icon");
+        }
+    }
 
     #[test]
     fn template_search_matches_labels_case_insensitively() {
