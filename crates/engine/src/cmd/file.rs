@@ -245,7 +245,9 @@ fn save(s: &mut Session, v: &Value) -> CmdResult {
     }
     s.stamp_save();
     let password = s.password.as_ref().map(crate::io::Password::as_str);
-    crate::io::save_path_with(&path, &s.doc, password, &opts).map_err(CmdError::Failed)?;
+    // A header/footer just made and left empty isn't saved (#960).
+    let copy = super::insert::saved_copy(s);
+    crate::io::save_path_with(&path, copy.as_ref().unwrap_or(&s.doc), password, &opts).map_err(CmdError::Failed)?;
     let encrypted = password.is_some() && crate::io::can_encrypt(&path.to_string_lossy());
     if ["docx", "docm", "dotx", "dotm", "odt", "rtf", "json", "xml"].contains(&ext.as_str()) {
         s.path = Some(path.clone());
@@ -257,16 +259,8 @@ fn save(s: &mut Session, v: &Value) -> CmdResult {
 /// Does `path` hold a Word 2003 XML Document already (so a plain save keeps that format)?
 #[cfg(not(target_arch = "wasm32"))]
 fn is_word_2003_file(path: &std::path::Path) -> bool {
-    use std::io::Read;
-    if crate::file_access::check_read(&path.to_string_lossy()).is_err() {
-        return false;
-    }
-    let Ok(f) = std::fs::File::open(path) else { return false };
-    let mut head = Vec::new();
     // The root element and its namespaces come first.
-    if f.take(64 * 1024).read_to_end(&mut head).is_err() {
-        return false;
-    }
+    let Ok(head) = crate::io::read_file_head(&path.to_string_lossy(), 64 * 1024) else { return false };
     wordcraft_docx::sniff_xml(&head) == wordcraft_docx::XmlKind::WordMl2003
 }
 

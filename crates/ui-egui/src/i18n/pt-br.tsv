@@ -1421,6 +1421,7 @@
 	Demote	Rebaixar
 	Go Back	Voltar
 	Toggle Unicode Character	Alternar caractere Unicode
+	Type Character Code	Digitar código de caractere
 	Toggle Field Codes	Alternar códigos de campo
 	Edit Field Code	Editar código de campo
 	Unlink Fields	Desvincular campos
@@ -2041,6 +2042,7 @@
 	Hyphenation Options…	Opções de hifenização…
 	Hyphenation zone:	Zona de hifenização:
 	Italian	Italiano
+	Croatian	Croata
 	Japanese	Japonês
 	Korean	Coreano
 	Limit consecutive hyphens to:	Limitar hífens consecutivos a:
@@ -2097,3 +2099,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Omitir a data e a hora dos comentários e das alterações controladas ao salvar
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	O documento que você está editando mantém os nomes e as datas; só o arquivo salvo os omite.
 	Privacy Settings	Configurações de privacidade atuais
+	Full Screen	Tela inteira
+	Full\nScreen	Tela\ninteira
+	Use the browser's full screen (F11)	Use a tela inteira do navegador (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} pol.
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	O Pesquisador precisa de um serviço online; o WordCraft mantém seus documentos offline.
+	These settings will be used for new documents.	Essas configurações serão usadas nos novos documentos.
+	can't split at the first row	não é possível dividir a tabela na primeira linha
+	select two or more cells to merge	selecione duas ou mais células para mesclar
+	there is no ink to replay	não há tinta para reproduzir
+	there's no citation after the caret	não há citação depois do cursor
+	this item is already at the top level	este item já está no nível superior
+	Envelope #10	Envelope nº 10
+	Envelope DL	Envelope DL
+	Reading Mode	Modo de leitura
+	Column width	Largura da coluna
+	Text size	Tamanho do texto
+	Edit Document	Editar documento
+	Go to what:	Ir para:
+	Type +2 or -1 to move from the page you are on.	Digite +2 ou -1 para se mover a partir da página atual.
+	Suggested	Sugestões
+	Set Proofing Language…	Definir idioma de revisão…
+	Language Preferences…	Preferências de idioma…

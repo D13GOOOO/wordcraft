@@ -1343,6 +1343,7 @@
 	Demote	Snížit úroveň
 	Go Back	Přejít zpět
 	Toggle Unicode Character	Přepnout znak Unicode
+	Type Character Code	Zadat kód znaku
 	Toggle Field Codes	Přepnout kódy polí
 	Edit Field Code	Upravit kód pole
 	Unlink Fields	Zrušit propojení polí
@@ -1648,6 +1649,7 @@
 	Hyphenation Options…	Možnosti dělení slov…
 	Hyphenation zone:	Pásmo dělení slov:
 	Italian	Italština
+	Croatian	Chorvatština
 	Japanese	Japonština
 	Korean	Korejština
 	Limit consecutive hyphens to:	Omezit počet po sobě jdoucích rozdělení:
@@ -2090,3 +2092,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Při ukládání vynechat datum a čas komentářů a sledovaných změn
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Upravovaný dokument si jména a data ponechá; vynechá je jen uložený soubor.
 	Privacy Settings	Aktuální nastavení soukromí
+	Full Screen	Celá obrazovka
+	Full\nScreen	Celá\nobrazovka
+	Use the browser's full screen (F11)	Použijte celou obrazovku prohlížeče (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} palce
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Výzkumník potřebuje online službu; WordCraft vaše dokumenty uchovává offline.
+	These settings will be used for new documents.	Tato nastavení se použijí pro nové dokumenty.
+	can't split at the first row	tabulku nelze rozdělit na prvním řádku
+	select two or more cells to merge	vyberte ke sloučení dvě nebo více buněk
+	there is no ink to replay	není žádný rukopis k přehrání
+	there's no citation after the caret	za kurzorem není žádná citace
+	this item is already at the top level	tato položka už je na nejvyšší úrovni
+	Envelope #10	Obálka č. 10
+	Envelope DL	Obálka DL
+	Reading Mode	Režim čtení
+	Column width	Šířka sloupce
+	Text size	Velikost textu
+	Edit Document	Upravit dokument
+	Go to what:	Přejít na:
+	Type +2 or -1 to move from the page you are on.	Zadáním +2 nebo -1 se posunete od aktuální stránky.
+	Suggested	Navrhované
+	Set Proofing Language…	Nastavit jazyk kontroly pravopisu…
+	Language Preferences…	Předvolby jazyka…

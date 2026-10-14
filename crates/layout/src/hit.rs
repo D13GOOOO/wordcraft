@@ -321,12 +321,23 @@ impl DocLayout {
 
     /// Which header/footer (if any) is at (x, y) on a page — for double-click editing.
     pub fn header_footer_at(&self, page: usize, y: f32) -> Option<(StoryRef, bool)> {
+        let (story, header) = self.header_footer_zone(page, y)?;
+        story.map(|s| (s, header))
+    }
+
+    /// Whether y on `page` is in its header area (above the body: `Some((_, true))`) or footer
+    /// area (below it: `Some((_, false))`), with the story shown there — `None` when the page
+    /// has no header/footer yet (double-clicking there creates one, #960).
+    pub fn header_footer_zone(&self, page: usize, y: f32) -> Option<(Option<StoryRef>, bool)> {
         let p = self.pages.get(page)?;
+        if !y.is_finite() {
+            return None;
+        }
         if y < p.body.y {
-            return p.header_story.map(|id| (StoryRef::Part(id), true));
+            return Some((p.header_story.map(StoryRef::Part), true));
         }
         if y > p.body.bottom() {
-            return p.footer_story.map(|id| (StoryRef::Part(id), false));
+            return Some((p.footer_story.map(StoryRef::Part), false));
         }
         None
     }

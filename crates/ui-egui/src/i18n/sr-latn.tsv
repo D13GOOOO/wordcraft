@@ -1419,6 +1419,7 @@
 	Demote	Spusti nivo
 	Go Back	Vrati se nazad
 	Toggle Unicode Character	Prebaci Unicode znak
+	Type Character Code	Unesi kod znaka
 	Toggle Field Codes	Uključi/isključi kodove polja
 	Edit Field Code	Uredi kod polja
 	Unlink Fields	Raskini vezu polja
@@ -2039,6 +2040,7 @@
 	Hyphenation Options…	Opcije deljenja reči…
 	Hyphenation zone:	Zona deljenja reči:
 	Italian	Italijanski
+	Croatian	Hrvatski
 	Japanese	Japanski
 	Korean	Korejski
 	Limit consecutive hyphens to:	Najviše uzastopnih crtica:
@@ -2095,3 +2097,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Izostavi datum i vreme komentara i praćenih izmena pri čuvanju
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Dokument koji uređujete zadržava imena i datume; izostavlja ih samo sačuvana datoteka.
 	Privacy Settings	Trenutna podešavanja privatnosti
+	Full Screen	Ceo ekran
+	Full\nScreen	Ceo\nekran
+	Use the browser's full screen (F11)	Koristite prikaz preko celog ekrana u pregledaču (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} inča
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Istraživaču je potrebna usluga na mreži, a WordCraft vaše dokumente čuva van mreže.
+	These settings will be used for new documents.	Ova podešavanja će se koristiti za nove dokumente.
+	can't split at the first row	tabela ne može da se podeli kod prvog reda
+	select two or more cells to merge	izaberite dve ili više ćelija za spajanje
+	there is no ink to replay	nema mastila za reprizu
+	there's no citation after the caret	posle kursora nema citata
+	this item is already at the top level	ova stavka je već na najvišem nivou
+	Envelope #10	Koverta br. 10
+	Envelope DL	Koverta DL
+	Reading Mode	Režim čitanja
+	Column width	Širina kolone
+	Text size	Veličina teksta
+	Edit Document	Uredi dokument
+	Go to what:	Idi na:
+	Type +2 or -1 to move from the page you are on.	Unesite +2 ili -1 da biste se pomerili od strane na kojoj ste.
+	Suggested	Predlozi
+	Set Proofing Language…	Postavi jezik provere…
+	Language Preferences…	Jezičke postavke…

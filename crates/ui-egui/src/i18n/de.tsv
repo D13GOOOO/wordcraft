@@ -1351,6 +1351,7 @@
 	Demote	Tiefer stufen
 	Go Back	Zurückspringen
 	Toggle Unicode Character	Unicode-Zeichen umschalten
+	Type Character Code	Zeichencode eingeben
 	Toggle Field Codes	Feldfunktionen ein/aus
 	Edit Field Code	Feldfunktion bearbeiten
 	Unlink Fields	Feldverknüpfungen aufheben
@@ -2010,6 +2011,7 @@
 	Hyphenation Options…	Silbentrennungsoptionen…
 	Hyphenation zone:	Silbentrennzone:
 	Italian	Italienisch
+	Croatian	Kroatisch
 	Japanese	Japanisch
 	Korean	Koreanisch
 	Limit consecutive hyphens to:	Aufeinanderfolgende Trennstriche begrenzen auf:
@@ -2084,3 +2086,30 @@
 	Leave out the date and time of comments and tracked changes when saving	Beim Speichern Datum und Uhrzeit von Kommentaren und nachverfolgten Änderungen weglassen
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Das bearbeitete Dokument behält Namen und Daten; nur die gespeicherte Datei lässt sie weg.
 	Privacy Settings	Aktuelle Datenschutzeinstellungen
+	Full Screen	Vollbild
+	Full\nScreen	Voll-\nbild
+	Use the browser's full screen (F11)	Verwenden Sie den Vollbildmodus des Browsers (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} Zoll
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Der Recherche-Assistent braucht einen Onlinedienst; WordCraft behält Ihre Dokumente offline.
+	These settings will be used for new documents.	Diese Einstellungen werden für neue Dokumente verwendet.
+	can't split at the first row	die Tabelle kann nicht an der ersten Zeile geteilt werden
+	select two or more cells to merge	wählen Sie zum Verbinden zwei oder mehr Zellen aus
+	there is no ink to replay	es gibt keine Freihandeingabe zum Wiedergeben
+	there's no citation after the caret	nach der Einfügemarke steht kein Zitat
+	this item is already at the top level	dieses Element ist bereits auf der obersten Ebene
+	Envelope #10	Umschlag Nr. 10
+	Envelope DL	Umschlag DL
+	Reading Mode	Lesemodus
+	Column width	Spaltenbreite
+	Text size	Textgröße
+	Edit Document	Dokument bearbeiten
+	Go to what:	Gehe zu:
+	Type +2 or -1 to move from the page you are on.	Geben Sie +2 oder -1 ein, um von der aktuellen Seite aus zu springen.
+	Suggested	Vorschläge
+	Set Proofing Language…	Sprache für die Korrekturhilfen festlegen…
+	Language Preferences…	Spracheinstellungen…

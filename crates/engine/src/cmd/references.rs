@@ -1,8 +1,10 @@
 //! References tab: table of contents, footnotes/endnotes, captions; field updates.
 
 use serde_json::{Value, json};
+use wordcraft_doc::numbering::{Counters, LevelSuffix};
 use wordcraft_doc::para::{InlineObject, NoteKind, OBJ};
 use wordcraft_doc::props::{CharProps, TabAlign, TabLeader, TabStop};
+use wordcraft_doc::section::NumFormat;
 use wordcraft_doc::{Block, Paragraph, PartKind, Path, Pos, StoryRef, para_block};
 
 use super::{delete_selection, sel_result};
@@ -244,11 +246,26 @@ fn toc_entries(s: &Session, f: &FieldCode) -> Vec<TocEntry> {
     let tc = f.has('f').then(|| f.arg('f').unwrap_or("").to_ascii_uppercase());
     let tc_levels = f.arg('l').and_then(level_range).unwrap_or((1, 9));
     let mut v = Vec::new();
+    // Every numbered paragraph advances the list counters, so an entry carries the number its
+    // heading shows (`1.1`), followed by the level's separator, as Word writes it.
+    let mut counters = Counters::default();
     for path in s.doc.para_paths(StoryRef::Body) {
+        let Some(p) = s.doc.para(StoryRef::Body, &path) else { continue };
+        let number = p
+            .props
+            .numbering
+            .or_else(|| s.doc.styles.resolve_para(&p.props).numbering)
+            .filter(|n| n.num != 0)
+            .and_then(|n| counters.next_label(&s.doc.numbering, n.num, n.level))
+            .filter(|(label, def)| !label.is_empty() && !matches!(def.format, NumFormat::Bullet | NumFormat::None))
+            .map(|(label, def)| match def.suffix {
+                LevelSuffix::Tab => format!("{label}\t"),
+                LevelSuffix::Space => format!("{label} "),
+                LevelSuffix::Nothing => label,
+            });
         if path.depth() > 0 {
             continue;
         }
-        let Some(p) = s.doc.para(StoryRef::Body, &path) else { continue };
         let style = p.props.style.as_deref().unwrap_or("Normal");
         if style.starts_with("TOC") {
             continue;
@@ -272,7 +289,8 @@ fn toc_entries(s: &Session, f: &FieldCode) -> Vec<TocEntry> {
         if let Some(l) = by_style.or(by_outline).or(if hidden { None } else { by_heading }) {
             let t = p.plain_text().replace(['\u{000C}', '\n', '\t'], " ").trim().to_string();
             if !t.is_empty() {
-                v.push(TocEntry { path: path.clone(), level: l - 1, text: t, lead });
+                let text = number.map_or_else(|| t.clone(), |n| format!("{n}{t}"));
+                v.push(TocEntry { path: path.clone(), level: l - 1, text, lead });
             }
         }
         if let Some(id) = &tc {

@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use wordcraft_doc::numbering::{Counters, Level};
 use wordcraft_doc::para::{Anchor, Float, FloatAlign, InlineObject, Wrap, WrapText};
-use wordcraft_doc::props::{Border, CharProps, Rgb, TableFloat, TextDirection};
+use wordcraft_doc::props::{Border, CharProps, HeightRule, Rgb, TableFloat, TextDirection};
 use wordcraft_doc::section::{HeaderSet, SectionProps, SectionStart};
 use wordcraft_doc::{Block, Blocks, Document, Paragraph, Path, StoryRef};
 use wordcraft_geom::{Point, Rect, Spin};
@@ -405,6 +405,17 @@ pub fn turn_rect(turn: TextDirection, x: f32, y: f32, r: Rect) -> Rect {
     }
 }
 
+/// Which header/footer of its section a page shows ([`Page::hf_slot`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HfSlot {
+    #[default]
+    Default,
+    /// The first page of a section with "Different First Page".
+    First,
+    /// An even page with "Different Odd & Even Pages".
+    Even,
+}
+
 /// One laid-out page.
 #[derive(Clone, Debug, Default)]
 pub struct Page {
@@ -422,6 +433,10 @@ pub struct Page {
     pub body: Rect,
     pub header_story: Option<u32>,
     pub footer_story: Option<u32>,
+    /// Which of its section's headers/footers this page shows (first page, even page or the
+    /// default), whether or not the section has one: double-clicking an empty header area
+    /// creates that one (#960).
+    pub hf_slot: HfSlot,
     /// Top-level body block index at the start of the page.
     pub first_block: usize,
     /// Width of the markup area on the right of `w` that holds comment balloons (Print Markup,
@@ -447,6 +462,8 @@ struct Key {
     width: u32,
     label: Option<String>,
     page: Option<(u32, u32, u32, u32)>,
+    /// The pages a split paragraph's fields are on after its first (`FieldCtx::page_from`).
+    page_from: u64,
     table: u64,
     notes: u64,
     excl: u64,
@@ -524,6 +541,11 @@ fn has_page_fields(p: &Paragraph) -> bool {
         }
         _ => false,
     })
+}
+
+/// Does `p` show a PAGE field, whose result is the number of the page it lands on?
+fn has_page_number_fields(p: &Paragraph) -> bool {
+    p.objects.iter().any(|o| matches!(o, InlineObject::Field { instr, .. } if fields::field_name(instr) == "PAGE"))
 }
 
 /// Does `p` show a page total, which depends on how many pages the document has?
@@ -702,6 +724,7 @@ impl Ctx<'_> {
             rev: p.rev,
             width: width.to_bits(),
             label: label.as_ref().map(|(t, l)| format!("{t}|{}|{}|{:?}|{:?}|{:?}|{:?}", l.indent, l.hanging, l.suffix, l.align, l.tab, l.chr)),
+            page_from: if page.is_some() && !self.fields.page_from.is_empty() { hash_of(&self.fields.page_from) } else { 0 },
             page,
             table: table.map(|t| hash_of(&format!("{t:?}"))).unwrap_or(0),
             notes: if p.objects.iter().any(|o| matches!(o, InlineObject::NoteRef { .. })) { self.notes_hash } else { 0 },
@@ -2534,7 +2557,7 @@ fn anchor_floats(
     before: f32,
     excl_mark: usize,
     label: &Option<(String, Level)>,
-) -> (HashMap<usize, Rect>, Arc<ParaLayout>) {
+) -> (HashMap<usize, Rect>, Arc<ParaLayout>, Vec<para::Exclusion>) {
     pb.excl.truncate(excl_mark);
     ctx.fields.page = pb.number;
     let (col_x, width) = (pb.col_x(), pb.col_w());
@@ -2559,7 +2582,8 @@ fn anchor_floats(
         }
     }
     let rel = rel_exclusions(&pb.excl, col_x, y0);
-    (rects, ctx.para_labelled(p, width, None, &rel, label.clone()))
+    let pl = ctx.para_labelled(p, width, None, &rel, label.clone());
+    (rects, pl, rel)
 }
 
 /// Where a paragraph's floating objects are positioned from, when they aren't placed already:
@@ -2696,6 +2720,28 @@ fn place_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize, 
     place_para_in_flow(ctx, pb, p, block, body_top);
 }
 
+/// How many times one body paragraph is laid out again for the page numbers of the later pages
+/// it runs onto (#1352).
+const MAX_PAGE_RELAYS: usize = 64;
+
+/// Run `f`, a layout of a paragraph again, with the automatic equation numbers it counted from
+/// (`eq_start`) the first time, and leave the count where it was: laying it out again doesn't
+/// count its numbered equations twice.
+fn again<T>(ctx: &mut Ctx, eq_start: u32, f: impl FnOnce(&mut Ctx) -> T) -> T {
+    let now = std::mem::replace(&mut ctx.eq_count, eq_start);
+    let out = f(ctx);
+    ctx.eq_count = now;
+    out
+}
+
+/// Run `f` with `map` as the field context's page map (`FieldCtx::page_from`), then take it back.
+fn with_page_map<T>(ctx: &mut Ctx, map: &mut Vec<(usize, u32)>, f: impl FnOnce(&mut Ctx) -> T) -> T {
+    ctx.fields.page_from = std::mem::take(map);
+    let out = f(ctx);
+    *map = std::mem::take(&mut ctx.fields.page_from);
+    out
+}
+
 fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize, body_top: f32) {
     let width = pb.col_w();
     // Floating objects anchored here join the page's wrap areas before the text is laid out; if
@@ -2705,7 +2751,17 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
     let excl_mark = pb.excl.len();
     let guess = pb.y + space_before;
     let label = ctx.next_label(p);
-    let (mut float_rects, mut pl) = anchor_floats(ctx, pb, p, guess, space_before, excl_mark, &label);
+    // The pages this paragraph's fields are on after its first (`FieldCtx::page_from`), kept here
+    // and lent to the field context only while this paragraph itself is laid out, so footnotes,
+    // text boxes and headers laid out in between never see it (#1352).
+    let mut page_map: Vec<(usize, u32)> = Vec::new();
+    // Where its automatic equation numbers start: each layout of it again counts from here.
+    let eq_start = ctx.eq_count;
+    let (mut float_rects, mut pl, mut rel) = anchor_floats(ctx, pb, p, guess, space_before, excl_mark, &label);
+    // The page its fields were laid out for (and the width), and how many times it was laid out again for a later
+    // page (bounded: a paragraph over hundreds of pages keeps the last number it got).
+    let (mut laid_page, mut laid_width) = (pb.number, pb.col_w());
+    let mut page_relays = 0usize;
     // The anchor paragraph's top (above its space before) the floats were placed from.
     let mut anchor_y = pb.y;
     let spot = |pb: &PageBuilder| (pb.pages.len(), pb.col);
@@ -2781,7 +2837,8 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
     // A different top only matters when there is something to wrap around.
     if spot(pb) != placed_at || ((pb.y - guess).abs() > 0.01 && !pb.excl.is_empty()) {
         let y0 = pb.y;
-        (float_rects, pl) = anchor_floats(ctx, pb, p, y0, applied_before, excl_mark, &label);
+        (float_rects, pl, rel) = again(ctx, eq_start, |ctx| anchor_floats(ctx, pb, p, y0, applied_before, excl_mark, &label));
+        (laid_page, laid_width) = (pb.number, pb.col_w());
         anchor_y = y0 - applied_before;
     }
     let mut n = pl.lines.len();
@@ -2789,6 +2846,36 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
     let mut after_on_page: Option<f32> = None;
     let mut l0 = 0;
     while l0 < n {
+        // Page fields in the lines going onto a new page show that page's number: lay the
+        // paragraph out again with the fields from there on on this page (the lines before stay as
+        // they were, so the line the rest starts with is still there), breaking the rest again for
+        // the new results' widths (#1352). Only a paragraph with page fields pays for this.
+        if l0 > 0
+            && pl.has_page_fields
+            && !pb.web
+            && page_relays < MAX_PAGE_RELAYS
+            && let Some(resume) = pl.lines.get(l0).map(|l| l.start)
+            && page_map.last().map_or(laid_page, |e| e.1) != pb.number
+            && has_page_number_fields(p)
+        {
+            page_relays += 1;
+            page_map.push((resume, pb.number));
+            ctx.fields.page = laid_page;
+            let relaid =
+                with_page_map(ctx, &mut page_map, |ctx| again(ctx, eq_start, |ctx| ctx.para_labelled(p, laid_width, None, &rel, label.clone())));
+            match relaid.lines.iter().position(|l| l.start == resume) {
+                Some(k) => {
+                    pl = relaid;
+                    n = pl.lines.len();
+                    l0 = k;
+                }
+                None => {
+                    page_map.pop();
+                }
+            }
+        }
+        // What is laid out for these lines from here (their footnotes) is on this page.
+        ctx.fields.page = pb.number;
         // How many lines fit?
         let Some(first) = pl.lines.get(l0) else { break };
         // A paragraph's first line may start below its top (pushed down by a floating object).
@@ -2891,7 +2978,8 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
                 pb.advance(block, body_top);
                 if l0 == 0 {
                     let y0 = pb.y;
-                    (float_rects, pl) = anchor_floats(ctx, pb, p, y0, 0.0, excl_mark, &label);
+                    (float_rects, pl, rel) = again(ctx, eq_start, |ctx| anchor_floats(ctx, pb, p, y0, 0.0, excl_mark, &label));
+                    (laid_page, laid_width) = (pb.number, pb.col_w());
                     anchor_y = y0;
                     n = pl.lines.len();
                 }
@@ -3001,9 +3089,11 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
                     && let Some(resume) = pl.lines.get(l0).map(|l| l.start)
                 {
                     let y0 = pb.y;
-                    let (rects, relaid) = anchor_floats(ctx, pb, p, y0, 0.0, excl_mark, &label);
+                    let (rects, relaid, relaid_rel) =
+                        with_page_map(ctx, &mut page_map, |ctx| again(ctx, eq_start, |ctx| anchor_floats(ctx, pb, p, y0, 0.0, excl_mark, &label)));
                     if let Some(k) = relaid.lines.iter().position(|l| l.start == resume) {
-                        (float_rects, pl) = (rects, relaid);
+                        (float_rects, pl, rel) = (rects, relaid, relaid_rel);
+                        (laid_page, laid_width) = (pb.number, pb.col_w());
                         anchor_y = y0;
                         n = pl.lines.len();
                         l0 = k;
@@ -3014,8 +3104,11 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
             _ => {}
         }
     }
-    pb.y += pl.rp.space_after;
-    pb.prev = Some((pl.rp.style.clone(), pl.rp.contextual_spacing, pl.rp.space_after, pl.rp.after_auto, label.is_some()));
+    // A mark that stayed with its page break keeps its space after on that page too: the next page
+    // starts with the next paragraph (Word, compatibility modes 12 to 15).
+    let space_after = if pb.after_break_mark { 0.0 } else { pl.rp.space_after };
+    pb.y += space_after;
+    pb.prev = Some((pl.rp.style.clone(), pl.rp.contextual_spacing, space_after, pl.rp.after_auto, label.is_some()));
 }
 
 /// The outline of the body for an Outline view pass.
@@ -3178,7 +3271,12 @@ fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc::Table, bl
         pb.content_bottom = pb.content_bottom.max(pb.y);
     };
     for (ri, row) in tl.rows.iter().enumerate() {
-        let splittable = !header_rows.contains(&ri) && !t.rows.get(ri).is_some_and(|r| r.props.cant_split);
+        // Word never splits a row of an exact height: it moves on whole.
+        let splittable = !header_rows.contains(&ri)
+            && !t
+                .rows
+                .get(ri)
+                .is_some_and(|r| r.props.cant_split || (r.props.height_rule == HeightRule::Exact && r.props.height.is_some_and(|h| h > 0.0)));
         let mut rest: Option<table::RowLayout> = None;
         // On a new page holding only the repeated header rows.
         let mut fresh = false;
@@ -3372,6 +3470,13 @@ fn headers_footers(ctx: &mut Ctx, pages: &mut [Page], sections: &[(usize, &Secti
         };
         let hid = pick(|s| s.headers);
         let fid = pick(|s| s.footers);
+        page.hf_slot = if sect.title_page && first_of_section.contains(&i) {
+            HfSlot::First
+        } else if even_odd && page.number % 2 == 0 {
+            HfSlot::Even
+        } else {
+            HfSlot::Default
+        };
         ctx.fields.page = page.number;
         ctx.fields.page_format = sect.page_num_format;
         ctx.fields.pages = total;

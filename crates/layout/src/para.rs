@@ -13,7 +13,7 @@ use wordcraft_doc::{Document, Paragraph};
 use wordcraft_fonts::FaceRef;
 
 use crate::NumeralMode;
-use crate::fields::{FIELD_SHADING, FieldCtx, field_code_text, field_text};
+use crate::fields::{FIELD_SHADING, FieldCtx, field_code_text, field_text_on};
 
 /// How a run set in one of Word's symbol fonts (Symbol, Wingdings, Wingdings 2/3, Webdings)
 /// shows its characters. Those fonts are proprietary and usually missing: a substitute has other
@@ -1317,7 +1317,7 @@ pub fn layout_para(p: &Paragraph, env: &ParaEnv) -> ParaLayout {
                                 match wordcraft_doc::eq::parse_overstrike(instr) {
                                     Some(o) => overstrike(&mut b, &o, instr, start, end, &rc, &mut enclosures),
                                     None => {
-                                        let (t, page_dep) = field_text(instr, result, env.fields);
+                                        let (t, page_dep) = field_text_on(instr, result, env.fields, env.fields.page_at(start));
                                         has_page_fields |= page_dep;
                                         b.shape_atomic(&t, start, end, &rc);
                                     }
@@ -1942,6 +1942,15 @@ fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u16, level: Optio
         if shift > 0.0 && slack > 0.0 {
             for v in xs.iter_mut().skip(align_from - c0) {
                 *v += shift;
+            }
+            // The list label belongs to the start of the line: it moves with the text (Word keeps
+            // the bullet attached when a list item is centred or aligned to the end). After a tab
+            // stop in the line the label stays, as the text before the tab does.
+            if first
+                && last_tab.is_none()
+                && let Some(lab) = pl.label.as_mut()
+            {
+                lab.x += shift;
             }
         }
         let justify = display.is_none() && ((rp.align == Align::Justify && end == LineEnd::Wrap) || rp.align == Align::Distribute);

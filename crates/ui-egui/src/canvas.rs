@@ -133,6 +133,11 @@ pub struct CanvasState {
     /// The last key ran an Alt shortcut: the text its key sends (it may arrive a frame later)
     /// isn't typed. The next key press clears it.
     pub(crate) swallow_text: bool,
+    /// Alt+numpad entry in progress: the digits typed while Alt is held (#961).
+    pub(crate) alt_code: String,
+    /// The character an Alt code just typed: if the platform also sends its own composed
+    /// character as text on the Alt release (Windows does), it isn't typed twice.
+    pub(crate) alt_code_echo: Option<crate::keys::AltCodeEcho>,
     /// Create Link is waiting for a click on the text box to link to: the linking box's object.
     pub(crate) link_from: Option<wordcraft_doc::Pos>,
     /// What screen readers were last told about the document (#488).
@@ -193,6 +198,8 @@ impl Default for CanvasState {
             mini_anchor: None,
             pasted: false,
             swallow_text: false,
+            alt_code: String::new(),
+            alt_code_echo: None,
             wheel: Default::default(),
             auto_scroll: Default::default(),
             scroll_offset: egui::Vec2::ZERO,
@@ -728,6 +735,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     // While "Save changes?" is up, keys answer it rather than edit the document behind it.
     if app.canvas.focused && !matches!(app.dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })) {
         crate::keys::canvas_events(app, ui.ctx());
+    } else {
+        // Alt+numpad entry doesn't survive the canvas losing the keyboard.
+        app.canvas.alt_code.clear();
     }
     crate::ink::replay_tick(app, ui.ctx());
     let layout = app.session.layout();
@@ -1231,9 +1241,20 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     if app.canvas.balloon.is_some() && ui.input(|i| i.pointer.any_pressed()) && resp.contains_pointer() && !in_balloon {
         deselect_balloon(app, ui.ctx());
     }
-    // Focus: the canvas takes keyboard focus on click and keeps Tab/arrows.
-    if resp.clicked() || resp.drag_started() || app.canvas.want_focus {
+    // Space and Enter also set `Response::clicked` on a focused click-sensing widget
+    // (egui's fake primary click). `request_focus` always interrupts IME; on X11 that
+    // destroys the XIM context and fcitx then drops every later key (#1169). A pointer
+    // click, an accessibility click, or a drag still takes focus, including a click on
+    // a canvas that already has it, so a composition commits. `want_focus` focuses only
+    // while the canvas does not, and does not interrupt an editor that already has it.
+    let keyboard_click = ui.memory(|m| m.has_focus(resp.id)) && ui.input(|i| i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Enter));
+    let pointer_click = resp.clicked_by(egui::PointerButton::Primary);
+    let accesskit_click = resp.clicked() && !pointer_click && !keyboard_click;
+    let focus_click = pointer_click || accesskit_click || resp.drag_started();
+    if focus_click || (app.canvas.want_focus && !resp.has_focus()) {
         resp.request_focus();
+    }
+    if focus_click || app.canvas.want_focus {
         app.canvas.want_focus = false;
     }
     if resp.has_focus() {
@@ -1813,20 +1834,26 @@ fn mouse(app: &mut WordApp, ui: &Ui, resp: &egui::Response, rects: &[Rect], layo
         app.canvas.dragging = false;
         return;
     }
-    // Double-click in the header/footer area edits it; double-click in the body leaves it.
+    // Double-click in the header/footer area edits it (creating it when the page has none, #960);
+    // double-click in the body leaves it. Print Layout only: the other views show no margins.
+    let hf_zone = if app.session.view.mode == wordcraft_layout::ViewMode::Print && !app.session.view.read_mode {
+        layout.header_footer_zone(page, y)
+    } else {
+        None
+    };
     if resp.double_clicked() {
-        if let Some((s, header)) = layout.header_footer_at(page, y)
+        if let Some((_, header)) = hf_zone
             && story == StoryRef::Body
         {
             let id = if header { "insert.editHeader" } else { "insert.editFooter" };
-            let _ = app.run(id, json!({}));
-            let _ = s;
-            if let Some(pos) = app.session.layout().hit(page, x, y, app.session.sel.focus.story) {
+            if app.run(id, json!({ "page": page })).is_ok()
+                && let Some(pos) = app.session.layout().hit(page, x, y, app.session.sel.focus.story)
+            {
                 app.session.sel = wordcraft_engine::Selection::caret(pos);
             }
             return;
         }
-        if matches!(story, StoryRef::Part(_)) && !in_text_box(app) && layout.header_footer_at(page, y).is_none() {
+        if matches!(story, StoryRef::Part(_)) && !in_text_box(app) && hf_zone.is_none() {
             let _ = app.run("insert.closeHeader", json!({}));
             if let Some(pos) = layout.hit(page, x, y, StoryRef::Body) {
                 app.session.sel = wordcraft_engine::Selection::caret(pos);
@@ -1856,8 +1883,8 @@ fn mouse(app: &mut WordApp, ui: &Ui, resp: &egui::Response, rects: &[Rect], layo
         app.canvas.last_press = Some((now, p, clicks));
         app.canvas.unit_drag = None;
         // A double-click that enters or leaves a header/footer is handled on release.
-        let hf_switch = (layout.header_footer_at(page, y).is_some() && story == StoryRef::Body)
-            || (matches!(story, StoryRef::Part(_)) && !in_text_box(app) && layout.header_footer_at(page, y).is_none());
+        let hf_switch =
+            (hf_zone.is_some() && story == StoryRef::Body) || (matches!(story, StoryRef::Part(_)) && !in_text_box(app) && hf_zone.is_none());
         // Clicking into a footnote/endnote or a text box edits it; clicking outside a text box goes
         // back to where it is. While editing a header/footer, only its own text boxes are in reach.
         let story = {
@@ -3156,6 +3183,77 @@ mod tests {
         assert_eq!(h.state().session.doc.plain_text(StoryRef::Part(part)), "Original");
     }
 
+    /// #960: double-clicking the top margin of a document without a header creates one and
+    /// edits it (the bottom margin: a footer), as in Word; typing goes into it, and
+    /// double-clicking the body leaves it. One left empty is taken away again.
+    #[test]
+    fn double_click_margin_creates_header_and_footer() {
+        use egui::{Event, PointerButton};
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        a.run("text.insert", json!({"text": "Body text"})).unwrap();
+        a.run("view.commentsPane", json!({"value": false})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 2200.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        for _ in 0..6 {
+            h.step();
+        }
+        let double_click = |h: &mut egui_kittest::Harness<'_, WordApp>, at: Pos2| {
+            h.event(Event::PointerMoved(at));
+            for _ in 0..2 {
+                h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers: Default::default() });
+                h.step();
+                h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers: Default::default() });
+                h.step();
+            }
+            // Let the double-click time pass before the next one.
+            for _ in 0..40 {
+                h.step();
+            }
+        };
+        let kind = |h: &egui_kittest::Harness<'_, WordApp>| part_kind(h.state(), h.state().session.sel.focus.story);
+        let page = h.state_mut().session.layout().pages[0].clone();
+        assert!(page.header_story.is_none() && page.footer_story.is_none());
+        let (x, top, bottom) = (page.body.x + 20.0, page.body.y / 2.0, (page.body.bottom() + page.h) / 2.0);
+        let body = page_to_screen(h.state_mut(), 0, x, page.body.y + 6.0).expect("body on screen");
+        // Top margin: a new header, the caret in it, typing goes there.
+        let at = page_to_screen(h.state_mut(), 0, x, top).expect("top margin on screen");
+        double_click(&mut h, at);
+        assert_eq!(kind(&h), Some(PartKind::Header), "editing a new header");
+        let header = h.state().session.sel.focus.story;
+        h.event(Event::Text("Running head".into()));
+        for _ in 0..3 {
+            h.step();
+        }
+        assert_eq!(h.state().session.doc.plain_text(header), "Running head");
+        assert_eq!(h.state().session.doc.plain_text(StoryRef::Body), "Body text");
+        // Double-click the body: back in it, the header kept.
+        double_click(&mut h, body);
+        assert_eq!(h.state().session.sel.focus.story, StoryRef::Body);
+        assert_eq!(h.state_mut().session.layout().pages[0].header_story.map(StoryRef::Part), Some(header));
+        // Bottom margin: a new footer; left empty, leaving takes it away again.
+        let at = page_to_screen(h.state_mut(), 0, x, bottom).expect("bottom margin on screen");
+        double_click(&mut h, at);
+        assert_eq!(kind(&h), Some(PartKind::Footer), "editing a new footer");
+        double_click(&mut h, body);
+        assert_eq!(h.state().session.sel.focus.story, StoryRef::Body);
+        assert!(h.state().session.doc.last_section.footers.default.is_none(), "the empty footer is gone");
+        // And a written footer stays.
+        double_click(&mut h, at);
+        let footer = h.state().session.sel.focus.story;
+        assert_eq!(kind(&h), Some(PartKind::Footer));
+        h.event(Event::Text("Page foot".into()));
+        h.step();
+        double_click(&mut h, body);
+        assert_eq!(h.state().session.sel.focus.story, StoryRef::Body);
+        assert_eq!(h.state().session.doc.plain_text(footer), "Page foot");
+    }
+
     /// #513: right-clicking a picture selects it and offers Wrap Text, as in Word; choosing
     /// Square there wraps text around it.
     #[test]
@@ -3679,6 +3777,52 @@ mod tests {
         // Hostile numbers never panic.
         let _ = collapse_white_space(&rects, &[(f32::NAN, f32::INFINITY), (-1e9, 1e9)], f32::NAN, f32::NAN);
         let _ = collapse_white_space(&[], &[], 1.0, 1.0);
+    }
+
+    /// #1169: Space and Enter count as `Response::clicked` on the focused canvas, and
+    /// `request_focus` always interrupts IME. On X11 that recreates the XIM context and
+    /// fcitx drops every later key. Those keys still type, and they must not set
+    /// `should_interrupt_composition`. A real pointer click still does, so a composition
+    /// commits when the caret moves.
+    #[test]
+    fn space_and_enter_on_the_canvas_do_not_interrupt_ime() {
+        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        app.run("document.setText", json!({"text": "The"})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..8 {
+            h.step();
+        }
+        assert!(h.state().canvas.focused, "the canvas takes focus when the window opens");
+        let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        let ime_interrupted =
+            |h: &egui_kittest::Harness<'_, WordApp>| h.output().platform_output.ime.as_ref().map(|ime| ime.should_interrupt_composition);
+        h.event(key(egui::Key::Space));
+        h.event(egui::Event::Text(" ".into()));
+        h.step();
+        assert_eq!(ime_interrupted(&h), Some(false), "space must not recreate the XIM context");
+        let text = h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body);
+        assert!(text.contains("The") && text.contains(' '), "the space is still inserted: {text:?}");
+        assert!(h.state().canvas.focused, "the canvas keeps the keyboard");
+        h.event(key(egui::Key::Enter));
+        h.step();
+        assert_eq!(ime_interrupted(&h), Some(false), "enter must not recreate the XIM context");
+        assert!(h.state().canvas.focused, "enter leaves the canvas focused");
+
+        let at = h.state().canvas.page_rects.first().map(|r| r.center()).expect("a page");
+        h.event(egui::Event::PointerMoved(at));
+        h.step();
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.step();
+        }
+        assert_eq!(ime_interrupted(&h), Some(true), "a click still interrupts composition");
     }
 
     fn page_at_index(rects: &[Rect], p: Pos2) -> Option<usize> {

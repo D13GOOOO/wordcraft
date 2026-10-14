@@ -1,6 +1,6 @@
 //! Working with fields like Word's field keys: show codes instead of results (Alt+F9, Shift+F9),
 //! edit a field's code, unlink a field to plain text (Ctrl+Shift+F9), lock and unlock it against
-//! updates (Ctrl+F11, Ctrl+Shift+F11) and move from field to field (F11, Shift+F11).
+//! updates (Ctrl+F11, Ctrl+Shift+F11) and move from field to field (Alt+F1, Shift+F11 / Alt+Shift+F1; F11 is full screen, #980).
 //!
 //! Two kinds of field are handled: a simple field ([`InlineObject::Field`], one object whose result
 //! is cached text) and a range field ([`InlineObject::FieldStart`] … [`InlineObject::FieldEnd`],
@@ -32,8 +32,10 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("fields.unlink", "Unlink Fields", "Insert › Text › Quick Parts", unlink).key("Mod+Shift+F9"),
         CommandSpec::new("fields.lock", "Lock Fields", "Insert › Text › Quick Parts", |s, _| set_locked(s, true)).key("Mod+F11"),
         CommandSpec::new("fields.unlock", "Unlock Fields", "Insert › Text › Quick Parts", |s, _| set_locked(s, false)).key("Mod+Shift+F11"),
-        CommandSpec::new("fields.next", "Next Field", "Insert › Text › Quick Parts", |s, _| go(s, true)).key("F11").pure(),
-        CommandSpec::new("fields.previous", "Previous Field", "Insert › Text › Quick Parts", |s, _| go(s, false)).key("Shift+F11").pure(),
+        CommandSpec::new("fields.next", "Next Field", "Insert › Text › Quick Parts", |s, _| go(s, true)).key("Alt+F1").pure(),
+        CommandSpec::new("fields.previous", "Previous Field", "Insert › Text › Quick Parts", |s, _| go(s, false))
+            .key("Shift+F11 / Alt+Shift+F1")
+            .pure(),
         CommandSpec::new("fields.selected", "Selected Fields", "Insert › Text › Quick Parts", |s, _| {
             Ok(Value::Array(selected(s).iter().map(|f| f.json()).collect()))
         })
@@ -231,7 +233,7 @@ fn unlink(s: &mut Session, _: &Value) -> CmdResult {
     Ok(json!({"fields": fields.len()}))
 }
 
-/// F11 / Shift+F11: select the next or previous field in the story (wrapping around).
+/// Alt+F1 / Shift+F11: select the next or previous field in the story (wrapping around).
 fn go(s: &mut Session, forward: bool) -> CmdResult {
     let (a, _) = s.sel.ordered();
     let all = story_fields(s, a.story);
@@ -311,8 +313,30 @@ mod tests {
         assert!(!page_text(&mut s).contains("{ AUTHOR }"));
     }
 
+    /// #980: F11 is full screen, as people expect of a desktop app; the field walk keeps Word's
+    /// other keys, Alt+F1 and Alt+Shift+F1 (and Shift+F11).
+    #[test]
+    fn f11_is_full_screen_and_alt_f1_walks_fields() {
+        let s = Session::new(wordcraft_doc::Document::new());
+        let key = |k: &str| s.keymap.resolve(&s.registry, k).map(|c| c.id);
+        assert_eq!(key("F11"), Some("view.fullScreen"));
+        assert_eq!(key("Alt+F1"), Some("fields.next"));
+        assert_eq!(key("Alt+Shift+F1"), Some("fields.previous"));
+        assert_eq!(key("Shift+F11"), Some("fields.previous"));
+        assert_eq!(key("Mod+F11"), Some("fields.lock"));
+        // ⌃⌘F is macOS' own full-screen key; elsewhere Mod is Ctrl, so "Mod+Ctrl+F" would read
+        // Ctrl+Ctrl+F: F11 only there.
+        let shortcut = s.registry.get("view.fullScreen").map(|c| c.shortcut);
+        if cfg!(target_os = "macos") {
+            assert_eq!(shortcut, Some("Mod+Ctrl+F / F11"));
+            assert_eq!(key("Mod+Ctrl+F"), Some("view.fullScreen"));
+        } else {
+            assert_eq!(shortcut, Some("F11"));
+        }
+    }
+
     /// Editing a code changes the instruction and the result; lock keeps a result through updates;
-    /// unlink turns the field into its text in one undo step; F11/Shift+F11 walk the fields.
+    /// unlink turns the field into its text in one undo step; Alt+F1/Shift+F11 walk the fields.
     #[test]
     fn edit_lock_unlink_and_walk_fields() {
         let mut s = session_with_fields();

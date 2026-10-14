@@ -1938,6 +1938,32 @@ fn toc_page_numbers_follow_headings() {
     }
 }
 
+/// Headings numbered through a list carry their numbers, and the level's separator, into the
+/// TOC entries.
+#[test]
+fn toc_entries_carry_heading_numbers() {
+    let mut s = s();
+    run(&mut s, "references.toc", json!({}));
+    run(&mut s, "caret.docEnd", json!({}));
+    for name in ["Alpha", "Bravo"] {
+        run(&mut s, "text.pageBreak", json!({}));
+        run(&mut s, "text.insert", json!({"text": name}));
+        run(&mut s, "para.heading1", json!({}));
+        run(&mut s, "text.newParagraph", json!({}));
+    }
+    let num = s.doc.numbering.add_list(wordcraft_doc::ListKind::Numbered);
+    for b in s.doc.body.iter_mut() {
+        if let wordcraft_doc::Block::Para(p) = std::sync::Arc::make_mut(b)
+            && p.props.style.as_deref() == Some("Heading1")
+        {
+            p.props.numbering = Some(wordcraft_doc::props::NumRef { num, level: 0 });
+        }
+    }
+    run(&mut s, "references.updateToc", json!({}));
+    let t = text(&s);
+    assert!(t.contains("1.\tAlpha\t2") && t.contains("2.\tBravo\t3"), "{t}");
+}
+
 /// A heading above the TOC keeps its index when the entries go in below it, so its page is read
 /// where it is, not `entries` blocks further down.
 #[test]

@@ -480,7 +480,7 @@ pub fn check_spelling(text: &str) -> Vec<Issue> {
 
 /// [`check_spelling`] with the File › Options › Proofing choices.
 pub fn check_spelling_with(text: &str, opts: &Options) -> Vec<Issue> {
-    words(text).into_iter().filter_map(|(a, b)| spelling_issue(text, a, b, ProofLang::En, opts)).collect()
+    spelling_issues(text, |_| ProofLang::En, opts)
 }
 
 /// Spelling issues in a paragraph of text in `lang` (none for a language without a dictionary;
@@ -489,17 +489,42 @@ pub fn check_spelling_in(text: &str, lang: ProofLang) -> Vec<Issue> {
     if !lang.is_proofed() {
         return Vec::new();
     }
-    words(text).into_iter().filter_map(|(a, b)| spelling_issue(text, a, b, lang, &Options::default())).collect()
+    spelling_issues(text, |_| lang, &Options::default())
 }
 
-/// The spelling issue of the word at `a..b` of `text`, if it is misspelled in `lang`. Words in
-/// web and e-mail addresses are skipped (unless `opts` says otherwise).
-fn spelling_issue(text: &str, a: usize, b: usize, lang: ProofLang, opts: &Options) -> Option<Issue> {
-    let w = text.get(a..b)?;
+/// Spelling issues of every word of `text`, each word spelled in `lang(word_start)`.
+///
+/// The web/e-mail classification of the whitespace-delimited token around a word is computed
+/// once per token and shared by every word punctuation splits out of it. Classifying per word
+/// rescanned the token each time, so a long whitespace-free run of punctuation-separated words
+/// cost quadratic scanning (#1335).
+fn spelling_issues(text: &str, lang: impl Fn(usize) -> ProofLang, opts: &Options) -> Vec<Issue> {
+    let mut token = (0, 0, false);
+    words(text)
+        .into_iter()
+        .filter_map(|(a, b)| {
+            if a < token.0 || a >= token.1 {
+                token = enclosing_token(text, a, b);
+            }
+            spelling_issue(text, a, b, lang(a), opts, token.2)
+        })
+        .collect()
+}
+
+/// The whitespace-delimited token enclosing the word at `a..b` of `text`: its byte range, and
+/// whether it looks like a web or e-mail address.
+fn enclosing_token(text: &str, a: usize, b: usize) -> (usize, usize, bool) {
     let ts = text.get(..a).and_then(|t| t.rfind(char::is_whitespace)).map(|i| i + 1).unwrap_or(0);
     let te = text.get(b..).and_then(|t| t.find(char::is_whitespace)).map(|i| b + i).unwrap_or(text.len());
     let token = text.get(ts..te).unwrap_or("");
-    let internet = token.contains("://") || token.contains('@') || token.starts_with("www.");
+    (ts, te, token.contains("://") || token.contains('@') || token.starts_with("www."))
+}
+
+/// The spelling issue of the word at `a..b` of `text`, if it is misspelled in `lang`. Words in
+/// web and e-mail addresses are skipped (unless `opts` says otherwise); `internet` is the
+/// classification of the word's enclosing token, from [`enclosing_token`].
+fn spelling_issue(text: &str, a: usize, b: usize, lang: ProofLang, opts: &Options, internet: bool) -> Option<Issue> {
+    let w = text.get(a..b)?;
     if (opts.ignore_internet && internet) || is_correct_in_with(w, lang, opts) {
         return None;
     }
@@ -583,7 +608,7 @@ pub fn check_text_with(text: &str, spans: &[(Range<usize>, ProofLang)], opts: &O
         let k = merged.partition_point(|(r, _)| r.end <= i);
         merged.get(k).filter(|(r, _)| r.start <= i).map_or(ProofLang::En, |s| s.1)
     };
-    let mut v: Vec<Issue> = words(text).into_iter().filter_map(|(a, b)| spelling_issue(text, a, b, lang_at(a), opts)).collect();
+    let mut v: Vec<Issue> = spelling_issues(text, lang_at, opts);
     if !grammar {
         v.sort_by_key(|i| (i.start, i.end));
         return v;
@@ -801,6 +826,45 @@ mod tests {
         let v = check_spelling(t);
         let bad: Vec<&str> = v.iter().map(|i| &t[i.start..i.end]).collect();
         assert_eq!(bad, vec!["sentense", "mispelled"]);
+    }
+
+    #[test]
+    fn address_token_covers_every_word_split_out_of_it() {
+        // #1335: one whitespace-delimited token, however punctuation splits it, has one
+        // web/e-mail classification, shared by all its words.
+        let t = "zxq@mail.example.com,blorp;qwirpy wugwug";
+        let bad: Vec<&str> = check_spelling(t).iter().map(|i| &t[i.start..i.end]).collect();
+        assert_eq!(bad, vec!["wugwug"]);
+        let opts = Options { ignore_internet: false, ..Options::default() };
+        let bad: Vec<&str> = check_spelling_with(t, &opts).iter().map(|i| &t[i.start..i.end]).collect();
+        assert_eq!(bad.first(), Some(&"zxq"), "{bad:?}");
+        assert!(bad.contains(&"qwirpy"), "{bad:?}");
+        assert_eq!(bad.last(), Some(&"wugwug"), "{bad:?}");
+    }
+
+    #[test]
+    fn spelling_scales_over_one_long_token() {
+        // #1335: thousands of punctuation-separated words inside a single
+        // whitespace-free token: one classification for the token, one issue per
+        // misspelled word, through every public spelling entry point.
+        let word = |i: usize| {
+            let mut w = String::from("zxq");
+            let mut n = i;
+            loop {
+                w.push((b'a' + (n % 26) as u8) as char);
+                n /= 26;
+                if n == 0 {
+                    break;
+                }
+            }
+            w
+        };
+        let t = (0..2000).map(word).collect::<Vec<_>>().join(",");
+        assert_eq!(check_spelling(&t).len(), 2000);
+        assert_eq!(check_spelling_in(&t, ProofLang::En).len(), 2000);
+        let opts = Options { ignore_internet: false, ..Options::default() };
+        assert_eq!(check_spelling_with(&t, &opts).len(), 2000);
+        assert_eq!(check_text(&t, &[]).into_iter().filter(|i| i.kind == IssueKind::Spelling).count(), 2000);
     }
 
     #[test]
