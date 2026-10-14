@@ -107,7 +107,12 @@ pub fn specs() -> Vec<CommandSpec> {
             let b = p::f32(v, "brightness").unwrap_or(0.0).clamp(-100.0, 100.0);
             let c = p::f32(v, "contrast").unwrap_or(0.0).clamp(-100.0, 100.0);
             let sharpen = p::f32(v, "sharpen").unwrap_or(0.0).clamp(-100.0, 100.0);
-            adjust(s, move |img| {
+            // Absolute from the original (like transparency): re-setting all three to 0
+            // restores the original pixels instead of stacking on the last pass.
+            let (_, o) = selected(s).ok_or_else(|| CmdError::Disabled("no picture".into()))?;
+            let InlineObject::Image { media, .. } = o else { return Err(CmdError::Disabled("not a picture".into())) };
+            let base = s.originals.get(&media).cloned().unwrap_or(media.clone());
+            adjust_media(s, &base, move |img| {
                 let mut img = img;
                 if b != 0.0 {
                     img = image::DynamicImage::ImageRgba8(image::imageops::colorops::brighten(&img, (b * 2.55) as i32));
@@ -128,7 +133,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("picture.color", "Color", "Picture Format › Adjust", |s, v| {
             let mode = p::str(v, "mode").unwrap_or("grayscale").to_string();
             let sat = p::f32(v, "saturation").unwrap_or(100.0);
-            adjust(s, move |img| recolor(img, &mode, sat))
+            // Absolute from the original (like transparency): saturation 100 restores it.
+            let (_, o) = selected(s).ok_or_else(|| CmdError::Disabled("no picture".into()))?;
+            let InlineObject::Image { media, .. } = o else { return Err(CmdError::Disabled("not a picture".into())) };
+            let base = s.originals.get(&media).cloned().unwrap_or(media.clone());
+            adjust_media(s, &base, move |img| recolor(img, &mode, sat))
         })
         .params(r#"{"mode": "grayscale|sepia|washout|blackAndWhite|saturation|tint", "saturation"?: 0..400}"#)
         .when(has_picture),
@@ -176,7 +185,15 @@ pub fn specs() -> Vec<CommandSpec> {
         .when(has_picture),
         CommandSpec::new("picture.transparency", "Transparency", "Picture Format › Adjust", |s, v| {
             let t = p::f32(v, "percent").unwrap_or(50.0).clamp(0.0, 100.0);
-            adjust(s, move |img| {
+            // Absolute, not compounding: 0% is always the original pixels fully opaque.
+            // The base is the pre-edit original (kept for Reset Picture), so dragging a
+            // slider back and forth never fades what a previous pass already faded.
+            // (Combining with other pixel edits then re-setting transparency drops those
+            // edits; a full live-effect stack is future work.)
+            let (_, o) = selected(s).ok_or_else(|| CmdError::Disabled("no picture".into()))?;
+            let InlineObject::Image { media, .. } = o else { return Err(CmdError::Disabled("not a picture".into())) };
+            let base = s.originals.get(&media).cloned().unwrap_or(media.clone());
+            adjust_media(s, &base, move |img| {
                 let mut rgba = img.to_rgba8();
                 for px in rgba.pixels_mut() {
                     px.0[3] = (px.0[3] as f32 * (1.0 - t / 100.0)) as u8;
@@ -964,7 +981,14 @@ fn size(s: &mut Session, v: &Value) -> CmdResult {
 fn adjust(s: &mut Session, f: impl Fn(image::DynamicImage) -> image::DynamicImage) -> CmdResult {
     let (_, o) = selected(s).ok_or_else(|| CmdError::Disabled("no picture".into()))?;
     let InlineObject::Image { media, .. } = o else { return Err(CmdError::Disabled("not a picture".into())) };
-    let bytes = s.doc.media.get(&media).cloned().ok_or_else(|| CmdError::Failed("picture data missing".into()))?;
+    adjust_media(s, &media, f)
+}
+
+/// Like [`adjust`], but decodes `base` (a media key, usually the pre-edit original) instead
+/// of the picture's current bitmap. The result still chains onto the originals map, so Reset
+/// Picture keeps working.
+fn adjust_media(s: &mut Session, base: &str, f: impl Fn(image::DynamicImage) -> image::DynamicImage) -> CmdResult {
+    let bytes = s.doc.media.get(base).cloned().ok_or_else(|| CmdError::Failed("picture data missing".into()))?;
     let img = image::load_from_memory(&bytes).map_err(|e| CmdError::Failed(format!("can't decode the picture: {e}")))?;
     if (img.width() as u64) * (img.height() as u64) > 80_000_000 {
         return Err(CmdError::Failed("picture is too large to edit".into()));
@@ -973,7 +997,18 @@ fn adjust(s: &mut Session, f: impl Fn(image::DynamicImage) -> image::DynamicImag
     let mut png = Vec::new();
     out.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).map_err(|e| CmdError::Failed(e.to_string()))?;
     let key = s.doc.add_media(png, "png");
-    let orig = s.originals.get(&media).cloned().unwrap_or(media.clone());
+    // Chain onto the ultimate original (the base's, or the current picture's when the base
+    // is itself derived), so Reset Picture always finds it.
+    let cur = selected(s).and_then(|(_, o)| match o {
+        InlineObject::Image { media, .. } => Some(media),
+        _ => None,
+    });
+    let orig = s
+        .originals
+        .get(base)
+        .cloned()
+        .or_else(|| cur.as_ref().and_then(|m| s.originals.get(m).cloned()))
+        .unwrap_or_else(|| cur.clone().unwrap_or_else(|| key.clone()));
     s.originals.entry(key.clone()).or_insert(orig);
     with_obj(s, |o| {
         if let InlineObject::Image { media, .. } = o {
@@ -1479,6 +1514,47 @@ mod tests {
         s.run("select.collapse", &json!({"end": true})).unwrap();
         s.run("text.insert", &json!({"text": "x"})).unwrap();
         assert!(s.run("picture.crop", &json!({"left": 0.1})).is_err());
+    }
+
+    /// Transparency is absolute from the original pixels: 80% then 0% is opaque again
+    /// (it used to stay faded), and repeating a value is idempotent. Corrections and color
+    /// re-set the same way: brightness 0 and saturation 100 restore the original.
+    #[test]
+    fn transparency_is_absolute_from_the_original() {
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        let data = super::super::insert::base64_encode(&png(20, 10));
+        s.run("insert.picture", &json!({"data": data})).unwrap();
+        let rgba = |s: &Session| {
+            let (_, o) = selected(s).unwrap();
+            let InlineObject::Image { media, .. } = o else { panic!("a picture") };
+            let bytes = s.doc.media.get(&media).cloned().unwrap();
+            image::load_from_memory(&bytes).unwrap().to_rgba8().pixels().map(|p| p.0).collect::<Vec<_>>()
+        };
+        let alpha = |s: &Session| rgba(s).iter().map(|p| p[3]).collect::<Vec<_>>();
+        let orig = rgba(&s);
+        assert!(orig.iter().all(|p| p[3] == 255));
+        s.run("picture.transparency", &json!({"percent": 80})).unwrap();
+        assert!(alpha(&s).iter().all(|&a| a == 50), "255 * 0.2 truncated");
+        s.run("picture.transparency", &json!({"percent": 0})).unwrap();
+        assert_eq!(rgba(&s), orig, "back to opaque");
+        s.run("picture.transparency", &json!({"percent": 50})).unwrap();
+        let once = rgba(&s);
+        assert!(once.iter().all(|p| p[3] == 127), "255 * 0.5");
+        s.run("picture.transparency", &json!({"percent": 50})).unwrap();
+        assert_eq!(rgba(&s), once, "repeating is idempotent");
+        s.run("picture.corrections", &json!({"brightness": 20})).unwrap();
+        assert_ne!(rgba(&s), orig);
+        s.run("picture.corrections", &json!({"brightness": 0})).unwrap();
+        assert_eq!(rgba(&s), orig, "brightness 0 restores the original");
+        s.run("picture.color", &json!({"mode": "saturation", "saturation": 0})).unwrap();
+        assert!(rgba(&s).iter().all(|p| p[0] == p[1] && p[1] == p[2]), "grayscale");
+        s.run("picture.color", &json!({"mode": "saturation", "saturation": 100})).unwrap();
+        assert!(
+            rgba(&s).iter().zip(orig.iter()).all(|(a, b)| a.iter().zip(b.iter()).all(|(x, y)| (*x as i16 - *y as i16).abs() <= 2)),
+            "saturation 100 restores within float rounding"
+        );
+        s.run("picture.reset", &json!({})).unwrap();
+        assert_eq!(rgba(&s), orig, "reset still finds the original");
     }
 
     /// #513: Wrap Text › Fix Position on Page / Move with Text re-anchor a floating picture

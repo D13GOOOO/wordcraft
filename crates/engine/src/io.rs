@@ -107,6 +107,22 @@ pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<Document, String> {
 /// whether the file was encrypted. Without the password needed the error satisfies
 /// [`needs_password`]; with a wrong one, [`wrong_password`].
 pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>) -> Result<(Document, bool), String> {
+    let (doc, encrypted) = read_bytes(name, bytes, password)?;
+    load_embedded_fonts(&doc);
+    Ok((doc, encrypted))
+}
+
+/// Load the fonts `doc` embeds (#1171) for this run, in memory only: text set in a font that isn't
+/// installed then lays out and exports with it instead of a fallback. Faces already available
+/// stay as they are.
+fn load_embedded_fonts(doc: &Document) {
+    let files: Vec<Vec<u8>> = wordcraft_docx::embedded_fonts(doc).iter().filter_map(|f| wordcraft_fonts::decode_font_file(f).ok()).collect();
+    if !files.is_empty() {
+        wordcraft_fonts::FontDb::global().add_document_fonts(files);
+    }
+}
+
+fn read_bytes(name: &str, bytes: &[u8], password: Option<&str>) -> Result<(Document, bool), String> {
     let ext = ext_of(name);
     if matches!(ext.as_str(), "docx" | "docm" | "dotx" | "dotm" | "doc" | "dot") && wordcraft_docx::is_encrypted(bytes) {
         let mut doc = wordcraft_docx::read_with_password(bytes, password).map_err(|e| e.to_string())?;
@@ -404,6 +420,18 @@ pub fn read_file_capped(path: &str, max: u64, what: &str) -> Result<Vec<u8>, Str
         return Err(format!("{path}: the {what} is larger than {} MB", max >> 20));
     }
     std::fs::read(path).map_err(|e| format!("{path}: {e}"))
+}
+
+/// The first `max` bytes of the file at `path` (fewer when it is shorter), inside the automation
+/// read root when there is one: enough to tell a file's format by its start.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn read_file_head(path: &str, max: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    crate::file_access::check_read(path)?;
+    let f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut head = Vec::new();
+    f.take(max).read_to_end(&mut head).map_err(|e| format!("{path}: {e}"))?;
+    Ok(head)
 }
 
 /// Write `bytes` to the file at `path`, inside the automation write root when there is one.

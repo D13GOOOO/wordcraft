@@ -1385,6 +1385,7 @@
 	Remove every custom shortcut and restore the built-in keys?	Usunąć wszystkie niestandardowe skróty i przywrócić wbudowane klawisze?
 	Reset All…	Resetuj wszystko…
 	Toggle Unicode Character	Przełącz znak Unicode
+	Type Character Code	Wpisz kod znaku
 	(Custom)	(Niestandardowe)
 	<< Remove	<< Usuń
 	Add >>	Dodaj >>
@@ -1569,6 +1570,7 @@
 	Ionosphere	Jonosfera
 	Issue	Numer
 	Italian	Włoski
+	Croatian	Chorwacki
 	Japanese	Japoński
 	Journal	Czasopismo naukowe
 	Korean	Koreański
@@ -2155,15 +2157,6 @@ preview	Title	Tytuł
 	DRAFT	WERSJA ROBOCZA
 	SAMPLE	WZÓR
 	URGENT	PILNE
-	Letter   8.50" × 11.00"	Letter   8,50" × 11,00"
-	Legal   8.50" × 14.00"	Legal   8,50" × 14,00"
-	Executive   7.25" × 10.50"	Executive   7,25" × 10,50"
-	Statement   5.50" × 8.50"	Statement   5,50" × 8,50"
-	Tabloid   11.00" × 17.00"	Tabloid   11,00" × 17,00"
-	B4 (JIS)   10.12" × 14.33"	B4 (JIS)   10,12" × 14,33"
-	B5 (JIS)   7.17" × 10.12"	B5 (JIS)   7,17" × 10,12"
-	Envelope #10   4.12" × 9.50"	Koperta nr 10   4,12" × 9,50"
-	Envelope DL   4.33" × 8.66"	Koperta DL   4,33" × 8,66"
 	Plain Table 1	Prosta tabela 1
 	Grid Table 1 Light	Tabela z siatką 1 — jasna
 	Grid Table 4 – Blue	Tabela z siatką 4 — niebieska
@@ -2478,3 +2471,30 @@ preview	Title	Tytuł
 	Leave out the date and time of comments and tracked changes when saving	Pomiń datę i godzinę komentarzy i śledzonych zmian przy zapisywaniu
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	Edytowany dokument zachowuje nazwiska i daty; pomija je tylko zapisany plik.
 	Privacy Settings	Bieżące ustawienia prywatności
+	Full Screen	Pełny ekran
+	Full\nScreen	Pełny\nekran
+	Use the browser's full screen (F11)	Użyj trybu pełnoekranowego przeglądarki (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} cala
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}, {columns} × {rows}, {size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	Badacz wymaga usługi online, a WordCraft przechowuje Twoje dokumenty offline.
+	These settings will be used for new documents.	Te ustawienia będą używane w nowych dokumentach.
+	can't split at the first row	nie można podzielić tabeli na pierwszym wierszu
+	select two or more cells to merge	zaznacz co najmniej dwie komórki do scalenia
+	there is no ink to replay	brak pisma odręcznego do odtworzenia
+	there's no citation after the caret	za kursorem nie ma cytatu
+	this item is already at the top level	ten element jest już na najwyższym poziomie
+	Envelope #10	Koperta nr 10
+	Envelope DL	Koperta DL
+	Reading Mode	Tryb czytania
+	Column width	Szerokość kolumny
+	Text size	Rozmiar tekstu
+	Edit Document	Edytuj dokument
+	Go to what:	Przejdź do:
+	Type +2 or -1 to move from the page you are on.	Wpisz +2 lub -1, aby przejść o tyle stron od bieżącej.
+	Suggested	Sugerowane
+	Set Proofing Language…	Ustaw język sprawdzania…
+	Language Preferences…	Preferencje językowe…
