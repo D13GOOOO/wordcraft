@@ -9,9 +9,9 @@
 //!
 //! Import: a tolerant reader for groups and destinations (unknown `\*` destinations, headers,
 //! footers, notes and objects are skipped), `\par \line \tab \page`, `\uN` with `\ucN`
-//! fallback skipping, `\'hh` and 8-bit text in the document's code page (`\ansicpg`) or the
-//! current font's (`\fcharset`, `\cpg`: Cyrillic, Central European, Greek…; Windows-1252 when
-//! none is named), the formatting words above, stylesheet-based
+//! fallback skipping, `\'hh` and 8-bit text in the document's code page (`\ansicpg`, `\mac`) or
+//! the current font's (`\fcharset`, `\cpg`: Cyrillic, Central European, Greek, Mac OS Roman…;
+//! Windows-1252 when none is named), the formatting words above, stylesheet-based
 //! headings and `\outlinelevel`, lists through `\ls`/`\ilvl`, fields, bookmarks, pictures and
 //! tables. Group nesting and picture sizes are capped.
 
@@ -1383,6 +1383,8 @@ impl Reader {
                     self.ansicpg = pv as u16;
                 }
             }
+            // The Macintosh character set: 8-bit text is Mac OS Roman (#1653).
+            "mac" if self.ansicpg == 0 => self.ansicpg = 10000,
             "deff" => self.deff = pv,
             "f" => {
                 self.st.cp = self.font_cps.get(&pv).copied();
@@ -2019,6 +2021,12 @@ mod tests {
         // Raw 8-bit text (not escaped) follows the same code page.
         let f = parse(b"{\\rtf1\\ansi\\ansicpg1251 \xc4\xee\xec\\par}").unwrap();
         assert_eq!(texts(&f), ["Normal:Дом"]);
+        // #1653: a Macintosh document (LibreOffice's fdo85889-mac.rtf) is Mac OS Roman, and so is
+        // a font with the Mac charset in a Windows document.
+        let f = parse(br"{\rtf1\mac \deff0{\fonttbl{\f0\fmodern Helvetica;}}\pard\f0\fs20 \'f1\'f2\'f3\par}").unwrap();
+        assert_eq!(texts(&f), ["Normal:ÒÚÛ"]);
+        let f = parse(br"{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}{\f1\fcharset77 Geneva;}}caf\'e9 {\f1 caf\'8e \'d2ok\'d3}\par}").unwrap();
+        assert_eq!(texts(&f), ["Normal:café café “ok”"]);
     }
 
     #[test]
