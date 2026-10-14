@@ -405,8 +405,10 @@ fn shape_effects(s: &mut Surface, kind: ShapeKind, rect: &Rect, fx: &wordcraft_d
 }
 
 /// Outline of a basic shape in a rectangle (same geometry as the raster renderer).
+/// A line or connector may be flat (zero width or height: horizontal or vertical), not both.
 fn shape_path(kind: ShapeKind, r: &Rect) -> Option<Path> {
-    if !(ok(r.x) && ok(r.y) && ok(r.w) && ok(r.h)) || r.w <= 0.0 || r.h <= 0.0 {
+    let flat_ok = kind.is_open() && r.w.max(r.h) > 0.0 && r.w.min(r.h) >= 0.0;
+    if !(ok(r.x) && ok(r.y) && ok(r.w) && ok(r.h)) || !(flat_ok || r.w > 0.0 && r.h > 0.0) {
         return None;
     }
     let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.w, r.y + r.h);

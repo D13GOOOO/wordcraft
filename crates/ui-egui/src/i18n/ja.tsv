@@ -1409,6 +1409,7 @@
 	Demote	レベル下げ
 	Go Back	前の編集位置に戻る
 	Toggle Unicode Character	Unicode 文字の切り替え
+	Type Character Code	文字コードの入力
 	Toggle Field Codes	フィールドコードの表示切り替え
 	Edit Field Code	フィールドコードの編集
 	Unlink Fields	フィールドのリンク解除
@@ -2029,6 +2030,7 @@
 	Hyphenation Options…	ハイフネーションのオプション…
 	Hyphenation zone:	ハイフネーション領域:
 	Italian	イタリア語
+	Croatian	クロアチア語
 	Japanese	日本語
 	Korean	韓国語
 	Limit consecutive hyphens to:	連続するハイフンの上限:
@@ -2085,3 +2087,30 @@
 	Leave out the date and time of comments and tracked changes when saving	保存時にコメントと変更履歴の日時を含めない
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	編集中のドキュメントには名前と日時が残ります。保存したファイルにだけ含まれません。
 	Privacy Settings	現在のプライバシー設定
+	Full Screen	全画面表示
+	Full\nScreen	全画面\n表示
+	Use the browser's full screen (F11)	ブラウザーの全画面表示を使用してください (F11)
+
+# #1128: size labels (Mailings, Layout › Size), status-bar messages, Reading Mode and Go To
+	{name}   {height} × {width} in	{name}   {height} × {width} インチ
+	{name}   {height} × {width} mm	{name}   {height} × {width} mm
+	{width} × {height} mm	{width} × {height} mm
+	{kind}, {columns} × {rows}, {size} ({paper})	{kind}、{columns} × {rows}、{size} ({paper})
+	Researcher needs an online service; WordCraft keeps your documents offline.	リサーチツールにはオンライン サービスが必要です。WordCraft では文書はオフラインのままです。
+	These settings will be used for new documents.	これらの設定は新しい文書に使用されます。
+	can't split at the first row	先頭の行では表を分割できません
+	select two or more cells to merge	結合するセルを 2 つ以上選択してください
+	there is no ink to replay	再生するインクがありません
+	there's no citation after the caret	カーソルの後に引用文献がありません
+	this item is already at the top level	この項目は既に最上位レベルです
+	Envelope #10	封筒 #10
+	Envelope DL	封筒 DL
+	Reading Mode	閲覧モード
+	Column width	列の幅
+	Text size	文字サイズ
+	Edit Document	文書の編集
+	Go to what:	移動先:
+	Type +2 or -1 to move from the page you are on.	現在のページから移動するには +2 や -1 のように入力します。
+	Suggested	おすすめ
+	Set Proofing Language…	校正言語の設定…
+	Language Preferences…	言語の設定…

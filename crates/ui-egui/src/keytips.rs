@@ -333,6 +333,7 @@ fn controls(tab: &str) -> Vec<Control> {
             c("New Window", "view.newWindow"),
             c("Arrange All", "view.arrangeAll"),
             c("Split", "view.split"),
+            c("Full Screen", "view.fullScreen"),
             c("Macros", "tools.macros"),
         ],
         "Help" => vec![d("Help", "about"), c("Community Discord", "ui.discord"), d("Commands", "commands")],
