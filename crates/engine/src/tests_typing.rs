@@ -52,7 +52,17 @@ fn typed(keys: &str) -> Session {
 #[test]
 fn sample_text_formulas_expand_on_enter() {
     for name in ["rand", "lorem"] {
-        for (args, paragraphs, sentences) in [("", 5, 3), ("2", 2, 3), ("2,4", 2, 4), ("1,1", 1, 1), ("200,1", 200, 1), ("1,200", 1, 200)] {
+        for (args, paragraphs, sentences) in [
+            ("", 5, 3),
+            ("2", 2, 3),
+            (" 2 ", 2, 3),
+            ("2,4", 2, 4),
+            ("2, 4", 2, 4),
+            (" 2 , 4 ", 2, 4),
+            ("1,1", 1, 1),
+            ("200,1", 200, 1),
+            ("1,200", 1, 200),
+        ] {
             let mut s = typed(&format!("={name}({args})"));
             let depth = s.undo_depth();
             typ(&mut s, "\n");
@@ -357,8 +367,8 @@ fn web_addresses_become_links() {
 
 #[test]
 fn dashes() {
-    let s = typed("a -- b and c - d and e--f ");
-    assert_eq!(s.doc.plain_text(StoryRef::Body), "A – b and c – d and e—f ");
+    let s = typed("a -- b and c - d and e--f and café--g ");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "A – b and c – d and e—f and café—g ");
 }
 
 #[test]
@@ -720,6 +730,34 @@ fn alt_shift_left_and_right_promote_and_demote_headings_and_list_items() {
 }
 
 #[test]
+fn down_and_up_from_a_line_start_beside_a_table_go_into_it() {
+    let mut s = typed("Intro line\n");
+    run(&mut s, "insert.table", json!({"rows": 2, "cols": 2}));
+    let (table, _, _) = s.sel.focus.path.cell().unwrap();
+    typ(&mut s, "a");
+    let cell = |r: u32, c: u32| {
+        let mut p = table.0.clone();
+        p.extend([r, c, 0]);
+        wordcraft_doc::Path(p)
+    };
+    // From the start of the line above, left of the cells' text: the first cell, then the one
+    // below, not the paragraph after the table.
+    run(&mut s, "caret.docStart", json!({}));
+    run(&mut s, "caret.down", json!({}));
+    assert_eq!(s.sel.focus.path, cell(0, 0));
+    run(&mut s, "caret.down", json!({}));
+    assert_eq!(s.sel.focus.path, cell(1, 0), "then the cell below");
+    // Up from the start of the paragraph after it: the last row's first cell.
+    run(&mut s, "caret.docEnd", json!({}));
+    run(&mut s, "caret.up", json!({}));
+    assert_eq!(s.sel.focus.path, cell(1, 0));
+    // Shift+Down from the line above takes the first row, not the whole table.
+    run(&mut s, "caret.docStart", json!({}));
+    run(&mut s, "caret.down", json!({"extend": true}));
+    assert_eq!(s.sel.focus.path, cell(0, 1));
+}
+
+#[test]
 fn alt_x_toggles_between_a_character_and_its_code() {
     if !cfg!(target_os = "macos") {
         assert_eq!(s().registry.by_shortcut("Alt+X").map(|c| c.id), Some("text.toggleUnicode"));
@@ -851,6 +889,29 @@ fn shift_f5_goes_back_through_the_last_edits() {
     assert_eq!(back(), Pos::body(0, 3));
     assert_eq!(back(), Pos::body(2, 5), "then round again");
     assert!(Session::new(wordcraft_doc::Document::new()).run("edit.goBack", &json!({})).is_err(), "nothing edited yet");
+}
+
+#[test]
+fn shift_right_at_the_end_of_a_cell_selects_the_cell_first() {
+    let mut s = s();
+    run(&mut s, "insert.table", json!({"rows": 2, "cols": 2}));
+    let (table, _, _) = s.sel.focus.path.cell().unwrap();
+    typ(&mut s, "ab");
+    run(&mut s, "caret.left", json!({}));
+    let shift_right = |s: &mut Session| {
+        run(s, "caret.right", json!({"extend": true}));
+        s.cell_range().map(|r| (r.rows, r.cols))
+    };
+    assert_eq!(shift_right(&mut s), None, "the letter first");
+    assert_eq!((s.sel.anchor.off, s.sel.focus.off), (1, 2));
+    assert_eq!(shift_right(&mut s), Some(((0, 0), (0, 0))), "then the cell alone");
+    assert_eq!(shift_right(&mut s), Some(((0, 0), (0, 1))), "then the next cell with it");
+    // In an empty cell the first press takes it.
+    let mut empty = table.0.clone();
+    empty.extend([1, 0, 0]);
+    let pos = Pos { story: StoryRef::Body, path: wordcraft_doc::Path(empty), off: 0 };
+    run(&mut s, "caret.set", json!({"pos": pos}));
+    assert_eq!(shift_right(&mut s), Some(((1, 1), (0, 0))));
 }
 
 #[test]
@@ -1016,6 +1077,43 @@ fn typing_rtl_letters_into_an_empty_paragraph_makes_it_rtl() {
     assert!(x < 300.0, "left-to-right paragraph: caret at {x}");
 }
 
+/// Select All then Delete or Backspace empties the document, tables included (Word, #1198):
+/// whether the text starts with a table or with a paragraph.
+#[test]
+fn select_all_then_delete_removes_tables() {
+    let tables = |s: &Session| s.doc.body.iter().filter(|b| b.as_table().is_some()).count();
+    // With the caret in a table, Select All grows the selection a step at a time (cell, row,
+    // table, document; #1478): press it until the whole document is selected.
+    let select_whole_document = |s: &mut Session| {
+        for _ in 0..6 {
+            let before = s.sel.clone();
+            run(s, "select.all", json!({}));
+            if s.sel == before {
+                break;
+            }
+        }
+    };
+    for key in ["text.delete", "text.backspace"] {
+        let mut s = typed("");
+        run(&mut s, "insert.table", json!({"rows": 2, "cols": 2}));
+        typ(&mut s, "cell");
+        assert_eq!(tables(&s), 1);
+        select_whole_document(&mut s);
+        run(&mut s, key, json!({}));
+        assert_eq!(tables(&s), 0, "{key}: a table at the start of the document goes");
+        assert_eq!(s.doc.plain_text(StoryRef::Body), "", "{key}");
+
+        let mut s = typed("before\n");
+        run(&mut s, "insert.table", json!({"rows": 2, "cols": 2}));
+        typ(&mut s, "cell");
+        assert_eq!(tables(&s), 1);
+        select_whole_document(&mut s);
+        run(&mut s, key, json!({}));
+        assert_eq!(tables(&s), 0, "{key}: a table after text goes");
+        assert_eq!(s.doc.plain_text(StoryRef::Body), "", "{key}");
+    }
+}
+
 /// #898: a click just after a citation at the end of a paragraph puts the caret before the
 /// citation's hidden field end; what is typed there goes after the citation, as in Word, instead
 /// of into its result (Zotero then reports the citation as edited by hand).
@@ -1027,7 +1125,7 @@ fn typing_after_a_citation_goes_outside_its_field() {
     let c = CharProps::default();
     let p = doc.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
     let start = p.len();
-    p.insert_object(start, InlineObject::FieldStart { instr: "ADDIN ZOTERO_ITEM CSL_CITATION {}".into(), locked: false }, &c).unwrap();
+    p.insert_object(start, InlineObject::FieldStart { instr: "ADDIN ZOTERO_ITEM CSL_CITATION {}".into(), locked: false, dirty: false }, &c).unwrap();
     let n = p.insert_text(p.len(), "(Smith 2020)", &c).unwrap();
     p.insert_object(start + 3 + n, InlineObject::FieldEnd, &c).unwrap();
     let mut s = Session::new(doc);

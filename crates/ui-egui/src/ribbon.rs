@@ -132,7 +132,31 @@ pub fn contextual_tabs(s: &wordcraft_engine::Session) -> Vec<&'static str> {
 
 /// Tab to show when the stored tab is no longer applicable (pure, tested).
 pub fn resolve_tab<'a>(current: &'a str, available: &[&str]) -> &'a str {
-    if available.contains(&current) { current } else { "Home" }
+    if available.contains(&current) { current } else { crate::DEFAULT_TAB }
+}
+
+/// Width of the » button that holds the tabs the strip has no room for.
+const MORE_TABS_W: f32 = 24.0;
+
+/// Which tabs fit on a strip `avail` points wide (#897), from each tab's width and whether it must
+/// stay. The others give way from the end, leaving `more` points for the » menu that holds them
+/// (pure, tested).
+pub fn fit_tabs(tabs: &[(f32, bool)], avail: f32, more: f32) -> Vec<bool> {
+    let mut fits = vec![true; tabs.len()];
+    let mut total: f32 = tabs.iter().map(|(w, _)| w).sum();
+    if total <= avail {
+        return fits;
+    }
+    for (fit, (w, keep)) in fits.iter_mut().zip(tabs).rev() {
+        if total + more <= avail {
+            break;
+        }
+        if !keep {
+            *fit = false;
+            total -= w;
+        }
+    }
+    fits
 }
 
 /// Whether the caret is inside a table (so the contextual tabs and their badges are shown).
@@ -196,41 +220,13 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
-                for (tab, custom) in &tabs {
-                    let (tab, custom) = (tab.as_str(), *custom);
-                    let contextual = !custom && wordcraft_engine::ribbon::CONTEXTUAL_TABS.contains(&tab);
-                    // A custom tab's name is the user's own text: shown as typed.
-                    let shown = if custom { tab } else { tl!(tab) };
-                    let w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(shown.to_string(), medium(12.5), t.text).size().x) + 18.0;
-                    let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
-                    if app.ui.keytips == crate::keytips::Phase::Tabs && app.ui.keytip_prefix.is_empty() {
-                        crate::keytips::record_tab(r, tab, &mut app.keytip_rects);
-                    }
-                    let active = app.ui.tab == tab && !app.ui.backstage;
-                    if resp.hovered() && !active {
-                        ui.painter().rect_filled(r.shrink2(vec2(0.0, 4.0)), 4.0, t.hover);
-                    }
-                    let color = if contextual || active { t.accent_text } else { t.text };
-                    ui.painter().text(r.center(), Align2::CENTER_CENTER, shown, if active { semibold(12.5) } else { medium(12.5) }, color);
-                    if active {
-                        let u = Rect::from_center_size(pos2(r.center().x, r.max.y - 2.0), vec2(w - 16.0, 3.0));
-                        ui.painter().rect_filled(u, 2.0, t.accent);
-                    }
-                    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, active, shown));
-                    if resp.clicked() {
-                        let _ = app.run("ui.tab", json!({"tab": tab}));
-                    }
-                    if resp.double_clicked() && tab != "File" {
-                        let _ = app.run("ui.collapseRibbon", json!({}));
-                    }
-                    resp.context_menu(|ui| crate::widgets::customize_menu_items(ui, app));
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // No document open (#1129): nothing to share, edit or comment on.
                     if !app.has_document() {
                         ui.disable();
                     }
-                    // Share, Editing mode, Comments.
+                    // Share, Editing mode, Comments, drawn first so the tabs get only the room
+                    // left of them (#897).
                     let share = tl!("Share");
                     let share_w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(share.to_string(), medium(12.0), t.text).size().x);
                     let (r, resp) = ui.allocate_exact_size(vec2((share_w + 36.0).max(74.0), 24.0), Sense::click());
@@ -264,6 +260,73 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                     if crate::widgets::icon_text_button(ui, "comment", tl!("Comments"), regular(12.0)).clicked() {
                         let _ = app.run("view.commentsPane", json!({}));
                     }
+                    ui.add_space(8.0);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        // The tabs that don't fit go into a » menu at the end of the strip. File, the
+                        // active tab and the contextual tabs (appended last) stay on the strip (#897).
+                        let labels: Vec<&str> = tabs.iter().map(|(tab, custom)| if *custom { tab.as_str() } else { tl!(tab) }).collect();
+                        let widths: Vec<(f32, bool)> = tabs
+                            .iter()
+                            .zip(&labels)
+                            .map(|((tab, custom), shown)| {
+                                let w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(shown.to_string(), medium(12.5), t.text).size().x) + 18.0;
+                                let contextual = !custom && wordcraft_engine::ribbon::CONTEXTUAL_TABS.contains(&tab.as_str());
+                                (w + 2.0, tab == "File" || *tab == app.ui.tab || contextual)
+                            })
+                            .collect();
+                        let fits = fit_tabs(&widths, ui.available_width(), MORE_TABS_W + 2.0);
+                        for ((tab, custom), _) in tabs.iter().zip(&fits).filter(|(_, fits)| **fits) {
+                            let (tab, custom) = (tab.as_str(), *custom);
+                            let contextual = !custom && wordcraft_engine::ribbon::CONTEXTUAL_TABS.contains(&tab);
+                            // A custom tab's name is the user's own text: shown as typed.
+                            let shown = if custom { tab } else { tl!(tab) };
+                            let w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(shown.to_string(), medium(12.5), t.text).size().x) + 18.0;
+                            let (r, resp) = ui.allocate_exact_size(vec2(w, 30.0), Sense::click());
+                            if app.ui.keytips == crate::keytips::Phase::Tabs {
+                                crate::keytips::record_tab(r, tab, &app.ui.keytip_prefix, &mut app.keytip_rects);
+                            }
+                            let active = app.ui.tab == tab && !app.ui.backstage;
+                            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, active, shown));
+                            if resp.hovered() && !active {
+                                ui.painter().rect_filled(r.shrink2(vec2(0.0, 4.0)), 4.0, t.hover);
+                            }
+                            let color = if contextual || active { t.accent_text } else { t.text };
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, shown, if active { semibold(12.5) } else { medium(12.5) }, color);
+                            if active {
+                                let u = Rect::from_center_size(pos2(r.center().x, r.max.y - 2.0), vec2(w - 16.0, 3.0));
+                                ui.painter().rect_filled(u, 2.0, t.accent);
+                            }
+                            if resp.clicked() {
+                                let _ = app.run("ui.tab", json!({"tab": tab}));
+                            }
+                            if resp.double_clicked() && tab != "File" {
+                                let _ = app.run("ui.collapseRibbon", json!({}));
+                            }
+                            resp.context_menu(|ui| crate::widgets::customize_menu_items(ui, app));
+                        }
+                        let left_out: Vec<(&str, &str)> = tabs
+                            .iter()
+                            .zip(&labels)
+                            .zip(&fits)
+                            .filter(|(_, fits)| !**fits)
+                            .map(|(((tab, _), shown), _)| (tab.as_str(), *shown))
+                            .collect();
+                        if !left_out.is_empty() {
+                            let (r, resp) = ui.allocate_exact_size(vec2(MORE_TABS_W, 30.0), Sense::click());
+                            if resp.hovered() {
+                                ui.painter().rect_filled(r.shrink2(vec2(0.0, 4.0)), 4.0, t.hover);
+                            }
+                            ui.painter().text(r.center(), Align2::CENTER_CENTER, "»", medium(12.5), t.text);
+                            egui::Popup::menu(&resp).show(|ui| {
+                                for (tab, shown) in left_out {
+                                    if ui.selectable_label(false, shown).clicked() {
+                                        let _ = app.run("ui.tab", json!({"tab": tab}));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+                    });
                 });
             });
         });
@@ -403,6 +466,25 @@ fn stack(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     });
 }
 
+/// Layout › Size: the named paper sizes, then More Paper Sizes… for a custom size in Page
+/// Setup (#1433).
+pub(crate) fn size_menu(ui: &mut Ui, app: &mut WordApp) {
+    // The current paper size is checked.
+    let x = wordcraft_engine::cmd::page::sect(&app.session);
+    let current = wordcraft_geom::paper_name(x.page_w, x.page_h);
+    for (n, w, h) in wordcraft_geom::PAPER_SIZES {
+        // Paper names are the industry's (Letter, A4, B5 (JIS)) and stay as they are; the
+        // envelopes say what they are. Sizes in the measurement unit, written the region's
+        // way (`21 cm × 29,7 cm`, #838).
+        let name = if n.starts_with("Envelope ") { tl!(n) } else { n };
+        let (width, height) = (crate::options::length(*w), crate::options::length(*h));
+        let label = crate::i18n::fmt(tl!("{paper}   {width} × {height}"), &[("paper", name), ("width", &width), ("height", &height)]);
+        mi_check(ui, app, &label, current == Some(*n), "layout.size", json!({"name": n}));
+    }
+    ui.separator();
+    mi(ui, app, crate::dialogs::PAPER_LABELS.more, "ui.dialog", json!({"name": "pageSetup"}));
+}
+
 pub(crate) fn mi(ui: &mut Ui, app: &mut WordApp, label: &str, id: &str, params: Value) {
     mi_text(ui, app, tl!(label), id, params);
 }
@@ -419,13 +501,16 @@ fn mi_text(ui: &mut Ui, app: &mut WordApp, text: &str, id: &str, params: Value) 
 }
 
 /// The proofing languages the Language menu offers: tag and English name (translated when drawn).
-pub(crate) const PROOFING_LANGUAGES: [(&str, &str); 6] = [
+pub(crate) const PROOFING_LANGUAGES: [(&str, &str); 9] = [
     ("en-US", "English (United States)"),
     ("en-GB", "English (United Kingdom)"),
     ("pl-PL", "Polish"),
     ("pt-BR", "Portuguese (Brazil)"),
     ("it-IT", "Italian"),
     ("hr-HR", "Croatian"),
+    ("tr-TR", "Turkish"),
+    ("ru-RU", "Russian"),
+    ("cs-CZ", "Czech"),
 ];
 
 /// The English name of a proofing language tag, as the status bar shows it (no tag: WordCraft's
@@ -462,6 +547,9 @@ pub(crate) fn language_name(tag: Option<&str>) -> String {
             wordcraft_engine::proof::ProofLang::Hr => "Croatian".into(),
             wordcraft_engine::proof::ProofLang::Pt => "Portuguese (Brazil)".into(),
             wordcraft_engine::proof::ProofLang::It => "Italian".into(),
+            wordcraft_engine::proof::ProofLang::Tr => "Turkish".into(),
+            wordcraft_engine::proof::ProofLang::Ru => "Russian".into(),
+            wordcraft_engine::proof::ProofLang::Cs => "Czech".into(),
             wordcraft_engine::proof::ProofLang::En if tag.eq_ignore_ascii_case("en") => "English (United States)".into(),
             _ => tag.to_string(),
         },
@@ -549,6 +637,11 @@ fn caret_lang_tag(app: &WordApp) -> Option<String> {
     s.doc.styles.resolve_char(style.as_deref(), &s.typing_props()).lang
 }
 
+/// The Hunspell dictionary the caret's language needs but doesn't have (`pl_PL`), if any (#1167).
+pub(crate) fn caret_missing_dictionary(app: &WordApp) -> Option<&'static str> {
+    wordcraft_engine::proof::missing_dictionary(caret_lang_tag(app).as_deref())
+}
+
 /// Review › Language (and the status bar's language): set the selection's proofing language, or
 /// leave it unchecked. The current choice has a check mark; a language outside the short list
 /// (French, German…) shows checked above it. Set Proofing Language… opens the Language dialog
@@ -569,6 +662,9 @@ pub(crate) fn language_menu(ui: &mut Ui, app: &mut WordApp) {
             || (tag == "pl-PL" && current.eq_ignore_ascii_case("pl"))
             || (tag == "pt-BR" && current.eq_ignore_ascii_case("pt"))
             || (tag == "it-IT" && current.eq_ignore_ascii_case("it"))
+            || (tag == "hr-HR" && current.eq_ignore_ascii_case("hr"))
+            || (tag == "tr-TR" && current.eq_ignore_ascii_case("tr"))
+            || (tag == "cs-CZ" && wordcraft_engine::proof::ProofLang::from_tag(Some(&current)) == wordcraft_engine::proof::ProofLang::Cs)
             || (tag == "en-US" && current.eq_ignore_ascii_case("en"))
     };
     let checks = language_checks(&current, listed);
@@ -656,10 +752,7 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
         });
         stack(ui, |ui| {
             small(ui, app, "cut", Some("Cut"), "Cut", "edit.cut", json!({}), false);
-            let r = small(ui, app, "copy", Some("Copy"), "Copy", "edit.copy", json!({}), false);
-            if r.clicked() {
-                crate::system_clipboard::put(app, ui.ctx(), &app.session.clipboard_text, &app.session.clipboard_html);
-            }
+            small(ui, app, "copy", Some("Copy"), "Copy", "edit.copy", json!({}), false);
             let active = app.session.painter.is_some();
             small(ui, app, "painter", Some("Format"), "Format Painter", "edit.formatPainter", json!({}), active);
         });
@@ -674,6 +767,8 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                 if let Some(f) = font_combo(ui, "font", 150.0, &font, &fams, Some(&*prev)) {
                     let _ = if f == crate::widgets::ADD_FONT {
                         app.run("font.add", json!({}))
+                    } else if f == crate::widgets::LOAD_SYSTEM_FONTS {
+                        app.run("font.loadSystem", json!({}))
                     } else {
                         let f = app.previews.font_stored(&f);
                         app.run("format.font", json!({"name": f}))
@@ -1257,6 +1352,51 @@ fn design(app: &mut WordApp, ui: &mut Ui) {
     });
 }
 
+// Layout › Margins, Orientation, Size and Columns: the caret section's setting has a check
+// mark, as Text Direction's does (#1206).
+fn margins_items(ui: &mut Ui, app: &mut WordApp) {
+    let current = wordcraft_engine::cmd::page::margins_preset_at(&app.session);
+    // The two uniform presets name their margin in the measurement unit (`2,54 cm`, #838).
+    for (l, k, uniform) in [
+        ("Normal  {size} all", "normal", Some(72.0)),
+        ("Narrow  {size} all", "narrow", Some(36.0)),
+        ("Moderate", "moderate", None),
+        ("Wide", "wide", None),
+        ("Mirrored", "mirrored", None),
+        ("Office 2003 Default", "office2003", None),
+    ] {
+        let label = match uniform {
+            Some(pt) => crate::i18n::fmt(tl!(l), &[("size", &crate::options::length(pt))]),
+            None => l.to_string(),
+        };
+        // Mirrored margins come from the document as well as from the preset (#1181).
+        let on = current == Some(k) || (k == "mirrored" && app.session.doc.settings.mirror_margins);
+        mi_check(ui, app, &label, on, "layout.margins", json!({"preset": k}));
+    }
+    mi(ui, app, "Custom Margins…", "ui.dialog", json!({"name": "pageSetup"}));
+}
+
+fn orientation_items(ui: &mut Ui, app: &mut WordApp) {
+    let land = wordcraft_engine::cmd::page::sect(&app.session).landscape;
+    mi_check(ui, app, "Portrait", !land, "layout.orientation", json!({"value": "portrait"}));
+    mi_check(ui, app, "Landscape", land, "layout.orientation", json!({"value": "landscape"}));
+}
+
+fn columns_items(ui: &mut Ui, app: &mut WordApp) {
+    let current = wordcraft_engine::cmd::page::columns_preset_at(&app.session);
+    for (l, k, params) in [
+        ("One", "one", json!({"count": 1})),
+        ("Two", "two", json!({"count": 2})),
+        ("Three", "three", json!({"count": 3})),
+        ("Left", "left", json!({"preset": "left"})),
+        ("Right", "right", json!({"preset": "right"})),
+    ] {
+        mi_check(ui, app, l, current == Some(k), "layout.columns", params);
+    }
+    ui.separator();
+    mi(ui, app, "More Columns…", "ui.dialog", json!({"name": "columns"}));
+}
+
 fn layout(app: &mut WordApp, ui: &mut Ui) {
     group(ui, "Page Setup", Some("layout.pageSetup"), app, |ui, app| {
         // Text Direction works on what the caret is in: table cells, a text box, else the section.
@@ -1269,43 +1409,10 @@ fn layout(app: &mut WordApp, ui: &mut Ui) {
                 mi_check(ui, app, label, dir == d, "layout.textDirection", json!({"value": d.ooxml()}));
             }
         });
-        menu_button(ui, app, "margins", Some("Margins"), "Margins", true, "layout.margins", |ui, app| {
-            for (l, k) in [
-                ("Normal  1\" all", "normal"),
-                ("Narrow  0.5\" all", "narrow"),
-                ("Moderate", "moderate"),
-                ("Wide", "wide"),
-                ("Mirrored", "mirrored"),
-                ("Office 2003 Default", "office2003"),
-            ] {
-                mi(ui, app, l, "layout.margins", json!({"preset": k}));
-            }
-            mi(ui, app, "Custom Margins…", "ui.dialog", json!({"name": "pageSetup"}));
-        });
-        menu_button(ui, app, "orientation", Some("Orientation"), "Orientation", true, "layout.orientation", |ui, app| {
-            mi(ui, app, "Portrait", "layout.orientation", json!({"value": "portrait"}));
-            mi(ui, app, "Landscape", "layout.orientation", json!({"value": "landscape"}));
-        });
-        menu_button(ui, app, "size", Some("Size"), "Size", true, "layout.size", |ui, app| {
-            for (n, w, h) in wordcraft_geom::PAPER_SIZES {
-                // Paper names are the industry's (Letter, A4, B5 (JIS)) and stay as they are; the
-                // envelopes say what they are. Sizes in the measurement unit, written the region's
-                // way (`21 cm × 29,7 cm`, #838).
-                let name = if n.starts_with("Envelope ") { tl!(n) } else { n };
-                let (width, height) = (crate::options::length(*w), crate::options::length(*h));
-                let label = crate::i18n::fmt(tl!("{paper}   {width} × {height}"), &[("paper", name), ("width", &width), ("height", &height)]);
-                mi_text(ui, app, &label, "layout.size", json!({"name": n}));
-            }
-        });
-        menu_button(ui, app, "columns", Some("Columns"), "Columns", true, "layout.columns", |ui, app| {
-            mi(ui, app, "One", "layout.columns", json!({"count": 1}));
-            mi(ui, app, "Two", "layout.columns", json!({"count": 2}));
-            mi(ui, app, "Three", "layout.columns", json!({"count": 3}));
-            mi(ui, app, "Left", "layout.columns", json!({"preset": "left"}));
-            mi(ui, app, "Right", "layout.columns", json!({"preset": "right"}));
-            ui.separator();
-            mi(ui, app, "More Columns…", "ui.dialog", json!({"name": "columns"}));
-        });
+        menu_button(ui, app, "margins", Some("Margins"), "Margins", true, "layout.margins", margins_items);
+        menu_button(ui, app, "orientation", Some("Orientation"), "Orientation", true, "layout.orientation", orientation_items);
+        menu_button(ui, app, "size", Some("Size"), "Size", true, "layout.size", size_menu);
+        menu_button(ui, app, "columns", Some("Columns"), "Columns", true, "layout.columns", columns_items);
         stack(ui, |ui| {
             menu_button(ui, app, "breaks", Some("Breaks"), "Breaks", false, "layout.break", |ui, app| {
                 ui.label(egui::RichText::new(tl!("Page Breaks")).strong());
@@ -2288,6 +2395,8 @@ fn picture_format(app: &mut WordApp, ui: &mut Ui) {
             });
             ui.add_space(2.0);
             crate::widgets::row(ui, |ui| {
+                let cropping = crate::crop::active(app).is_some();
+                small(ui, app, "crop", Some("Crop"), "Crop", "ui.crop", json!({}), cropping);
                 for (i, side) in ["L", "T", "R", "B"].iter().enumerate() {
                     ui.label(egui::RichText::new(tl!(side)).small());
                     let mut v = crop0[i] * 100.0;
@@ -2618,6 +2727,34 @@ mod tests {
         }
     }
 
+    /// #1206: Margins, Orientation, Size and Columns mark the caret section's setting, as Word
+    /// does. Every value differs from a new document's, so a default can't satisfy it.
+    #[test]
+    fn page_setup_menus_mark_the_current_setting() {
+        use egui_kittest::kittest::{By, NodeT, Queryable};
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::from_text("Text")), crate::Services::default());
+        app.run("layout.margins", json!({"preset": "narrow"})).unwrap();
+        app.run("layout.orientation", json!({"value": "landscape"})).unwrap();
+        app.run("layout.size", json!({"name": "A4"})).unwrap();
+        app.run("layout.columns", json!({"preset": "right"})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 1200.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                margins_items(ui, app);
+                orientation_items(ui, app);
+                size_menu(ui, app);
+                columns_items(ui, app);
+            },
+            app,
+        );
+        h.run_steps(2);
+        let checked: Vec<String> = h
+            .query_all(By::new().predicate(|n| n.toggled() == Some(egui::accesskit::Toggled::True)))
+            .filter_map(|n| n.accesskit_node().label())
+            .collect();
+        let first_words: Vec<&str> = checked.iter().filter_map(|l| l.trim_start_matches('✓').split_whitespace().next()).collect();
+        assert_eq!(first_words, ["Narrow", "Landscape", "A4", "Right"], "{checked:?}");
+    }
+
     /// #860 review: a tag the language list doesn't have shows by language and region, not as
     /// the tag; Portuguese (Angola) isn't Brazil's, and no name shows twice in the menu.
     #[test]
@@ -2643,11 +2780,27 @@ mod tests {
     }
 
     #[test]
+    fn czech_has_a_name_in_the_language_menu() {
+        assert!(PROOFING_LANGUAGES.contains(&("cs-CZ", "Czech")));
+        for tag in ["cs", "cs-CZ", "CS-cz", "ces", "CZE"] {
+            assert_eq!(language_name(Some(tag)), "Czech", "{tag}");
+        }
+    }
+
+    #[test]
     fn portuguese_has_a_name_in_the_language_menu() {
         assert!(PROOFING_LANGUAGES.iter().any(|(t, _)| *t == "pt-BR"));
         assert_eq!(language_name(Some("pt-BR")), "Portuguese (Brazil)");
         assert_eq!(language_name(Some("pt")), "Portuguese (Brazil)");
         assert_eq!(language_name(Some("PT-BR".to_string().as_str())), "Portuguese (Brazil)");
+    }
+
+    #[test]
+    fn turkish_has_a_name_in_the_language_menu() {
+        assert!(PROOFING_LANGUAGES.iter().any(|(t, _)| *t == "tr-TR"));
+        assert_eq!(language_name(Some("tr-TR")), "Turkish");
+        assert_eq!(language_name(Some("tr")), "Turkish");
+        assert_eq!(language_name(Some("TR-TR")), "Turkish");
     }
 
     #[test]
@@ -2752,6 +2905,48 @@ mod tests {
         tall.sort();
         tall.dedup();
         assert!(tall.is_empty(), "groups taller than the ribbon: {tall:#?}");
+    }
+
+    /// #897: the tabs that didn't fit were drawn under Comments / Editing / Share, so at 1280 pt
+    /// in Polish the table tabs were out of reach. They stay on the strip and a click opens them.
+    #[test]
+    fn table_tabs_stay_clickable_when_the_tab_strip_overflows() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::from_text("Text")), crate::Services::default());
+        app.run("insert.table", json!({"rows": 3, "cols": 3})).unwrap();
+        app.run("ui.language", json!({"value": "pl"})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1280.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        let buttons = [tl!("Comments"), tl!("Editing")].map(|b| h.get_by_label(b).rect());
+        for tab in ["Table Design", "Table Layout"] {
+            let r = h.get_by_label(tl!(tab)).rect();
+            assert!(r.right() <= 1280.0 && buttons.iter().all(|b| !b.intersects(r)), "{tab} {r:?} under {buttons:?}");
+            h.get_by_label(tl!(tab)).click();
+            h.run_steps(2);
+            assert_eq!(h.state().ui.tab, tab);
+        }
+    }
+
+    #[test]
+    fn fit_tabs_keeps_the_kept_tabs_and_drops_from_the_end() {
+        let tabs = [(40.0, true), (50.0, false), (50.0, false), (50.0, false), (60.0, true)];
+        assert_eq!(fit_tabs(&tabs, 250.0, 20.0), [true; 5]);
+        // 250 doesn't fit 240 with room for »: the last plain tabs give way, the kept ones stay.
+        assert_eq!(fit_tabs(&tabs, 240.0, 20.0), [true, true, true, false, true]);
+        // 200 would fit 210, but not with the » button too.
+        assert_eq!(fit_tabs(&tabs, 210.0, 20.0), [true, true, false, false, true]);
+        assert_eq!(fit_tabs(&tabs, 150.0, 20.0), [true, false, false, false, true]);
+        // Nothing but the kept tabs fits: they stay anyway.
+        assert_eq!(fit_tabs(&tabs, 10.0, 20.0), [true, false, false, false, true]);
+        // Hostile numbers don't panic.
+        let _ = fit_tabs(&[(f32::NAN, false), (f32::INFINITY, false)], f32::NAN, 20.0);
     }
 
     /// #860: Review › Language (and the status bar) reach every proofing language, not just the
