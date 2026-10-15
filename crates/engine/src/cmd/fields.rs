@@ -208,6 +208,14 @@ fn unlink(s: &mut Session, _: &Value) -> CmdResult {
     if fields.is_empty() {
         return Err(none_selected());
     }
+    // Unlinking rewrites the field into text: refused in content locked against editing.
+    // Not tracked (Word doesn't track it either); the result stays as ordinary text.
+    let width = OBJ.len_utf8();
+    for f in &fields {
+        let end = f.end.as_ref().unwrap_or(&f.at);
+        let end = Pos { off: end.off.saturating_add(width), ..end.clone() };
+        super::controls::check_edit(s, &f.at, &end)?;
+    }
     let texts: Vec<String> = fields.iter().map(|f| if f.end.is_none() { shown_text(s, f) } else { String::new() }).collect();
     // Markers to remove and text to put in their place, last first so earlier positions hold.
     let mut edits: Vec<(Pos, String)> = Vec::new();
@@ -219,7 +227,6 @@ fn unlink(s: &mut Session, _: &Value) -> CmdResult {
     }
     edits.sort_by(|a, b| b.0.cmp(&a.0));
     edits.dedup_by(|a, b| a.0 == b.0);
-    let width = OBJ.len_utf8();
     for (at, text) in &edits {
         let para = s.doc.para_mut(at.story, &at.path)?;
         if para.object_at(at.off).is_none() {
