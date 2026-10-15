@@ -625,7 +625,54 @@ pub fn bidi_levels(text: &str, rtl_para: bool) -> Vec<u8> {
     }
     let level = if rtl_para { unicode_bidi::Level::rtl() } else { unicode_bidi::Level::ltr() };
     let info = unicode_bidi::ParagraphBidiInfo::new(text, Some(level));
-    info.levels.iter().map(|l| l.number()).collect()
+    let mut levels: Vec<u8> = info.levels.iter().map(|l| l.number()).collect();
+    keep_latin_text_together(text, level.number(), &mut levels);
+    levels
+}
+
+/// Latin text keeps the digits, spaces and punctuation inside it: "2-naphthol" or "Windows 11"
+/// after a Persian word reads as typed, as in Word, instead of "naphthol-2" or "11 Windows"
+/// (UAX #9 alone sends a neutral between a Latin letter and a digit to the paragraph's direction,
+/// and a digit after Arabic letters becomes an Arabic number) (#2150). The Latin text runs from
+/// the word with the first left-to-right letter to the word with the last letter or digit after
+/// it, without crossing a right-to-left letter, a tab or an explicit embedding mark; it all takes its
+/// letters' level, except sentence punctuation at either end, which stays the paragraph's. The
+/// spaces and punctuation between it and the right-to-left text around it then sit between
+/// opposite directions and take the paragraph's level (rule N2), so a space after a Persian word
+/// stays between the two.
+fn keep_latin_text_together(text: &str, base: u8, levels: &mut [u8]) {
+    use unicode_bidi::BidiClass::{AL, AN, B, BN, CS, EN, ES, ET, FSI, L, LRE, LRI, LRO, NSM, ON, PDF, PDI, R, RLE, RLI, RLO, S, WS};
+    let chars: Vec<(usize, char, unicode_bidi::BidiClass)> = text.char_indices().map(|(i, c)| (i, c, unicode_bidi::bidi_class(c))).collect();
+    let stop = |c: &unicode_bidi::BidiClass| matches!(c, R | AL | B | S | LRE | RLE | LRO | RLO | PDF | LRI | RLI | FSI | PDI);
+    let sentence_end = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '…' | '،' | '؛' | '؟');
+    for seg in chars.split(|(_, _, c)| stop(c)) {
+        let Some(first) = seg.iter().position(|(_, _, c)| *c == L) else { continue };
+        let Some(last) = seg.iter().rposition(|(_, _, c)| matches!(c, L | EN | AN)) else { continue };
+        let word_start = seg.get(..first).and_then(|s| s.iter().rposition(|(_, _, c)| *c == WS)).map_or(0, |k| k + 1);
+        let start = seg.get(word_start..first).and_then(|s| s.iter().position(|&(_, c, _)| !sentence_end(c))).map_or(first, |k| word_start + k);
+        let word_end = seg.get(last..).and_then(|s| s.iter().position(|(_, _, c)| *c == WS)).map_or(seg.len(), |k| last + k);
+        let end = seg.get(..word_end).and_then(|s| s.iter().rposition(|&(_, c, _)| !sentence_end(c))).map_or(0, |k| k + 1).max(last + 1);
+        let Some(span) = seg.get(start..end) else { continue };
+        let mut letter_levels = span.iter().filter(|(_, _, c)| *c == L).filter_map(|&(i, _, _)| levels.get(i).copied());
+        let Some(lv) = letter_levels.next() else { continue };
+        if !letter_levels.all(|l| l == lv) {
+            continue;
+        }
+        let mut set = |&(i, c, _): &(usize, char, unicode_bidi::BidiClass), to: u8| {
+            if let Some(l) = levels.get_mut(i..i + c.len_utf8()) {
+                l.fill(to);
+            }
+        };
+        span.iter().for_each(|ch| set(ch, lv));
+        // Inside an explicit embedding the paragraph's level isn't the neutrals' one: leave them.
+        if lv > base.saturating_add(1) {
+            continue;
+        }
+        let neutral = |ch: &&(usize, char, unicode_bidi::BidiClass)| matches!(ch.2, WS | ON | CS | ES | ET | BN | NSM);
+        let before = seg.get(..start).unwrap_or_default().iter().rev().take_while(neutral);
+        let after = seg.get(end..).unwrap_or_default().iter().take_while(neutral);
+        before.chain(after).for_each(|ch| set(ch, base));
+    }
 }
 
 /// Rule L2 of UAX #9: the visual order (left to right) of items with these levels: from the
