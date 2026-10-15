@@ -4362,7 +4362,7 @@ mod tests {
             h.step();
         }
         assert_eq!(prompt(h.state()), None, "answered");
-        assert!(h.state().quit_requested, "Don't Save closes");
+        assert!(!h.state().has_document() && !h.state().quit_requested, "Don't Save closes the document, not the window (#1712)");
         assert_eq!(std::fs::read(&path).unwrap(), before, "nothing was saved");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -5324,17 +5324,18 @@ mod tests {
         assert_eq!(r["ok"], json!(false), "{r}");
         let e = r["error"].as_str().unwrap_or("");
         assert!(e.contains("unsaved") && e.contains("force"), "{e}");
-        assert!(!a.quit_requested);
+        assert!(a.has_document() && !a.quit_requested);
         assert!(body_text(&a).contains(UNSAVED));
 
         let r = control_execute(&mut a, json!({"command": "file.close", "params": {"force": true}}));
         assert_eq!(r["ok"], json!(true), "{r}");
-        assert!(a.quit_requested);
+        // Closed: the document, not the window (#1712).
+        assert!(!a.has_document() && !a.quit_requested);
 
         let mut clean = app();
         let r = control_execute(&mut clean, json!({"command": "file.close"}));
         assert_eq!(r["ok"], json!(true), "{r}");
-        assert!(clean.quit_requested);
+        assert!(!clean.has_document() && !clean.quit_requested);
     }
 
     /// Every way to name `file.close` over the control channel is guarded (#1268).
@@ -5356,13 +5357,13 @@ mod tests {
             let mut a = typed();
             let r = send(&mut a, method, params.clone());
             assert_eq!(r["ok"], json!(false), "{method} {params}: {r}");
-            assert!(!a.quit_requested, "{method} {params}");
+            assert!(a.has_document() && !a.quit_requested, "{method} {params}");
             assert!(body_text(&a).contains(UNSAVED));
         }
         let mut a = typed();
         let r = send(&mut a, "file.close", json!({"force": true}));
         assert_eq!(r["ok"], json!(true), "{r}");
-        assert!(a.quit_requested);
+        assert!(!a.has_document() && !a.quit_requested);
     }
 
     const MAILINGS: [&str; 3] = ["mailings.envelopes", "mailings.labels", "mailings.finish"];
