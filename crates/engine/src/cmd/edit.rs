@@ -125,14 +125,15 @@ pub fn specs() -> Vec<CommandSpec> {
             s.ui_requests.push(json!({"open": tab}));
             Ok(json!({"open": tab}))
         })
-        .key("Mod+H")
+        // Word for Mac's own key is ⌃H.
+        .key(super::mac_or("Mod+H / Ctrl+H", "Mod+H"))
         .params(r#"{"tab"?: "find|replace|goto" (default replace)}"#)
         .pure(),
         CommandSpec::new("edit.replaceAll", "Replace All", "Home › Editing › Replace", replace_all)
             .params(r#"{"text": string, "with": string (^p ^t ^& ^c …; \\1 with wildcards), …options of edit.find}"#),
         CommandSpec::new("edit.goto", "Go To", "Home › Editing › Find", goto)
             .key("Mod+Alt+G / F5")
-            .params(r#"{"page"?: n, "pageBy"?: int (pages forward, negative back, from the caret's page), "bookmark"?: string, "paragraph"?: n}; none opens Find and Replace on its Go To tab"#)
+            .params(r#"{"page"?: n, "pageBy"?: int (pages forward, negative back, from the caret's page), "bookmark"?: string (selects its text), "paragraph"?: n}; none opens Find and Replace on its Go To tab"#)
             .pure(),
         CommandSpec::new("edit.goBack", "Go Back", "Navigation", |s, _| {
             let p = s.go_back().ok_or_else(|| CmdError::Failed("no edits to go back to yet".into()))?;
@@ -634,6 +635,7 @@ fn replace_all(s: &mut Session, v: &Value) -> CmdResult {
     let story = s.sel.focus.story;
     let results = search_full(s, story, true)?;
     let n = results.len();
+    super::controls::check_deletions(s, story, results.iter().map(|f| (&f.a, &f.b)))?;
     for Found { a, b, rep } in results.into_iter().rev() {
         let with = rep.unwrap_or_default();
         if s.doc.settings.track_changes {
@@ -683,8 +685,14 @@ fn goto(s: &mut Session, v: &Value) -> CmdResult {
         return sel_result(s);
     }
     if let Some(name) = p::str(v, "bookmark") {
-        let bm = s.doc.bookmarks().into_iter().find(|(n, _)| n == name).ok_or_else(|| CmdError::Failed(format!("no bookmark `{name}`")))?;
-        s.sel = Selection::caret(bm.1);
+        // Word's built-in bookmark: the top of the document.
+        if name == "_top" {
+            s.sel = Selection::caret(Pos::body(0, 0));
+            return sel_result(s);
+        }
+        // As in Word, the bookmark's text is selected (a caret for an empty bookmark).
+        let (from, to) = super::insert::bookmark_range(&s.doc, name).ok_or_else(|| CmdError::Failed(format!("no bookmark `{name}`")))?;
+        s.sel = Selection { anchor: from, focus: to };
         return sel_result(s);
     }
     if let Some(n) = p::u64(v, "paragraph") {

@@ -337,6 +337,9 @@ pub struct Session {
     /// Formatting picked with a collapsed caret, applied to the next typed text.
     pub pending: Option<CharProps>,
     pub path: Option<std::path::PathBuf>,
+    /// Name given to a document not saved yet (File › Info › Rename): what Save suggests. A file
+    /// name, not document metadata, so it is not part of the document or its undo history.
+    pub file_name: Option<String>,
     pub dirty: bool,
     /// Where the custom dictionary is kept on disk, if the host wired one up. Only the desktop
     /// app does: headless sessions (MCP, `wordcraft-cli run`), tests and the web build leave
@@ -446,6 +449,8 @@ pub struct Session {
     /// Password, `file.encrypt`); `None` saves them unencrypted. Kept from a password-protected
     /// file that was opened, cleared when the document is replaced.
     pub password: Option<crate::io::Password>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) recovery: Option<crate::recovery::Recovery>,
     /// More pictures and shapes selected along with the one the selection holds (Shift+click),
     /// for Group. Cleared by any edit or selection change other than adding to it.
     pub also_selected: Vec<Pos>,
@@ -505,6 +510,10 @@ pub struct Prefs {
     /// The region the user chose for new documents, units and the decimal separator (a locale
     /// tag like `pl-PL`, File › Options › Advanced › Region); `None` follows the system.
     pub region: Option<String>,
+    /// A folder searched for Hunspell dictionaries before the system locations (File › Options ›
+    /// Proofing, #1063): an app started from Finder or the Dock doesn't see
+    /// `WORDCRAFT_DICTIONARIES`. `None` searches the system locations only.
+    pub dictionaries_folder: Option<String>,
     /// Formatting marks shown even while Show/Hide ¶ is off.
     pub marks: wordcraft_layout::display::FormattingMarks,
     /// Mark grammar errors as you type (with Check spelling as you type on).
@@ -529,6 +538,7 @@ impl Default for Prefs {
             overtype: false,
             units: Default::default(),
             region: None,
+            dictionaries_folder: None,
             marks: Default::default(),
             mark_grammar: true,
             ignore_uppercase: true,
@@ -586,6 +596,7 @@ impl Session {
             view: ViewState::default(),
             pending: None,
             path: None,
+            file_name: None,
             user_dict_path: None,
             dirty: false,
             clipboard: None,
@@ -632,6 +643,8 @@ impl Session {
             editing_lang: None,
             read_aloud: Default::default(),
             password: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            recovery: None,
             column: None,
             column_mode: false,
             widened: None,
@@ -689,6 +702,12 @@ impl Session {
     /// those).
     pub fn sel_ends(&self) -> &Selection {
         self.widened.as_ref().filter(|w| w.sel == self.sel).map_or(&self.sel, |w| &w.ends)
+    }
+
+    pub fn selects_whole_story(&self) -> bool {
+        let st = self.sel.focus.story;
+        let (a, b) = self.sel.ordered();
+        a == self.doc.start_of(st) && b == self.doc.end_of(st)
     }
 
     /// Document revision (bumped by every change).
@@ -859,8 +878,10 @@ impl Session {
     }
     /// Stamp the document's save metadata (modified time, last modified by, revision; created
     /// when it has none) the way Word does on every save. `file.save` calls it, and so does any
-    /// front end that writes the bytes itself (the web build's download, #262).
+    /// front end that writes the bytes itself (the web build's download, #262). Like Word, the
+    /// document also keeps the zoom it is shown at (#995).
     pub fn stamp_save(&mut self) {
+        self.doc.settings.zoom = crate::cmd::view::saved_zoom(&self.view);
         let core = &mut self.doc.core;
         core.modified = crate::cmd::now_iso();
         if core.created.is_empty() {
@@ -979,6 +1000,7 @@ impl Session {
         self.doc = doc;
         self.doc.ensure_nonempty();
         self.password = None;
+        self.file_name = None;
         self.sel = Selection::caret(self.doc.start_of(StoryRef::Body));
         self.pending = None;
         self.also_selected.clear();
@@ -1018,6 +1040,7 @@ impl Session {
             view: _,
             pending: _,
             path: _,
+            file_name: _,
             // The custom dictionary file, like the file path: host wiring, not an edit.
             user_dict_path: _,
             dirty,
@@ -1069,6 +1092,8 @@ impl Session {
             math_normal_text: _,
             // The save password, like the file path: not an edit to the document.
             password: _,
+            #[cfg(not(target_arch = "wasm32"))]
+                recovery: _,
             also_selected: _,
             // Column selection and a widened selection's ends, like `sel`'s shape: valid only while
             // `sel` matches them.

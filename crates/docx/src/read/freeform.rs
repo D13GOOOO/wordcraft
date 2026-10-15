@@ -7,6 +7,10 @@ use crate::xml::El;
 
 /// Straight pieces a Bézier curve is flattened into.
 const CURVE_STEPS: usize = 8;
+/// Points read from one path segment. A conformant `a:lnTo`/`a:moveTo` has one, `a:quadBezTo`
+/// two and `a:cubicBezTo` three; the cap bounds the de Casteljau control polygon so a segment
+/// stuffed with points can't make curve flattening quadratic in the point count.
+const MAX_SEG_POINTS: usize = 8;
 /// Largest path coordinate kept, in EMUs.
 const MAX_EMU: f64 = 1.0e12;
 
@@ -41,7 +45,7 @@ pub fn cust_geom(sppr: &El, w: f32, h: f32) -> Option<Freeform> {
             if cur.len() >= MAX_POINTS || done.len() >= MAX_PATHS {
                 break;
             }
-            let pts: Vec<[f64; 2]> = seg.children("a:pt").filter_map(pt).collect();
+            let pts: Vec<[f64; 2]> = seg.children("a:pt").filter_map(pt).take(MAX_SEG_POINTS).collect();
             match seg.local() {
                 "moveTo" => {
                     if !cur.is_empty() {
@@ -65,7 +69,10 @@ pub fn cust_geom(sppr: &El, w: f32, h: f32) -> Option<Freeform> {
             }
         }
         if !cur.is_empty() {
-            done.push((cur, false));
+            // A path drawn back to where it started is closed, though it has no `a:close` (#743:
+            // Word's cover pages), so it's filled.
+            let back = cur.len() > 2 && cur.first() == cur.last();
+            done.push((cur, back));
         }
         for (pts, closed) in done.into_iter().take(MAX_PATHS.saturating_sub(paths.len())) {
             paths.push(FreePath { pts: pts.into_iter().take(MAX_POINTS).map(scale).collect(), closed: closed && !fill_none });
@@ -114,4 +121,37 @@ fn bezier(c: &[[f64; 2]], t: f64) -> [f64; 2] {
             .collect();
     }
     p.first().copied().unwrap_or([0.0, 0.0])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sppr(seg: &str) -> crate::xml::El {
+        let xml = format!(
+            "<wps:spPr xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" \
+             xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\">\
+             <a:custGeom><a:pathLst><a:path w=\"100\" h=\"100\">\
+             <a:moveTo><a:pt x=\"0\" y=\"0\"/></a:moveTo>{seg}</a:path></a:pathLst></a:custGeom></wps:spPr>"
+        );
+        crate::xml::parse(xml.as_bytes()).expect("parse spPr")
+    }
+
+    #[test]
+    fn a_bezier_segment_with_many_points_is_bounded() {
+        // One cubicBezTo stuffed with 50 000 points must not make de Casteljau quadratic: the
+        // control polygon is capped, so flattening stays a handful of points and returns at once.
+        let pts = "<a:pt x=\"1\" y=\"1\"/>".repeat(50_000);
+        let sppr = sppr(&format!("<a:cubicBezTo>{pts}</a:cubicBezTo>"));
+        let f = cust_geom(&sppr, 100.0, 100.0).expect("a path");
+        assert!(f.paths.iter().all(|p| p.pts.len() <= 1 + CURVE_STEPS), "{:?}", f.paths.iter().map(|p| p.pts.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_conformant_cubic_still_flattens_to_a_curve() {
+        let sppr = sppr("<a:cubicBezTo><a:pt x=\"0\" y=\"100\"/><a:pt x=\"100\" y=\"100\"/><a:pt x=\"100\" y=\"0\"/></a:cubicBezTo>");
+        let f = cust_geom(&sppr, 100.0, 100.0).expect("a path");
+        assert_eq!(f.paths.len(), 1);
+        assert!(f.paths[0].pts.len() >= 2 && f.paths[0].pts.len() <= 1 + CURVE_STEPS);
+    }
 }
