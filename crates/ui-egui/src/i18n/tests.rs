@@ -377,7 +377,11 @@ fn czech_locales_and_saved_preference_work_without_changing_the_document() {
 fn czech_covers_the_entire_existing_interface_catalog() {
     use std::collections::HashSet;
     let keys = |source| parse_entries(source).0.into_iter().map(|e| e.source).collect::<HashSet<_>>();
-    assert_eq!(keys(lang("cs").0.source), keys(lang("zh-hans").0.source));
+    // Keep the original Chinese coverage and include the complete styles, equation gallery,
+    // paper sizes and watermarks from the Russian and Spanish catalogs.
+    assert!(keys(lang("cs").0.source).is_superset(&keys(lang("zh-hans").0.source)));
+    assert!(keys(lang("cs").0.source).is_superset(&keys(lang("ru").0.source)));
+    assert!(keys(lang("cs").0.source).is_superset(&keys(lang("es").0.source)));
     let cs = lang("cs");
     assert_eq!(tr(cs, "Home"), "Domů");
     assert_eq!(tr(cs, "Font"), "Písmo");
@@ -391,6 +395,13 @@ fn czech_covers_the_entire_existing_interface_catalog() {
         assert_eq!(fmt(tr(cs, "{words} words"), &[("words", &words)]), format!("Počet slov: {count}"));
         assert_eq!(fmt(tr(cs, "{selected} of {words} words"), &[("selected", "1"), ("words", &words)]), format!("Počet slov: {words}; vybráno: 1"));
     }
+    set_current(cs);
+    // Built-in names and numbered style families use Czech; user-defined names stay as written.
+    for (style, expected) in [("Normal", "Normální"), ("No Spacing", "Bez mezer"), ("Heading 2", "Nadpis 2"), ("TOC 3", "Obsah 3")] {
+        assert_eq!(builtin_style_name(style), expected);
+    }
+    assert_eq!(builtin_style_name("My Own Style"), "My Own Style");
+    set_current(Lang::EN);
 }
 
 #[test]
@@ -1024,7 +1035,7 @@ fn an_italian_interface_writes_new_documents_in_italian() {
 #[test]
 fn the_editing_languages_are_the_ones_wordcraft_can_proof() {
     let with: Vec<(&str, &str)> = Lang::all().filter_map(|l| l.editing_lang().map(|e| (l.code(), e))).collect();
-    assert_eq!(with, [("pt-br", "pt-BR"), ("pl", "pl-PL"), ("it", "it-IT")]);
+    assert_eq!(with, [("pt-br", "pt-BR"), ("pl", "pl-PL"), ("tr", "tr-TR"), ("it", "it-IT")]);
 }
 
 #[test]

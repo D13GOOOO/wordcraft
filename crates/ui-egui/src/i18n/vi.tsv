@@ -2517,3 +2517,104 @@
 	{name}   {height} × {width} in	{name}   {height} × {width} in
 	{name}   {height} × {width} mm	{name}   {height} × {width} mm
 	{width} × {height} mm	{width} × {height} mm
+
+# Custom paper sizes (#1496)
+	Custom size	Kích thước tùy chỉnh
+	More Paper Sizes…	Thêm khổ giấy…
+	Paper	Giấy
+	Paper size:	Khổ giấy:
+	The margins don't fit on a page this size; make the margins smaller first.	Lề không vừa với trang có kích thước này; hãy thu nhỏ lề trước.
+
+# Web Save before New/Open (#1510)
+	Saving {name} was cancelled, so it is still open and nothing was lost.	Đã hủy lưu {name}, nên tài liệu vẫn mở và không mất gì.
+	Waiting for the save to finish…	Đang chờ lưu xong…
+
+# Alignment guides (#1519)
+	Moved objects snap to the page's edges and centre, the margins and other objects. Hold Alt to move freely.	Đối tượng được di chuyển sẽ bắt vào mép và tâm trang, lề và các đối tượng khác. Giữ Alt để di chuyển tự do.
+	Show alignment guides when moving pictures and shapes	Hiện đường căn chỉnh khi di chuyển ảnh và hình
+
+# Cross-reference dialog (#1003)
+	For which item:	Cho mục nào:
+	Heading	Đề mục
+	Heading text	Văn bản đề mục
+	Insert reference to:	Chèn tham chiếu tới:
+	Reference type:	Loại tham chiếu:
+
+# Rename Document (#1016)
+	Account	Tài khoản
+	Document name	Tên tài liệu
+	Rename	Đổi tên
+	Rename Document	Đổi tên tài liệu
+
+# Ctrl+drag copies (#1046)
+	Copy to	Sao chép tới
+
+# Dictionaries folder (#1063)
+	Dictionaries	Từ điển
+	Dictionaries folder:	Thư mục từ điển:
+	Not set: the system's usual places	Chưa đặt: các vị trí thông thường của hệ thống
+	Hunspell .aff and .dic files here (pl_PL, pt_BR, it_IT, hr_HR, tr_TR) are used before the system's.	Các tệp Hunspell .aff và .dic trong thư mục này (pl_PL, pt_BR, it_IT, hr_HR, tr_TR) được dùng trước các tệp của hệ thống.
+	{language}: {file}	{language}: {file}
+	{language}: no dictionary found	{language}: không tìm thấy từ điển
+
+# Show only the selected text's comment (#1066)
+	In the margin	Trong lề
+	Only for the selected text	Chỉ cho văn bản được chọn
+
+# STYLEREF field (#882)
+	Style name:	Tên kiểu:
+	Text of the nearest paragraph with a given style (running headers)	Văn bản của đoạn gần nhất có kiểu đã cho (đầu trang chạy)
+
+# Mail merge Filter and Sort (#885)
+	Add Condition	Thêm điều kiện
+	And	Và
+	Ascending	Tăng dần
+	Compare to	So sánh với
+	Comparison	Phép so sánh
+	Contains	Chứa
+	Descending	Giảm dần
+	Does not contain	Không chứa
+	Equal to	Bằng
+	Filter Recipients	Lọc người nhận
+	Filter and Sort	Lọc và sắp xếp
+	Greater than	Lớn hơn
+	Greater than or equal	Lớn hơn hoặc bằng
+	Is blank	Trống
+	Is not blank	Không trống
+	Less than	Nhỏ hơn
+	Less than or equal	Nhỏ hơn hoặc bằng
+	Not equal to	Khác
+	Or	Hoặc
+	Remove condition	Xóa điều kiện
+	Sort Recipients	Sắp xếp người nhận
+	Sort by	Sắp xếp theo
+	Then by	Sau đó theo
+	{count} of {total} recipients will be merged.	Sẽ phối {count} trên {total} người nhận.
+
+# Backstage › Recover (#586)
+	Recover	Khôi phục
+
+# STYLEREF switch labels (#1294)
+	Add whether it is above or below	Thêm là ở phía trên hay phía dưới
+	Number only, without the label's words	Chỉ số, không kèm chữ của nhãn
+	Show its list number	Hiện số danh sách của nó
+	Show its number relative to this field	Hiện số của nó tương đối với trường này
+	Show its number with all higher levels	Hiện số của nó kèm mọi cấp cao hơn
+	Take the last match on the page	Lấy kết quả khớp cuối cùng trên trang
+
+# Bookmark dialog (#1277)
+	Delete Bookmark	Xóa dấu trang
+	Hidden bookmarks	Dấu trang ẩn
+	Sort by:	Sắp xếp theo:
+
+# Page Setup › Mirror margins (#1239)
+	Mirror margins	Lề đối xứng
+
+# Insert Hyperlink › Place in This Document (#1370)
+	Existing File or Web Page	Tệp hoặc trang web hiện có
+	Link to:	Liên kết tới:
+	Place in This Document	Vị trí trong tài liệu này
+
+# Missing dictionary on the status bar (#1441)
+	No spelling dictionary for {language} is installed, so it isn't checked. WordCraft looks for the Hunspell dictionary {name} in the WORDCRAFT_DICTIONARIES folder and in the usual system locations.	Chưa cài từ điển chính tả cho {language}, nên ngôn ngữ này không được kiểm tra. WordCraft tìm từ điển Hunspell {name} trong thư mục WORDCRAFT_DICTIONARIES và ở các vị trí thông thường của hệ thống.
+	{language} (no dictionary)	{language} (không có từ điển)

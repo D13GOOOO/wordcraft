@@ -289,6 +289,21 @@ to the AUR itself. Install one of them:
 | [`wordcraft`](https://aur.archlinux.org/packages/wordcraft) | The latest release, built from source with `cargo` | You prefer to build releases yourself |
 | [`wordcraft-git`](https://aur.archlinux.org/packages/wordcraft-git) | The current `main` branch, built from source | You want unreleased changes and accept an occasional broken build |
 For example `yay -S wordcraft-bin` or `paru -S wordcraft-bin`.
+
+#### Community packages
+
+These packages are maintained by community members, not by the WordCraft team.
+
+On Gentoo, the [::snakebyte overlay](https://github.com/switch87/snakebyte-overlay) packages the
+Linux release as `app-office/wordcraft-bin` (prebuilt) and `app-office/wordcraft` (built from source):
+
+```sh
+eselect repository add snakebyte git https://github.com/switch87/snakebyte-overlay.git
+emaint sync -r snakebyte
+echo 'app-office/wordcraft-bin ~amd64' >> /etc/portage/package.accept_keywords/wordcraft
+emerge --ask app-office/wordcraft-bin
+```
+
 ### FreeBSD
 
 | Build | File |
