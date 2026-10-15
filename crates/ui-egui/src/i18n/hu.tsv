@@ -87,6 +87,9 @@
 	Book Title	Könyvcím
 	Bookmark	Könyvjelző
 	Bookmark name:	Könyvjelző neve:
+	Delete Bookmark	Könyvjelző törlése
+	Hidden bookmarks	Rejtett könyvjelzők
+	Sort by:	Rendezés:
 	Border Painter	Szegélyfestő
 	Border\nPainter	Szegély-\nfestő
 	Borders	Szegélyek
@@ -328,6 +331,7 @@
 	Immersive	Elmélyült
 	Immersive Reader	Elmélyült olvasás
 	Immersive\nReader	Elmélyült\nolvasás
+	In the margin	A margón
 	Increase Font Size	Betűméret növelése
 	Increase Indent	Behúzás növelése
 	Indent	Behúzás
@@ -381,6 +385,8 @@
 	Labels	Címkék
 	Landscape	Fekvő
 	Language	Nyelv
+	{language} (no dictionary)	{language} (nincs szótár)
+	No spelling dictionary for {language} is installed, so it isn't checked. WordCraft looks for the Hunspell dictionary {name} in the WORDCRAFT_DICTIONARIES folder and in the usual system locations.	A(z) {language} nyelvhez nincs telepítve helyesírási szótár, ezért nem ellenőrzi. A WordCraft a(z) {name} Hunspell-szótárat a WORDCRAFT_DICTIONARIES mappában és a szokásos rendszerhelyeken keresi.
 	Lasso	Lasszó
 	Last Column	Utolsó oszlop
 	Last commit	Utolsó commit
@@ -482,6 +488,7 @@
 	OK	OK
 	One	Egy
 	One Page	Egy oldal
+	Only for the selected text	Csak a kijelölt szövegnél
 	Open	Megnyitás
 	OpenDocument Text (*.odt)	OpenDocument szöveg (*.odt)
 	Optional Hyphen	Feltételes kötőjel
@@ -1574,6 +1581,8 @@
 	Outside border	Külső szegély
 	Overtype	Felülírás
 	Overtype (typing replaces the characters after the caret)	Felülírás (a gépelés a kurzor utáni karaktereket cseréli)
+	Show alignment guides when moving pictures and shapes	Igazítási segédvonalak megjelenítése képek és alakzatok mozgatásakor
+	Moved objects snap to the page's edges and centre, the margins and other objects. Hold Alt to move freely.	A mozgatott objektumok a lap széleihez és közepéhez, a margókhoz és más objektumokhoz illeszkednek. Szabad mozgatáshoz tartsa lenyomva az Alt billentyűt.
 	Page display	Oldalmegjelenítés
 	Paragraph marks	Bekezdésjelek
 	Personalize	Személyre szabás
@@ -2447,6 +2456,30 @@
 	Reading Column Width	Olvasási oszlopszélesség
 	Reading Line Spacing	Olvasási sorköz
 	Reading Text Size	Olvasási szövegméret
+	Filter Recipients	Címzettek szűrése
+	Sort Recipients	Címzettek rendezése
+	Filter and Sort	Szűrés és rendezés
+	And	És
+	Or	Vagy
+	Comparison	Összehasonlítás
+	Compare to	Összehasonlítás ezzel
+	Add Condition	Feltétel hozzáadása
+	Remove condition	Feltétel eltávolítása
+	Sort by	Rendezés alapja
+	Then by	Majd
+	Ascending	Növekvő
+	Descending	Csökkenő
+	Equal to	Egyenlő
+	Not equal to	Nem egyenlő
+	Less than	Kisebb, mint
+	Greater than	Nagyobb, mint
+	Less than or equal	Kisebb vagy egyenlő
+	Greater than or equal	Nagyobb vagy egyenlő
+	Is blank	Üres
+	Is not blank	Nem üres
+	Contains	Tartalmazza
+	Does not contain	Nem tartalmazza
+	{count} of {total} recipients will be merged.	{total} címzettből {count} kerül egyesítésre.
 	Undo Actions	Több művelet visszavonása
 	Undo History	Visszavonási előzmények
 	Undo 1 Action	1 művelet visszavonása
@@ -2460,6 +2493,14 @@
 	Automatic ({region})	Automatikus ({region})
 	Picture	Kép
 	Pastes the clipboard's picture.	Beilleszti a vágólapon lévő képet.
+	Text of the nearest paragraph with a given style (running headers)	Az adott stílusú legközelebbi bekezdés szövege (élőfejek)
+	Style name:	Stílus neve:
+	Take the last match on the page	A lap utolsó találatának használata
+	Show its list number	A listaszámának megjelenítése
+	Show its number relative to this field	A számának megjelenítése ehhez a mezőhöz képest
+	Show its number with all higher levels	A számának megjelenítése az összes felső szinttel
+	Number only, without the label's words	Csak a szám, a címke szavai nélkül
+	Add whether it is above or below	Annak jelzése, hogy feljebb vagy lejjebb van
 	Select Column	Oszlop kijelölése
 	Select Table Cells by Clicking	Táblázatcellák kijelölése kattintással
 	Insert Row or Column by Clicking	Sor vagy oszlop beszúrása kattintással
@@ -2468,6 +2509,13 @@
 	Insert Caption…	Felirat beszúrása…
 	Table Properties…	Táblázat tulajdonságai…
 	Search	Keresés
+	Copy to	Másolás ide
+
+# Document naming and account controls.
+	Rename Document	Dokumentum átnevezése
+	Document name	Dokumentum neve
+	Rename	Átnevezés
+	Account	Fiók
 	Privacy Options	Adatvédelmi beállítások
 	Trust Center	Adatvédelmi központ
 	Privacy for this document	A dokumentum adatvédelme
@@ -2475,6 +2523,13 @@
 	Leave out the date and time of comments and tracked changes when saving	Mentéskor a megjegyzések és a követett módosítások dátumának és idejének elhagyása
 	The document you are editing keeps the names and dates; only the saved file leaves them out.	A szerkesztett dokumentum megtartja a neveket és a dátumokat; csak a mentett fájlból maradnak ki.
 	Privacy Settings	Jelenlegi adatvédelmi beállítások
+	Waiting for the save to finish…	Várakozás a mentés befejezésére…
+	Saving {name} was cancelled, so it is still open and nothing was lost.	A(z) {name} mentése megszakadt, így továbbra is nyitva van, és semmi sem veszett el.
+	Paper	Papír
+	Paper size:	Papírméret:
+	Custom size	Egyéni méret
+	More Paper Sizes…	További papírméretek…
+	The margins don't fit on a page this size; make the margins smaller first.	A margók nem férnek el ekkora oldalon; először csökkentse a margókat.
 	Full Screen	Teljes képernyő
 	Full\nScreen	Teljes\nképernyő
 	Use the browser's full screen (F11)	Használja a böngésző teljes képernyős módját (F11)
@@ -2503,3 +2558,29 @@
 	Set Proofing Language…	Nyelvi ellenőrzés nyelvének beállítása…
 	Language Preferences…	Nyelvi beállítások…
 	Title Bar	Címsáv
+
+# Cross-reference dialog (#1003)
+	For which item:	Melyik elemhez:
+	Heading	Címsor
+	Heading text	Címsor szövege
+	Insert reference to:	Hivatkozás beszúrása erre:
+	Reference type:	Hivatkozás típusa:
+
+# Dictionaries folder (#1063)
+	Dictionaries	Szótárak
+	Dictionaries folder:	Szótárak mappája:
+	Not set: the system's usual places	Nincs beállítva: a rendszer szokásos helyei
+	Hunspell .aff and .dic files here (pl_PL, pt_BR, it_IT, hr_HR, tr_TR) are used before the system's.	Az ebben a mappában lévő Hunspell .aff és .dic fájlok (pl_PL, pt_BR, it_IT, hr_HR, tr_TR) elsőbbséget élveznek a rendszer fájljaival szemben.
+	{language}: {file}	{language}: {file}
+	{language}: no dictionary found	{language}: nem található szótár
+
+# Backstage › Recover (#586)
+	Recover	Helyreállítás
+
+# Page Setup › Mirror margins (#1239)
+	Mirror margins	Tükrözött margók
+
+# Insert Hyperlink › Place in This Document (#1370)
+	Existing File or Web Page	Létező fájl vagy weblap
+	Link to:	Hivatkozás helye:
+	Place in This Document	Dokumentumon belüli hely

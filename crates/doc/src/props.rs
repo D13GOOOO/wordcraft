@@ -1074,9 +1074,25 @@ pub struct RowProps {
     pub header: bool,
     /// Don't let the row break across pages.
     pub cant_split: bool,
+    /// Grid columns skipped before the row's first cell (`w:gridBefore`), and the preferred
+    /// width of that gap in points (`w:wBefore`).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub grid_before: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub w_before: Option<f32>,
+    /// Grid columns left after the row's last cell (`w:gridAfter`), and their width in points
+    /// (`w:wAfter`).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub grid_after: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub w_after: Option<f32>,
     /// Tracked formatting change (`w:trPrChange`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fmt_change: Option<Box<PropChange<RowProps>>>,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]

@@ -152,7 +152,10 @@ fn list_autoformat(s: &mut Session) -> Result<bool, CmdError> {
     // Bullets join an existing bullet list; typing "1. " always starts numbering again at 1,
     // as in Word.
     let found = if kind.is_bullet() { s.doc.numbering.find_kind(kind) } else { None };
-    let num = found.unwrap_or_else(|| s.doc.numbering.add_list(kind));
+    let num = match found {
+        Some(n) => n,
+        None => s.doc.numbering.try_add_list(kind)?,
+    };
     let para = s.doc.para_mut(f.story, &f.path)?;
     let len = para.len();
     para.delete(0, len)?;
@@ -189,7 +192,7 @@ fn dash_autoformat(s: &mut Session) -> Result<(), CmdError> {
     } else if before.ends_with(' ')
         && let Some(i) = before.trim_end().rfind("--")
         && i > 0
-        && before.trim_end().get(i - 1..i).is_some_and(|c| c != " ")
+        && before.trim_end()[..i].chars().next_back().is_some_and(|c| c != ' ')
     {
         let p = s.doc.para_mut(f.story, &f.path)?;
         let props = p.props_at(i).clone();
@@ -524,7 +527,7 @@ fn sample_text(s: &Session) -> Option<String> {
     if args.contains(['(', ')']) {
         return None;
     }
-    let count = |arg: &str| arg.parse::<usize>().ok().filter(|n| (1..=200).contains(n));
+    let count = |arg: &str| arg.trim().parse::<usize>().ok().filter(|n| (1..=200).contains(n));
     let counts = if args.is_empty() {
         Some((5, 3))
     } else if let Some((p, s)) = args.split_once(',') {

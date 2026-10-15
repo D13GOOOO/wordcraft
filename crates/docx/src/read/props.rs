@@ -9,7 +9,7 @@ use wordcraft_doc::props::{
 };
 use wordcraft_doc::section::{
     Columns, DocGrid, DocGridType, LineNumberRestart, LineNumbering, MAX_CHAR_SPACE, MAX_GRID_PITCH, NotePos, NoteProps, NoteRestart, NumFormat,
-    SectionProps, SectionStart,
+    PageVAlign, SectionProps, SectionStart,
 };
 
 use super::drawing_color::adjust_lum;
@@ -43,6 +43,9 @@ use crate::xml::El;
 pub struct PropCtx {
     pub major_font: String,
     pub minor_font: String,
+    /// The theme's complex-script fonts (`a:cs`), which the `…Bidi` theme slots name.
+    pub major_cs: String,
+    pub minor_cs: String,
     /// The theme's colour scheme (dk1, lt1, dk2, lt2, accent1..6, hlink, folHlink); empty when the
     /// package has none, and then `w:themeColor` falls back to the fixed colour.
     pub theme_colors: Vec<Rgb>,
@@ -82,7 +85,10 @@ impl PropCtx {
     }
 
     fn theme_font(&self, t: &str) -> Option<String> {
-        let f = if t.starts_with("major") { &self.major_font } else { &self.minor_font };
+        let (latin, cs) = if t.starts_with("major") { (&self.major_font, &self.major_cs) } else { (&self.minor_font, &self.minor_cs) };
+        // Measured in Word: `minorBidi`/`majorBidi` name the complex-script font, and an empty one
+        // names nothing, so the font beside it or the inherited one applies.
+        let f = if t.ends_with("Bidi") { cs } else { latin };
         (!f.is_empty()).then(|| f.clone())
     }
 
@@ -510,10 +516,22 @@ pub fn trpr(e: &El) -> RowProps {
             }
             "w:tblHeader" => r.header = on_off(k),
             "w:cantSplit" => r.cant_split = on_off(k),
+            "w:gridBefore" => r.grid_before = k.attr("w:val").and_then(u32_of).unwrap_or(0).min(63),
+            "w:gridAfter" => r.grid_after = k.attr("w:val").and_then(u32_of).unwrap_or(0).min(63),
+            "w:wBefore" => r.w_before = gap_width(k),
+            "w:wAfter" => r.w_after = gap_width(k),
             _ => {}
         }
     }
     r
+}
+
+/// `w:wBefore`/`w:wAfter` in points: only a width in twips (`dxa`) is kept.
+fn gap_width(k: &El) -> Option<f32> {
+    match k.attr("w:type") {
+        None | Some("dxa") => tw(k, "w:w").filter(|v| *v >= 0.0).map(|v| v.min(crate::units::MAX_LEN_PT)),
+        _ => None,
+    }
 }
 
 /// `w:tcPr`; returns the props and whether the cell is a legacy `hMerge` continuation.
@@ -656,9 +674,10 @@ pub fn sectpr(e: &El) -> (SectionProps, Vec<HfRef>) {
             }
             "w:vAlign" => {
                 s.valign = match k.attr("w:val") {
-                    Some("center") | Some("both") => VAlign::Center,
-                    Some("bottom") => VAlign::Bottom,
-                    _ => VAlign::Top,
+                    Some("center") => PageVAlign::Center,
+                    Some("both") => PageVAlign::Justify,
+                    Some("bottom") => PageVAlign::Bottom,
+                    _ => PageVAlign::Top,
                 }
             }
             "w:pgBorders" => s.page_borders = Some(borders(k)),
