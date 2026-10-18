@@ -2546,6 +2546,7 @@ preview	Title	Titel
 	Local font access was denied.	Åtkomst till lokala typsnitt nekades.
 	Loaded {count} system fonts.	{count} systemtypsnitt har lästs in.
 	Croatian	Kroatiska
+	Indonesian	Indonesiska
 	Text of the nearest paragraph with a given style (running headers)	Text från närmaste stycke med en viss stil (löpande sidhuvuden)
 	Style name:	Stilnamn:
 	Filter Recipients	Filtrera mottagare
@@ -2647,3 +2648,15 @@ preview	Title	Titel
 	Bottom Right Cell	Nedre högra cellen
 	Inside Horizontal Border	Inre vågrät kantlinje
 	Inside Vertical Border	Inre lodrät kantlinje
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Sammanfoga celler före delning
+	Table size	Tabellstorlek
+	AutoFit behavior	Autopassning
+	Initial column width:	Ursprunglig kolumnbredd:
+	AutoFit to contents	Autoanpassa efter innehåll
+	AutoFit to window	Autoanpassa efter fönster
+	Separate text at	Avgränsa text vid
+	Commas	Kommatecken
+	Other:	Annat:
+	The number must be between 1 and {max}.	Talet måste vara mellan 1 och {max}.
+	The measurement must be between {min} and {max}.	Måttet måste vara mellan {min} och {max}.
