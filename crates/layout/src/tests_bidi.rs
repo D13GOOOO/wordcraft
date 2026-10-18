@@ -146,6 +146,14 @@ fn latin_text_keeps_its_digits_spaces_and_punctuation_in_order() {
     let lv = bidi_levels(s, false);
     assert_eq!(lv[at(s, 4)], 1, "{lv:?}");
     assert_eq!(lv[at(s, 5)], 0, "{lv:?}");
+    // With no space between them the mark still keeps the Persian word's level, in either
+    // paragraph direction; the Latin text after it is its own run.
+    let s = "نسخهٔWindows";
+    for rtl in [true, false] {
+        let lv = bidi_levels(s, rtl);
+        assert_eq!(lv[at(s, 4)], lv[at(s, 3)], "rtl {rtl}: {lv:?}");
+        assert_eq!(lv[at(s, 5)] % 2, 0, "rtl {rtl}: {lv:?}");
+    }
     // Numbers alone and text across a tab are left to UAX #9.
     for s in ["سال 5-10", "سال 2 و 3", "سلام 2\tx"] {
         assert_eq!(bidi_levels(s, true), unicode_levels(s, true), "{s:?}");

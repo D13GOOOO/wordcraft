@@ -746,7 +746,7 @@ pub fn bidi_levels(text: &str, rtl_para: bool) -> Vec<u8> {
 /// opposite directions and take the paragraph's level (rule N2), so a space after a Persian word
 /// stays between the two.
 fn keep_latin_text_together(text: &str, base: u8, levels: &mut [u8]) {
-    use unicode_bidi::BidiClass::{AL, AN, B, BN, CS, EN, ES, ET, FSI, L, LRE, LRI, LRO, ON, PDF, PDI, R, RLE, RLI, RLO, S, WS};
+    use unicode_bidi::BidiClass::{AL, AN, B, BN, CS, EN, ES, ET, FSI, L, LRE, LRI, LRO, NSM, ON, PDF, PDI, R, RLE, RLI, RLO, S, WS};
     let chars: Vec<(usize, char, unicode_bidi::BidiClass)> = text.char_indices().map(|(i, c)| (i, c, unicode_bidi::bidi_class(c))).collect();
     let stop = |c: &unicode_bidi::BidiClass| matches!(c, R | AL | B | S | LRE | RLE | LRO | RLO | PDF | LRI | RLI | FSI | PDI);
     let sentence_end = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '…' | '،' | '؛' | '؟');
@@ -784,7 +784,9 @@ fn keep_latin_text_together(text: &str, base: u8, levels: &mut [u8]) {
                 l.fill(to);
             }
         };
-        span.iter().for_each(|ch| set(ch, lv));
+        // Combining marks the span starts with belong to the right-to-left letter just before the
+        // segment (rule W1): they keep its level, so that letter is shaped with them.
+        span.iter().skip_while(|(_, _, c)| *c == NSM).for_each(|ch| set(ch, lv));
         // Inside an explicit embedding the paragraph's level isn't the neutrals' one: leave them.
         if lv > base.saturating_add(1) || seg.first().is_some_and(|&(i, _, _)| embedded.get(i).copied().unwrap_or(false)) {
             continue;
