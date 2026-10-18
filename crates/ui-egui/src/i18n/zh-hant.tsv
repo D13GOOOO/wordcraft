@@ -2046,6 +2046,7 @@
 	Hyphenation zone:	斷字區：
 	Italian	義大利文
 	Croatian	克羅埃西亞文
+	Indonesian	印尼文
 	Japanese	日文
 	Korean	韓文
 	Limit consecutive hyphens to:	連續斷字數上限：
@@ -2234,3 +2235,15 @@
 # Reading Mode column widths (#1040)
 	Narrow	窄
 	Medium	中等
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	分割前合併儲存格
+	Table size	表格大小
+	AutoFit behavior	自動調整行為
+	Initial column width:	初始欄寬：
+	AutoFit to contents	依內容自動調整
+	AutoFit to window	依視窗自動調整
+	Separate text at	分隔文字於
+	Commas	逗號
+	Other:	其他：
+	The number must be between 1 and {max}.	數字必須介於 1 和 {max} 之間。
+	The measurement must be between {min} and {max}.	度量值必須介於 {min} 和 {max} 之間。

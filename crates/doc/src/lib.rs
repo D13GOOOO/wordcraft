@@ -24,6 +24,7 @@ pub mod eq;
 pub mod fields;
 pub mod freeform;
 pub mod graphic;
+pub mod line_dash;
 pub mod link;
 pub mod locale_number;
 pub mod math;
@@ -310,6 +311,11 @@ pub struct TextBody {
     /// Resize shape to fit text (`a:spAutoFit`, VML `mso-fit-shape-to-text`): Word grows the
     /// box to its text, so none of the text is cut.
     pub auto_fit: bool,
+    /// The colour the shape's style gives its text (`wps:style/a:fontRef`): what automatic text
+    /// colour means inside this box, instead of black. Text whose colour comes from its runs,
+    /// styles or the document defaults keeps it (Word, observed with synthetic documents).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_color: Option<props::Rgb>,
 }
 
 /// Word's default text box margins (left, top, right, bottom), EMU: 0.1" and 0.05".
@@ -386,6 +392,40 @@ impl Document {
         idx.and_then(|i| self.revisions.get(i as usize)).and_then(|r| r.move_name.as_deref())
     }
 }
+
+/// A building block (Insert › Quick Parts, AutoText…) kept in the document's glossary
+/// (ECMA-376 §17.12: `w:docPart`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BuildingBlock {
+    /// The entry's name (`w:docPartPr/w:name`).
+    pub name: String,
+    /// Its gallery (`w:category/w:gallery`: `docParts` for Quick Parts, `autoTxt` for AutoText…).
+    pub gallery: String,
+    /// Its category within the gallery (`w:category/w:name`, e.g. "General").
+    pub category: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// The entry's identity (`w:guid`), kept as read.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub guid: String,
+    /// The paragraph style it's associated with (`w:style`), kept as read.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub style: String,
+    /// Its types (`w:types/w:type`: `normal`, `bbPlcHdr` for a content control's placeholder…).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// How it's inserted (`w:behaviors/w:behavior`: `content`, `p`, `pg`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub behaviors: Vec<String>,
+    /// The content (`w:docPartBody`).
+    pub blocks: Blocks,
+}
+
+/// The gallery Quick Parts saves to (`w:gallery w:val="docParts"`).
+pub const QUICK_PARTS_GALLERY: &str = "docParts";
+/// The AutoText gallery (`w:gallery w:val="autoTxt"`).
+pub const AUTO_TEXT_GALLERY: &str = "autoTxt";
 
 /// A bibliography source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -682,6 +722,9 @@ pub struct Document {
     /// Source-format parts we keep verbatim for round-trip (e.g. custom XML), by part name.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub passthrough: BTreeMap<String, Arc<Vec<u8>>>,
+    /// The document's own building blocks (its glossary document), in file order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub glossary: Vec<BuildingBlock>,
 }
 
 impl Default for Document {
@@ -709,6 +752,7 @@ impl Document {
             endnote_separators: NoteSeparators::default(),
             media: BTreeMap::new(),
             passthrough: BTreeMap::new(),
+            glossary: Vec::new(),
         }
     }
 

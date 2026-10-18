@@ -2008,6 +2008,7 @@
 	Column:	열:
 	Count by:	증가 단위:
 	Czech	체코어
+	Indonesian	인도네시아어
 	Danish	덴마크어
 	Delivery address:	배달 주소:
 	Detect language automatically	언어 자동 감지
@@ -2488,3 +2489,15 @@ preview	Title	제목
 	Bottom Right Cell	오른쪽 아래 셀
 	Inside Horizontal Border	안쪽 가로 테두리
 	Inside Vertical Border	안쪽 세로 테두리
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	나누기 전에 셀 병합
+	Table size	표 크기
+	AutoFit behavior	자동 맞춤
+	Initial column width:	초기 열 너비:
+	AutoFit to contents	내용에 맞게 자동 맞춤
+	AutoFit to window	창에 맞게 자동 맞춤
+	Separate text at	텍스트 구분 기호
+	Commas	쉼표
+	Other:	기타:
+	The number must be between 1 and {max}.	숫자는 1에서 {max} 사이여야 합니다.
+	The measurement must be between {min} and {max}.	측정값은 {min}에서 {max} 사이여야 합니다.
