@@ -1365,6 +1365,10 @@ template	Letter	Pismo
 	Moved to	Premješteno u
 	Moves	Premještanja
 	Multilevel List	Višerazinski popis
+	Multilevel List Library	Biblioteka višerazinskih popisa
+	Article I.	Članak I.
+	Chapter 1	Poglavlje 1
+	Section 1.01	Odjeljak 1.01
 	Multiple Pages	Više stranica
 	Name	Naziv
 	Name (A–Z)	Naziv (A–Ž)
@@ -2257,6 +2261,7 @@ template	Letter	Pismo
 	This password type isn't supported.	Ova vrsta lozinke nije podržana.
 	This point forward	Od ove točke nadalje
 	This section	Ovaj odjeljak
+	Selected text	Odabrani tekst
 	Three	Tri
 	Through	Kroz
 	Tight	Usko
@@ -2645,3 +2650,9 @@ preview	Title	Naslov
 	Other:	Ostalo:
 	The number must be between 1 and {max}.	Broj mora biti između 1 i {max}.
 	The measurement must be between {min} and {max}.	Mjera mora biti između {min} i {max}.
+	Recently Used Fonts	Nedavno korišteni fontovi
+	All Fonts	Svi fontovi
+	Moved from:	Premješteno iz:
+	Moved to:	Premješteno u:
+	Spike	Skupljač
+	Insert Spike	Umetni iz skupljača
