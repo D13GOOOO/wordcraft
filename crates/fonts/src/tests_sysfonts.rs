@@ -587,7 +587,7 @@ fn circle_without_text_face() {
 fn circle_checks_face_coverage() {
     let db = FontDb::with_font_dirs(Vec::new());
     db.set_system_fallback(false);
-    db.add_document_fonts(vec![named_face("SourceSerif4-Regular.ttf", "Times New Roman")]);
+    db.add_document_fonts(vec![(named_face("SourceSerif4-Regular.ttf", "Times New Roman"), "Times New Roman".to_string())]);
     let preferred = db.face("Times New Roman", "Regular");
     assert!(!preferred.covers('●'));
     let primary = db.face("Source Serif 4", "Regular");

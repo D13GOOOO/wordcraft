@@ -2269,3 +2269,9 @@
 	All Fonts	Усі шрифти
 	Spike	Накопичувач
 	Insert Spike	Вставити з накопичувача
+# Add Font status (#1789)
+	Added 1 font	Додано 1 шрифт
+	Added {n} fonts	Додано шрифтів: {n}
+	{added}; {count} couldn't be read: {names}	{added}; не вдалося прочитати ({count}): {names}
+	{names} and {n} more	{names} та ще {n}
+	{added}; {n} skipped (limit {max})	{added}; пропущено: {n} (ліміт {max})

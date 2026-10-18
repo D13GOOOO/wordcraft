@@ -2656,3 +2656,9 @@ preview	Title	Naslov
 	Moved to:	Premješteno u:
 	Spike	Skupljač
 	Insert Spike	Umetni iz skupljača
+# Add Font status (#1789)
+	Added 1 font	Dodan 1 font
+	Added {n} fonts	Dodano fontova: {n}
+	{added}; {count} couldn't be read: {names}	{added}; nije moguće pročitati ({count}): {names}
+	{names} and {n} more	{names} i još {n}
+	{added}; {n} skipped (limit {max})	{added}; preskočeno: {n} (ograničenje {max})
