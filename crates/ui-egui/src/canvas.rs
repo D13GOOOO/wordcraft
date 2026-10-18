@@ -1529,7 +1529,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         (resp, rects)
     });
     app.canvas.scroll_offset = out.state.offset;
-    scrollbar_page_tip(app, ui, out.id, &geo.rects, layout.pages.len());
+    scrollbar_page_tip(app, ui, out.id, &geo.rects, &geo.bands, layout.pages.len());
     crate::ink::replay_bar(app, ui, out.inner_rect);
     app.canvas.scroll_max = (out.content_size - out.inner_rect.size()).max(egui::Vec2::ZERO);
     if app.session.view.read_mode {
@@ -2182,11 +2182,12 @@ pub fn nearest_page(rects: &[Rect], p: Pos2) -> Option<usize> {
 /// While the vertical scrollbar of the canvas scroll area `scroll` is dragged, a tip beside the
 /// pointer says which page is at the top of the window, as the status bar says it ("Page 15 of
 /// 42"): dragging through a long document, you see where you'll land (#2551). `rects` are the
-/// pages in content coordinates.
-fn scrollbar_page_tip(app: &mut WordApp, ui: &Ui, scroll: egui::Id, rects: &[Rect], pages: usize) {
+/// pages in content coordinates, `bands` the part of each on screen ([`Geometry::bands`]).
+fn scrollbar_page_tip(app: &mut WordApp, ui: &Ui, scroll: egui::Id, rects: &[Rect], bands: &[(f32, f32)], pages: usize) {
     // egui's scroll bars sense under the scroll area's id with the axis (1: vertical).
     let dragged = ui.ctx().is_being_dragged(scroll.with(1usize));
-    app.canvas.scrollbar_page = (dragged && !rects.is_empty() && pages > 0).then(|| top_page(rects, app.canvas.scroll_offset.y).min(pages - 1));
+    app.canvas.scrollbar_page =
+        (dragged && !rects.is_empty() && pages > 0).then(|| top_page(rects, bands, app.canvas.scroll_offset.y).min(pages - 1));
     let (Some(page), Some(at)) = (app.canvas.scrollbar_page, ui.ctx().pointer_latest_pos()) else { return };
     let text = crate::i18n::fmt(tl!("Page {page} of {pages}"), &[("page", &(page + 1).to_string()), ("pages", &pages.to_string())]);
     egui::Area::new(egui::Id::new("scrollbar_page_tip"))
@@ -2201,10 +2202,13 @@ fn scrollbar_page_tip(app: &mut WordApp, ui: &Ui, scroll: egui::Id, rects: &[Rec
         });
 }
 
-/// The page whose rect (content coordinates) is at height `y`, or the first one below it: the
-/// page at the top of a window scrolled to `y`. The last page past the end.
-fn top_page(rects: &[Rect], y: f32) -> usize {
-    rects.iter().position(|r| r.max.y > y).unwrap_or(rects.len().saturating_sub(1))
+/// The page shown at height `y` (content coordinates), or the first one below it: the page at
+/// the top of a window scrolled to `y`. The last page past the end. A page ends where its band
+/// (`bands`, the part on screen) does: with Hide White Space the rects overlap in the hidden
+/// margins, and the next page's text already shows there.
+fn top_page(rects: &[Rect], bands: &[(f32, f32)], y: f32) -> usize {
+    let bottom = |i: usize, r: &Rect| r.min.y + bands.get(i).map_or(r.height(), |b| b.1);
+    rects.iter().enumerate().position(|(i, r)| bottom(i, r) > y).unwrap_or(rects.len().saturating_sub(1))
 }
 
 /// Whether wheel input counts as being over the canvas. Another widget's drag (a scrollbar, say)
@@ -3597,63 +3601,79 @@ mod tests {
         use egui::accesskit::Role;
         use egui::{Event, PointerButton};
         use egui_kittest::kittest::Queryable;
-        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
-        for _ in 0..9 {
-            a.run("text.insert", json!({"text": "Page text"})).unwrap();
-            a.run("layout.break", json!({"kind": "page"})).unwrap();
-        }
-        a.run("view.commentsPane", json!({"value": false})).unwrap();
-        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
-            |ui, app: &mut WordApp| {
-                let ctx = ui.ctx().clone();
-                app.logic(&ctx);
-                app.ui(ui);
-            },
-            a,
-        );
-        for _ in 0..6 {
+        for hide_white_space in [false, true] {
+            let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+            for _ in 0..9 {
+                a.run("text.insert", json!({"text": "Page text"})).unwrap();
+                a.run("layout.break", json!({"kind": "page"})).unwrap();
+            }
+            a.run("view.commentsPane", json!({"value": false})).unwrap();
+            a.run("view.hideWhiteSpace", json!({"value": hide_white_space})).unwrap();
+            let (rev, sel) = (a.session.rev(), a.session.sel.clone());
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+                |ui, app: &mut WordApp| {
+                    let ctx = ui.ctx().clone();
+                    app.logic(&ctx);
+                    app.ui(ui);
+                },
+                a,
+            );
+            for _ in 0..6 {
+                h.step();
+            }
+            assert_eq!(h.state_mut().session.layout().pages.len(), 10);
+            let bar = h
+                .query_all_by_role(Role::ScrollBar)
+                .map(|n| n.rect())
+                .filter(|r| r.height() > r.width())
+                .max_by(|a, b| a.height().total_cmp(&b.height()))
+                .expect("the canvas's vertical scrollbar");
+            let button =
+                |at: Pos2, pressed: bool| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+            let from = pos2(bar.center().x, bar.top() + 8.0);
+            h.event(Event::PointerMoved(from));
             h.step();
-        }
-        assert_eq!(h.state_mut().session.layout().pages.len(), 10);
-        let bar = h
-            .query_all_by_role(Role::ScrollBar)
-            .map(|n| n.rect())
-            .filter(|r| r.height() > r.width())
-            .max_by(|a, b| a.height().total_cmp(&b.height()))
-            .expect("the canvas's vertical scrollbar");
-        let button =
-            |at: Pos2, pressed: bool| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
-        let from = pos2(bar.center().x, bar.top() + 8.0);
-        h.event(Event::PointerMoved(from));
-        h.step();
-        assert_eq!(h.state().canvas.scrollbar_page, None, "no tip before a drag");
-        h.event(button(from, true));
-        h.step();
-        let to = pos2(from.x, bar.top() + bar.height() * 0.65);
-        for k in 1..=6 {
-            h.event(Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+            assert_eq!(h.state().canvas.scrollbar_page, None, "no tip before a drag");
+            h.event(button(from, true));
             h.step();
+            let to = pos2(from.x, bar.top() + bar.height() * 0.65);
+            for k in 1..=6 {
+                h.event(Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+                h.step();
+            }
+            let page = h.state().canvas.scrollbar_page.expect("a tip while the scrollbar is dragged");
+            assert!((4..10).contains(&page), "a page well down the document: {page}");
+            assert!(h.query_by_label(&format!("Page {} of 10", page + 1)).is_some(), "the tip names page {}", page + 1);
+            h.event(button(to, false));
+            h.step();
+            h.step();
+            assert_eq!(h.state().canvas.scrollbar_page, None, "the tip goes with the button");
+            assert!(h.query_by_label(&format!("Page {} of 10", page + 1)).is_none(), "and its text");
+            assert_eq!((h.state().session.rev(), &h.state().session.sel), (rev, &sel), "scrolling changes neither the document nor the selection");
         }
-        let page = h.state().canvas.scrollbar_page.expect("a tip while the scrollbar is dragged");
-        assert!((4..10).contains(&page), "a page well down the document: {page}");
-        assert!(h.query_by_label(&format!("Page {} of 10", page + 1)).is_some(), "the tip names page {}", page + 1);
-        h.event(button(to, false));
-        h.step();
-        h.step();
-        assert_eq!(h.state().canvas.scrollbar_page, None, "the tip goes with the button");
-        assert!(h.query_by_label(&format!("Page {} of 10", page + 1)).is_none(), "and its text");
     }
 
     /// `top_page`: the page at a window's top, the one below in a gap, the last one past the end.
     #[test]
     fn the_page_at_the_top_of_the_window() {
         let rects: Vec<Rect> = (0..3).map(|i| Rect::from_min_size(pos2(0.0, i as f32 * 110.0), vec2(80.0, 100.0))).collect();
-        assert_eq!(top_page(&rects, 0.0), 0);
-        assert_eq!(top_page(&rects, 99.0), 0);
-        assert_eq!(top_page(&rects, 105.0), 1, "in the gap: the page below");
-        assert_eq!(top_page(&rects, 250.0), 2);
-        assert_eq!(top_page(&rects, 1e6), 2, "past the end: the last page");
-        assert_eq!(top_page(&[], 0.0), 0);
+        let whole: Vec<(f32, f32)> = rects.iter().map(|r| (0.0, r.height())).collect();
+        assert_eq!(top_page(&rects, &whole, 0.0), 0);
+        assert_eq!(top_page(&rects, &whole, 99.0), 0);
+        assert_eq!(top_page(&rects, &whole, 105.0), 1, "in the gap: the page below");
+        assert_eq!(top_page(&rects, &whole, 250.0), 2);
+        assert_eq!(top_page(&rects, &whole, 1e6), 2, "past the end: the last page");
+        assert_eq!(top_page(&[], &[], 0.0), 0);
+
+        // Hide White Space: the rects overlap in the hidden margins. Just past the seam the next
+        // page's text shows, so that page is at the top, though the previous rect reaches further.
+        let sizes = [(612.0, 792.0); 3];
+        let (full, _) = place_pages(&sizes, 0.0, 1.0, 1, vec2(800.0, 600.0));
+        let (moved, bands, _) = collapse_white_space(&full, &[(72.0, 720.0); 3], 1.0, 600.0);
+        let seam = moved[0].min.y + bands[0].1;
+        assert!(moved[0].max.y > seam + SEAM + 2.0, "the rects overlap past the seam");
+        assert_eq!(top_page(&moved, &bands, seam - 2.0), 0);
+        assert_eq!(top_page(&moved, &bands, seam + SEAM + 2.0), 1, "across the seam: the next page");
     }
 
     /// #1014: Ctrl+drag on a shape leaves it and drops a copy; a plain drag moves it.
