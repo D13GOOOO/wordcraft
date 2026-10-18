@@ -7,12 +7,12 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use kurbo::BezPath;
 use skrifa::instance::{Location, LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlinePen};
+use skrifa::outline::{DrawSettings, Engine, HintingInstance, HintingOptions, OutlinePen, Target};
 use skrifa::raw::FileRef;
 use skrifa::string::StringId;
 use skrifa::{GlyphId, MetadataProvider};
 
-mod user;
+pub(crate) mod user;
 pub use user::{FONT_FILE_EXTS, FontFormat, Installed, MAX_FONT_FILE_BYTES, UserFont, UserFontError, decode_font_file, is_font_file_name, sniff};
 
 /// The family used when a requested family is unknown (the UI sans).
@@ -84,6 +84,8 @@ pub struct FontFace {
     pub instance: Option<harfrust::ShaperInstance>,
     /// Basic Multilingual Plane coverage bitset, built on first use.
     bmp: std::sync::OnceLock<Box<[u64]>>,
+    // Some legacy CJK fonts assemble their contours with TrueType instructions.
+    outline_hinter: std::sync::OnceLock<Option<HintingInstance>>,
 }
 
 /// A cheap `Copy` handle to a face. Faces are never unloaded, so the handle lives for the rest of
@@ -177,7 +179,28 @@ impl FontFace {
         if let Some(f) = self.skrifa()
             && let Some(g) = f.outline_glyphs().get(GlyphId::new(gid))
         {
-            let _ = g.draw(DrawSettings::unhinted(Size::unscaled(), self.location()), &mut pen);
+            let hinter = self.outline_hinter.get_or_init(|| {
+                let outlines = f.outline_glyphs();
+                if !outlines.require_interpreter() {
+                    return None;
+                }
+                // At UPEM pixels, hinted coordinates remain in font units. This
+                // executes contour assembly without tying the cache to view zoom.
+                HintingInstance::new(
+                    &outlines,
+                    Size::new(self.upem as f32),
+                    self.location(),
+                    HintingOptions { engine: Engine::Interpreter, target: Target::Mono },
+                )
+                .map_err(|e| log::warn!("Cannot initialize outline interpreter for {}: {e}", self.family))
+                .ok()
+            });
+            let settings =
+                hinter.as_ref().map_or_else(|| DrawSettings::unhinted(Size::unscaled(), self.location()), |h| DrawSettings::hinted(h, false));
+            if let Err(e) = g.draw(settings, &mut pen) {
+                log::warn!("Cannot draw glyph {gid} in {}: {e}", self.family);
+                return BezPath::new();
+            }
         }
         pen.0
     }
@@ -310,7 +333,7 @@ pub struct FontDb {
     /// search sorts every loaded face, so without this text in a script the requested font lacks
     /// (Thai, #59) got slower with every font loaded.
     fallbacks: RwLock<FallbackCache>,
-    ea_fallbacks: RwLock<EaFallbackCache>,
+    run_fallbacks: RwLock<RunFallbackCache>,
     #[cfg(not(target_arch = "wasm32"))]
     catalog: RwLock<Vec<CatalogEntry>>,
     /// Fonts the user added at run time, and the folder they are stored in (#582).
@@ -546,10 +569,10 @@ struct FallbackCache {
     map: HashMap<(char, u32), Option<Arc<FontFace>>>,
 }
 
-/// [`FontDb::fallback_for_east_asian`] results: (sorted, deduplicated chars, excluded face, bold,
+/// [`FontDb::fallback_for_run`] results: (sorted, deduplicated chars, excluded face, bold,
 /// italic) → face, valid while the loaded face count is `faces`.
 #[derive(Default)]
-struct EaFallbackCache {
+struct RunFallbackCache {
     faces: usize,
     /// Chars held in the keys (bounds memory: hostile runs can be long).
     chars: usize,
@@ -557,19 +580,24 @@ struct EaFallbackCache {
     map: HashMap<(Vec<char>, u32, bool, bool), Option<Arc<FontFace>>>,
 }
 
-/// Most cached run-level East Asian fallbacks, and most chars in their keys, before the cache is
-/// reset.
-const EA_FALLBACK_CACHE_MAX: usize = 4096;
-const EA_FALLBACK_CACHE_CHARS: usize = 1 << 20;
+/// Most cached run-level fallbacks, and most chars in their keys, before the cache is reset.
+const RUN_FALLBACK_CACHE_MAX: usize = 4096;
+const RUN_FALLBACK_CACHE_CHARS: usize = 1 << 20;
 
 /// Loaded faces other than `exclude`, in fallback order: for right-to-left text the fonts made
-/// for the script first (so a word isn't split across fonts, which breaks Arabic joining), then
-/// the fallback family, upright, nearest to regular weight.
-fn fallback_order(faces: &[Arc<FontFace>], exclude: u32, rtl: bool) -> Vec<&Arc<FontFace>> {
+/// for the script first (so a word isn't split across fonts, which breaks Arabic joining); for a
+/// complex-script character `complex` (Thai, Myanmar…) faces with OpenType layout tables, the
+/// script's own families first, as the per-character fallback ranks them; then the fallback
+/// family, upright, nearest to regular weight.
+fn fallback_order(faces: &[Arc<FontFace>], exclude: u32, rtl: bool, complex: Option<char>) -> Vec<&Arc<FontFace>> {
     let mut order: Vec<&Arc<FontFace>> = faces.iter().filter(|f| f.id != exclude).collect();
     let rank =
         |f: &FontFace| if rtl { RTL_FALLBACKS.iter().position(|n| f.family.eq_ignore_ascii_case(n)).unwrap_or(RTL_FALLBACKS.len()) } else { 0 };
-    order.sort_by_key(|f| (rank(f), !f.family.eq_ignore_ascii_case(FALLBACK_FAMILY), f.italic, (f.weight - 400.0).abs() as i32));
+    let shaping = |f: &FontFace| match complex {
+        Some(c) => (!f.has_layout_tables(), crate::fallback_rank(c, &f.family)),
+        None => (false, 0),
+    };
+    order.sort_by_key(|f| (rank(f), shaping(f), !f.family.eq_ignore_ascii_case(FALLBACK_FAMILY), f.italic, (f.weight - 400.0).abs() as i32));
     order
 }
 
@@ -857,6 +885,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, legacy
         bytes,
         index,
         bmp: std::sync::OnceLock::new(),
+        outline_hinter: std::sync::OnceLock::new(),
     })
 }
 
@@ -917,7 +946,7 @@ impl FontDb {
             faces: RwLock::new(faces),
             outlines: Mutex::new(HashMap::new()),
             fallbacks: RwLock::new(FallbackCache::default()),
-            ea_fallbacks: RwLock::new(EaFallbackCache::default()),
+            run_fallbacks: RwLock::new(RunFallbackCache::default()),
             #[cfg(not(target_arch = "wasm32"))]
             catalog: RwLock::new(Vec::new()),
             user: RwLock::new(user::UserFonts::default()),
@@ -947,7 +976,7 @@ impl FontDb {
         }
         // Misses remembered while it was off may be found now.
         self.fallbacks.write().unwrap_or_else(|e| e.into_inner()).map.clear();
-        *self.ea_fallbacks.write().unwrap_or_else(|e| e.into_inner()) = EaFallbackCache::default();
+        *self.run_fallbacks.write().unwrap_or_else(|e| e.into_inner()) = RunFallbackCache::default();
         #[cfg(target_arch = "wasm32")]
         let _ = on;
     }
@@ -1531,16 +1560,20 @@ impl FontDb {
         (order.into_iter().find(|f| f.covers(c)).cloned(), faces.len())
     }
 
-    /// One fallback face for a run's East Asian characters: the first face in the fallback order
-    /// that covers **every** given character, so a whole run draws in a single CJK face instead of
-    /// mixing faces character by character (a bundled Japanese Mincho for JIS-covered ideographs
-    /// beside a Simplified-Chinese sans for the rest). Like [`Self::fallback_for`], a system font
-    /// is loaded lazily the first time no loaded face covers a character. `None` when no single
-    /// face covers them all, and the caller keeps the per-character fallback.
+    /// One fallback face for a run: the first face in the fallback order that covers **every**
+    /// given character, so a whole run draws in a single face instead of mixing faces character
+    /// by character. East Asian runs: a bundled Japanese Mincho for JIS-covered ideographs beside
+    /// a Simplified-Chinese sans for the rest. A missing Thai font (#1549): the Thai letters in
+    /// one face and the Latin letters and digits beside them in another, at another size; a Thai
+    /// face covers them all, so the run is given every character, Latin ones included.
+    /// Complex-script characters prefer the script's own families with OpenType layout tables, as
+    /// [`Self::fallback_for`] does. Like it, a system font is loaded lazily the first time no
+    /// loaded face covers a character. `None` when no single face covers them all, and the caller
+    /// keeps the per-character fallback.
     ///
     /// Cached per (character set, excluded face, bold, italic) and dropped when the loaded faces
     /// change, like [`Self::fallback_for`], so relayout doesn't repeat the search.
-    pub fn fallback_for_east_asian(&self, chars: &[char], exclude: u32, bold: bool, italic: bool) -> Option<Arc<FontFace>> {
+    pub fn fallback_for_run(&self, chars: &[char], exclude: u32, bold: bool, italic: bool) -> Option<Arc<FontFace>> {
         if chars.is_empty() {
             return None;
         }
@@ -1550,18 +1583,18 @@ impl FontDb {
         let key = (set, exclude, bold, italic);
         let n = self.read_faces().len();
         {
-            let cache = self.ea_fallbacks.read().unwrap_or_else(|e| e.into_inner());
+            let cache = self.run_fallbacks.read().unwrap_or_else(|e| e.into_inner());
             if cache.faces == n
                 && let Some(hit) = cache.map.get(&key)
             {
                 return hit.clone();
             }
         }
-        let found = self.search_east_asian(&key.0, exclude, bold, italic);
+        let found = self.search_run(&key.0, exclude, bold, italic);
         // Keyed by the face count after the search (a system fallback may have loaded fonts).
         let n = self.read_faces().len();
-        let mut cache = self.ea_fallbacks.write().unwrap_or_else(|e| e.into_inner());
-        if cache.faces != n || cache.map.len() >= EA_FALLBACK_CACHE_MAX || cache.chars.saturating_add(key.0.len()) > EA_FALLBACK_CACHE_CHARS {
+        let mut cache = self.run_fallbacks.write().unwrap_or_else(|e| e.into_inner());
+        if cache.faces != n || cache.map.len() >= RUN_FALLBACK_CACHE_MAX || cache.chars.saturating_add(key.0.len()) > RUN_FALLBACK_CACHE_CHARS {
             cache.map.clear();
             cache.faces = n;
             cache.chars = 0;
@@ -1571,7 +1604,7 @@ impl FontDb {
         found
     }
 
-    fn search_east_asian(&self, chars: &[char], exclude: u32, bold: bool, italic: bool) -> Option<Arc<FontFace>> {
+    fn search_run(&self, chars: &[char], exclude: u32, bold: bool, italic: bool) -> Option<Arc<FontFace>> {
         #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut base = self.loaded_covering(chars, exclude);
         #[cfg(not(target_arch = "wasm32"))]
@@ -1611,7 +1644,10 @@ impl FontDb {
     fn loaded_covering(&self, chars: &[char], exclude: u32) -> Option<Arc<FontFace>> {
         let faces = self.read_faces();
         let rtl = chars.iter().any(|c| crate::is_rtl(*c) || arabic_block(*c));
-        fallback_order(&faces, exclude, rtl).into_iter().find(|f| chars.iter().all(|c| f.covers(*c))).cloned()
+        // A complex-script character picks the families its script prefers (the lowest one: the
+        // run's characters come sorted).
+        let complex = chars.iter().copied().find(|c| crate::needs_layout_tables(*c));
+        fallback_order(&faces, exclude, rtl, complex).into_iter().find(|f| chars.iter().all(|c| f.covers(*c))).cloned()
     }
 
     /// Load a system font covering `c` (preferred fallback families first, then any cataloged
@@ -1749,18 +1785,38 @@ mod tests_sysfonts;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires a locally licensed kaiu.ttf; set WORDCRAFT_TEST_KAI_FONT"]
+    fn kai_contours_include_complete_character_body() {
+        use kurbo::Shape;
+        let path = std::env::var_os("WORDCRAFT_TEST_KAI_FONT").expect("set WORDCRAFT_TEST_KAI_FONT");
+        let db = super::FontDb::with_font_dirs(vec![]);
+        db.set_system_fallback(false);
+        assert!(db.add_font(std::fs::read(path).unwrap()) > 0);
+        let face = db.face("DFKai-SB", "Regular");
+        assert_eq!(face.family, "DFKai-SB");
+        for ch in ['中', '文', '契', '約'] {
+            let outline = face.glyph_outline(face.glyph_for(ch));
+            let bounds = outline.bounding_box();
+            eprintln!("{ch}: {bounds:?}, upem={}", face.upem);
+            assert!(bounds.width() > face.upem * 0.5, "{ch}: missing horizontal strokes");
+            assert!(bounds.height() > face.upem * 0.5, "{ch}: missing vertical strokes");
+            assert!(std::sync::Arc::ptr_eq(&db.outline(&face, face.glyph_for(ch)), &db.outline(&face, face.glyph_for(ch))));
+        }
+    }
+
     use super::*;
 
     #[test]
-    fn east_asian_run_fallback_is_cached_per_char_set() {
+    fn run_fallback_is_cached_per_char_set() {
         let db = FontDb::with_font_dirs(Vec::new());
         db.set_system_fallback(false);
         let latin = db.face(FALLBACK_FAMILY, "Regular");
-        let a = db.fallback_for_east_asian(&['分', '类', '分'], latin.id(), false, false).map(|f| f.id());
+        let a = db.fallback_for_run(&['分', '类', '分'], latin.id(), false, false).map(|f| f.id());
         // The same set in another order (and without the repeat) is the same entry.
-        assert_eq!(db.fallback_for_east_asian(&['类', '分'], latin.id(), false, false).map(|f| f.id()), a);
+        assert_eq!(db.fallback_for_run(&['类', '分'], latin.id(), false, false).map(|f| f.id()), a);
         {
-            let cache = db.ea_fallbacks.read().unwrap();
+            let cache = db.run_fallbacks.read().unwrap();
             assert_eq!(cache.faces, db.read_faces().len());
             assert_eq!(cache.map.len(), 1);
             assert!(cache.map.contains_key(&(vec!['分', '类'], latin.id(), false, false)));
@@ -1768,14 +1824,40 @@ mod tests {
         // Long hostile runs keep the cache bounded.
         let many: Vec<char> = (0x4E00u32..0x4E00 + 50_000).filter_map(char::from_u32).collect();
         for i in 0..30 {
-            let _ = db.fallback_for_east_asian(many.get(i..).unwrap_or(&[]), latin.id(), false, false);
+            let _ = db.fallback_for_run(many.get(i..).unwrap_or(&[]), latin.id(), false, false);
         }
-        let cache = db.ea_fallbacks.read().unwrap();
-        assert!(cache.chars <= EA_FALLBACK_CACHE_CHARS, "{}", cache.chars);
+        let cache = db.run_fallbacks.read().unwrap();
+        assert!(cache.chars <= RUN_FALLBACK_CACHE_CHARS, "{}", cache.chars);
         // Turning the system fallback on or off forgets remembered misses.
         drop(cache);
         db.set_system_fallback(false);
-        assert!(db.ea_fallbacks.read().unwrap().map.is_empty());
+        assert!(db.run_fallbacks.read().unwrap().map.is_empty());
+    }
+
+    /// The issue's run (#1549): Thai letters and digits, Latin letters, digits and the baht sign.
+    const THAI_RUN: &str = "[D] น้ำ ค่ำ ปั้น ฝั่ง ปู่ ๑๒๓๔๕๖๗๘๙๐ ฿1,250.50";
+
+    #[test]
+    fn a_thai_run_with_latin_falls_back_to_one_face() {
+        let db = FontDb::global();
+        if db.fallback_for('น', 0).is_none() {
+            eprintln!("skipped: no Thai font installed");
+            return;
+        }
+        let latin = db.face(FALLBACK_FAMILY, "Regular");
+        let chars: Vec<char> = THAI_RUN.chars().filter(|c| !c.is_whitespace()).collect();
+        let f = db.fallback_for_run(&chars, latin.id(), false, false).expect("one face covers the run");
+        assert_ne!(f.id, latin.id);
+        for c in &chars {
+            assert!(f.covers(*c), "{} covers {c}", f.family);
+        }
+        // A Thai font with OpenType tables, as the per-character fallback prefers.
+        assert!(f.has_layout_tables(), "{} shapes Thai", f.family);
+        // Without system fonts no bundled face covers Thai: the caller keeps the per-character path.
+        let bundled = FontDb::with_font_dirs(Vec::new());
+        bundled.set_system_fallback(false);
+        let latin = bundled.face(FALLBACK_FAMILY, "Regular");
+        assert!(bundled.fallback_for_run(&chars, latin.id(), false, false).is_none());
     }
 
     #[test]
