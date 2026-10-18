@@ -2059,6 +2059,7 @@
 	Hyphenation zone:	Зона дељења речи:
 	Italian	Италијански
 	Croatian	Хрватски
+	Indonesian	Индонежански
 	Japanese	Јапански
 	Korean	Корејски
 	Limit consecutive hyphens to:	Највише узастопних цртица:
@@ -2247,3 +2248,15 @@
 # Reading Mode column widths (#1040)
 	Narrow	Уска
 	Medium	Средња
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Споји ћелије пре дељења
+	Table size	Величина табеле
+	AutoFit behavior	Аутоматско уклапање
+	Initial column width:	Почетна ширина колоне:
+	AutoFit to contents	Аутоматски уклопи према садржају
+	AutoFit to window	Аутоматски уклопи према прозору
+	Separate text at	Раздвоји текст на
+	Commas	Зарези
+	Other:	Друго:
+	The number must be between 1 and {max}.	Број мора бити између 1 и {max}.
+	The measurement must be between {min} and {max}.	Мера мора бити између {min} и {max}.
