@@ -764,6 +764,8 @@
 	Space before/after:	Abstand vor/nach:
 	Spacing	Abstand
 	Spacing (pt):	Abstand (pt):
+	Kerning for fonts:	Unterschneidung für Schriftarten:
+	Points and above	Punkt und größer
 	Speech	Sprache
 	Spelling & Grammar	Rechtschreibung und Grammatik
 	Spelling &\nGrammar	Rechtschreibung und\nGrammatik
@@ -1403,6 +1405,8 @@
 	Customize Ribbon	Menüband anpassen
 	Add to Quick Access Toolbar	Zur Symbolleiste für den Schnellzugriff hinzufügen
 	Remove from Quick Access Toolbar	Aus der Symbolleiste für den Schnellzugriff entfernen
+	Hide Quick Access Toolbar	Symbolleiste für den Schnellzugriff ausblenden
+	Show Quick Access Toolbar	Symbolleiste für den Schnellzugriff einblenden
 	Customize the Ribbon…	Menüband anpassen…
 	Customize Quick Access Toolbar…	Symbolleiste für den Schnellzugriff anpassen…
 	More Commands…	Weitere Befehle…
@@ -2125,6 +2129,10 @@
 	Contains	Enthält
 	Does not contain	Enthält nicht
 	{count} of {total} recipients will be merged.	{count} von {total} Empfängern werden zusammengeführt.
+	Find in list:	In Liste suchen:
+	Any field	Beliebiges Feld
+	Matches: {count}	Treffer: {count}
+	Show only records that will be merged	Nur Datensätze anzeigen, die zusammengeführt werden
 	Show KeyTips (Alt or F10)	Zugriffstasten anzeigen (Alt oder F10)
 	Reading	Lesen
 	Reading Column Width	Spaltenbreite beim Lesen
@@ -2256,3 +2264,26 @@
 	All Fonts	Alle Schriftarten
 	Spike	Sammlung
 	Insert Spike	Sammlung einfügen
+# Add Font status (#1789)
+	Added 1 font	1 Schriftart hinzugefügt
+	Added {n} fonts	{n} Schriftarten hinzugefügt
+	{added}; {count} couldn't be read: {names}	{added}; {count} nicht lesbar: {names}
+	{names} and {n} more	{names} und {n} weitere
+	{added}; {n} skipped (limit {max})	{added}; {n} übersprungen (Limit {max})
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	Im Text
+	In margin	Im Rand
+	Drop Cap Options…	Initialoptionen…
+	Lines to drop:	Initialhöhe (Zeilen):
+	Distance from text:	Abstand zum Text:
+	Distance from text	Abstand zum Text
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Seitenverhältnis sperren
+	Relative to original picture size	Relativ zur ursprünglichen Bildgröße
+	Original size	Originalgröße
+	{width} × {height} pixels	{width} × {height} Pixel
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Geben Sie eine Größe in einer beliebigen Einheit ein, z. B. 5 cm oder 300 px. Die andere Seite passt sich an, sodass das Bild seine Proportionen behält.
+
+	Import…	Importieren…

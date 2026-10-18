@@ -111,7 +111,8 @@ fn default_margins(t: &Table, style: Option<&TableStyleProps>) -> [f32; 4] {
 /// bottom margins.
 pub fn cell_margins(doc: &wordcraft_doc::Document, t: &Table, row: usize, cell: usize) -> [f32; 4] {
     let style = t.props.style.as_deref().and_then(|id| doc.styles.table_style(id));
-    t.rows.get(row).and_then(|r| r.cells.get(cell)).and_then(|c| c.props.margins).unwrap_or_else(|| default_margins(t, style.as_ref()))
+    let defaults = default_margins(t, style.as_ref());
+    t.rows.get(row).and_then(|r| r.cells.get(cell)).map_or(defaults, |cell| cell.props.resolved_margins(defaults))
 }
 
 /// The most paragraphs [`measure_table_columns`] lays out: a huge table is measured by its first
@@ -183,7 +184,7 @@ pub fn measure_table_columns(doc: &wordcraft_doc::Document, t: &Table) -> Vec<(f
         let mut g = 0usize;
         for cell in &row.cells {
             let span = cell.span();
-            let margins = cell.props.margins.unwrap_or(margins_def);
+            let margins = cell.props.resolved_margins(margins_def);
             let side = margins[1].max(0.0) + margins[3].max(0.0);
             let text = style.as_ref().map(|st| region_text(st, region_of(t, style.as_ref(), ri, g, span, ncols)));
             let env = crate::para::ParaEnv {
@@ -196,6 +197,7 @@ pub fn measure_table_columns(doc: &wordcraft_doc::Document, t: &Table) -> Vec<(f
                 hide_deleted: Default::default(),
                 table: text.as_ref(),
                 proofing: None,
+                typing_word: None,
                 // Measurement uses a fixed environment (like show_hidden/proofing above).
                 numeral: crate::NumeralMode::default(),
                 exclusions: &[],
@@ -203,6 +205,7 @@ pub fn measure_table_columns(doc: &wordcraft_doc::Document, t: &Table) -> Vec<(f
                 read_line_spacing: None,
                 grid: crate::para::Grid::default(),
                 fit_objects: false,
+                fitted: &[],
             };
             let (mut min, mut max) = (EMPTY_TEXT, EMPTY_TEXT);
             if cell.props.vmerge != VMerge::Continue && !cell.props.text_direction.is_turned() {
@@ -286,7 +289,7 @@ pub(crate) fn first_cell_left_margin(ctx: &Ctx, t: &Table) -> f32 {
 }
 
 fn first_cell_left_margin_in(t: &Table, def: [f32; 4]) -> f32 {
-    t.rows.first().and_then(|r| r.cells.first()).and_then(|c| c.props.margins).unwrap_or(def)[1]
+    t.rows.first().and_then(|r| r.cells.first()).map_or(def, |cell| cell.props.resolved_margins(def))[1]
 }
 
 /// What a table style gives the cells in one set of parts: shading, vertical alignment and each
@@ -355,7 +358,15 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
     let ncols = t.cols().max(1);
     // Column widths.
     let mut grid: Vec<f32> = if t.grid.len() == ncols {
-        t.grid.iter().map(|w| if w.is_finite() { w.max(4.0) } else { 72.0 }).collect()
+        // Grid units can be narrower than a text box, including omitted row-end columns.
+        t.grid
+            .iter()
+            .map(|&w| match w {
+                w if !w.is_finite() => 72.0,
+                w if w <= 0.0 => 4.0,
+                w => w,
+            })
+            .collect()
     } else {
         vec![avail / ncols as f32; ncols]
     };
@@ -371,8 +382,13 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
         _ => None,
     };
     if let Some(tw) = target {
-        let k = tw / total.max(1.0);
-        grid.iter_mut().for_each(|w| *w *= k);
+        if total > 0.0 && total < 1.0 {
+            // Divide first: a tiny positive total can overflow the scale factor.
+            grid.iter_mut().for_each(|w| *w = (*w / total) * tw);
+        } else {
+            let k = tw / total.max(1.0);
+            grid.iter_mut().for_each(|w| *w *= k);
+        }
         total = tw;
     }
     if total > avail * 1.5 && !t.props.fixed {
@@ -470,7 +486,7 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
         let (row_top, row_bottom) = row
             .cells
             .iter()
-            .map(|c| c.props.margins.unwrap_or(margins_def))
+            .map(|c| c.props.resolved_margins(margins_def))
             .fold((0.0f32, 0.0f32), |(top, bottom), m| (top.max(m[0]), bottom.max(m[2])));
         for (ci, cell) in row.cells.iter().enumerate() {
             let span = cell.span();
@@ -479,7 +495,7 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
             // Right to left: grid columns run from the right edge, and the start (left) margin
             // is on the cell's right.
             let (x0, x1) = if rtl { ((acc - x1).max(0.0), (acc - x0).max(0.0)) } else { (x0, x1) };
-            let m = cell.props.margins.unwrap_or(margins_def);
+            let m = cell.props.resolved_margins(margins_def);
             let margins = if rtl { [row_top, m[3], row_bottom, m[1]] } else { [row_top, m[1], row_bottom, m[3]] };
             let cw = (x1 - x0 - margins[1] - margins[3]).max(4.0);
             let region = region_of(t, style.as_ref(), ri, g, span, ncols);
@@ -537,6 +553,23 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
             // border): the border's width sits on top of the cell margin.
             let band = |b: Option<Border>| b.filter(Border::is_visible).map_or(0.0, |b| b.width.clamp(0.0, 12.0));
             let (band_t, band_b) = (band(borders.top), if ri + 1 == nrows { band(borders.bottom) } else { 0.0 });
+            // A shared edge painted by the row above still clears this cell's text and minimum.
+            let band_t = if band_t > 0.0 || cell.props.vmerge == VMerge::Continue {
+                band_t
+            } else {
+                rows.last()
+                    .into_iter()
+                    .flatten()
+                    .filter(|above| above.g < g + span && g < above.g + above.span)
+                    .filter(|above| {
+                        above.vmerge == VMerge::None
+                            || !t.cell_at_grid(ri, above.g).is_some_and(|ci| {
+                                t.grid_col(ri, ci) == above.g && row.cells.get(ci).is_some_and(|c| c.props.vmerge == VMerge::Continue)
+                            })
+                    })
+                    .map(|above| band(above.borders.bottom))
+                    .fold(0.0, f32::max)
+            };
             let insets = margins[0] + margins[2] + band_t + band_b;
             let turn = cell.props.text_direction;
             let mut turned = None;
@@ -562,7 +595,7 @@ pub fn layout_table(ctx: &mut Ctx, story: StoryRef, t: &Table, path: &[u32], ava
                 turned = Some(Turned { turn, len, across, snap, region, ci, top: margins[0] + band_t });
                 (items, len)
             } else {
-                let BoxLayout { mut items, mut height, floats_bottom, last_top } =
+                let BoxLayout { mut items, mut height, floats_bottom, last_top, .. } =
                     layout_box(ctx, story, &cell.blocks, &cpath, cw, BoxContext::Cell(text), depth, None);
                 // A hidden end-of-cell mark: an empty last paragraph takes no room (Word for
                 // Windows: a row of empty such cells is only its borders).
@@ -808,11 +841,15 @@ pub fn split_row(row: &RowLayout, cut: f32) -> Option<(RowLayout, RowLayout)> {
         .collect();
     // A cell that widow/orphan control leaves with nothing on this page, though its first line
     // would fit there, takes the whole row on with it: Word doesn't leave the other cells behind
-    // beside an empty one (observed with synthetic documents).
+    // beside an empty one (observed with synthetic documents). Trailing space alone can move
+    // the last paragraph without deferring the whole row.
     for (items, splits) in cells.iter().zip(&splits) {
         let first = items.iter().zip(splits).find_map(|(it, &split)| text_lines(it).map(|t| (t, split)));
-        if let Some(((para, l0, _, y), split)) = first
+        if let Some(((para, l0, l1, y), split)) = first
             && split == l0
+            && para.rp.widow_control
+            && l1.saturating_sub(l0) > 1
+            && crate::item_bottom(y, para, l0, l1).is_some_and(|bottom| !fits(bottom))
             && para.lines.get(l0).is_some_and(|l| fits(y + l.top - para.lines.get(l0).map_or(0.0, |f| f.top) + l.height))
         {
             return None;
@@ -1075,7 +1112,7 @@ fn column_content(ctx: &mut Ctx, t: &Table, style: Option<&TableStyleProps>, dep
                 let text = style.map(|st| region_text(st, region_of(t, style, ri, g, cell.span(), cols.len())));
                 let (lo, hi) = blocks_content(ctx, &cell.blocks, text.as_ref(), depth);
                 any |= hi > 0.0;
-                let m = cell.props.margins.unwrap_or(margins_def);
+                let m = cell.props.resolved_margins(margins_def);
                 let need = (lo + m[1] + m[3], hi + m[1] + m[3]);
                 match cols.get_mut(g) {
                     Some(col) if span == 1 => *col = (col.0.max(need.0), col.1.max(need.1)),

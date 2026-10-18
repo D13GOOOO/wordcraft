@@ -21,6 +21,8 @@ enum Piece<'a> {
     Br(Option<&'static str>),
     NbHyphen,
     SoftHyphen,
+    /// A symbol character in its own font (`w:sym`, ECMA-376 §17.3.3.30).
+    Sym(&'a str, char),
     /// An object and its byte offset in the paragraph.
     Obj(&'a InlineObject, usize),
 }
@@ -137,6 +139,12 @@ impl Writer<'_> {
             let tail = head.split_off(first.len_utf8()).ok();
             if let Some(mut tail) = tail {
                 head.props.drop_cap = Some(lines);
+                // The letter's own font goes on its run (`w:rFonts`).
+                if let Some(f) = p.props.drop_cap_font.as_ref().filter(|f| !f.trim().is_empty()) {
+                    for r in &mut head.runs {
+                        r.props.font = Some(f.clone());
+                    }
+                }
                 head.section = None;
                 self.para_inner(w, &head, rels, false, depth, true);
                 tail.props.drop_cap = None;
@@ -259,6 +267,7 @@ impl Writer<'_> {
             let range = range.clone();
             let base = range.start;
             let Some(text) = p.text.get(range) else { continue };
+            let sym_font = props.sym_font.as_deref().filter(|f| !f.trim().is_empty());
             let mut buf = String::new();
             for (ci, c) in text.char_indices() {
                 let special = match c {
@@ -276,6 +285,9 @@ impl Writer<'_> {
                             None => Piece::Text(String::new()),
                         })
                     }
+                    // `w:char` is a two-byte code (ST_ShortHexNumber) from U+0020, as the reader
+                    // takes it; anything else stays text.
+                    c if (0x20..=0xFFFF).contains(&u32::from(c)) => sym_font.map(|f| Piece::Sym(f, c)),
                     _ => None,
                 };
                 match special {
@@ -358,6 +370,7 @@ impl Writer<'_> {
                             Piece::Br(Some(t)) => w.empty("w:br", &[("w:type", t)]),
                             Piece::NbHyphen => w.empty("w:noBreakHyphen", &[]),
                             Piece::SoftHyphen => w.empty("w:softHyphen", &[]),
+                            Piece::Sym(font, c) => w.empty("w:sym", &[("w:font", font), ("w:char", &format!("{:04X}", u32::from(*c)))]),
                             _ => {}
                         }
                     }
@@ -565,6 +578,12 @@ impl Writer<'_> {
                 let root = match (graphic.chart.as_deref(), graphic.smart_art.as_deref(), graphic.source.as_deref()) {
                     (Some(spec), _, _) => crate::xml::parse(self.chart_graphic(spec, rels).as_bytes()).ok(),
                     (None, Some(spec), _) => crate::xml::parse(self.smart_art_graphic(spec, *gw, *gh, rels).as_bytes()).ok(),
+                    // Ink in a group member's form (no drawing of its own) can't stand alone: left
+                    // out before its parts are queued, so no orphan part or relationship is written.
+                    (None, None, Some(src)) if ink && !standalone_ink(src) => {
+                        log::warn!("docx: group-member ink outside its group can't be written; it is left out");
+                        None
+                    }
                     (None, None, Some(src)) => self.embedded_tree(src, rels, ink.then_some((*gw, *gh, float, alt.as_str()))),
                     (None, None, None) => None,
                 };
@@ -741,6 +760,15 @@ impl Writer<'_> {
                         InlineObject::Shape { extra, .. } => {
                             let id = self.shape_docpr(extra.id);
                             self.wsp(w, &c.obj, Some(&id), at, rels, depth);
+                        }
+                        // Native ink kept from the file, with its fallback, at the member's place.
+                        InlineObject::Graphic { w: iw, h: ih, float, graphic, .. } if graphic.kind == wordcraft_doc::graphic::GraphicKind::Ink => {
+                            if let Some(src) = graphic.source.as_deref()
+                                && let Some(mut root) = self.embedded_tree(src, rels, None)
+                            {
+                                Self::place_member(&mut root, [c.x, c.y, *iw, *ih], float, 0);
+                                w.raw(&root.to_xml());
+                            }
                         }
                         _ => {}
                     }
@@ -1169,7 +1197,7 @@ impl Writer<'_> {
                     ("relativeHeight", &self.z.to_string()),
                     ("behindDoc", behind),
                     ("locked", "0"),
-                    ("layoutInCell", "1"),
+                    ("layoutInCell", if float.outside_cell { "0" } else { "1" }),
                     ("allowOverlap", "1"),
                 ],
             );
@@ -1744,4 +1772,39 @@ fn comment_reference_style(doc: &wordcraft_doc::Document) -> &str {
         .iter()
         .find(|s| s.kind == wordcraft_doc::styles::StyleKind::Character && s.name.eq_ignore_ascii_case("annotation reference"))
         .map_or("CommentReference", |s| s.id.as_str())
+}
+
+/// Is kept ink `src` in a form the drawing-level writer writes: its `a:graphic`, a direct run-level
+/// `w:contentPart`, or an `mc:AlternateContent` whose choice holds a drawing (not a group member's
+/// bare `w14:contentPart`, nor one in `mc:AlternateContent` with a `pic:pic` fallback)?
+fn standalone_ink(src: &wordcraft_doc::graphic::Embedded) -> bool {
+    match crate::xml::parse(src.xml.as_bytes()) {
+        Ok(root) => match root.name.as_str() {
+            "a:graphic" | "w:contentPart" => true,
+            "mc:AlternateContent" => root.child("mc:Choice").and_then(|c| c.child("w:drawing")).is_some_and(|d| d.find("a:graphic").is_some()),
+            _ => false,
+        },
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod standalone_ink_tests {
+    use super::standalone_ink;
+    use wordcraft_doc::graphic::Embedded;
+
+    fn emb(xml: &str) -> Embedded {
+        Embedded { xml: xml.into(), ..Default::default() }
+    }
+
+    /// Review: an alternate whose choice has a drawing but no `a:graphic` is not writable as ink.
+    #[test]
+    fn alternate_content_needs_a_graphic() {
+        let ns = r#"xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#;
+        let with =
+            format!("<mc:AlternateContent {ns}><mc:Choice Requires=\"w14\"><w:drawing><a:graphic/></w:drawing></mc:Choice></mc:AlternateContent>");
+        let without = format!("<mc:AlternateContent {ns}><mc:Choice Requires=\"w14\"><w:drawing/></mc:Choice></mc:AlternateContent>");
+        assert!(standalone_ink(&emb(&with)));
+        assert!(!standalone_ink(&emb(&without)));
+    }
 }

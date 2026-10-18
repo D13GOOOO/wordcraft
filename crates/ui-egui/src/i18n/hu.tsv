@@ -696,6 +696,8 @@
 	Space before/after:	Térköz előtte/utána:
 	Spacing	Térköz
 	Spacing (pt):	Térköz (pt):
+	Kerning for fonts:	Alávágás betűtípusoknál:
+	Points and above	pont és nagyobb
 	Speech	Beszéd
 	Spelling & Grammar	Helyesírás és nyelvhelyesség
 	Spelling &\nGrammar	Helyesírás és\nnyelvhelyesség
@@ -1791,6 +1793,8 @@
 	Customize Ribbon	Menüszalag testreszabása
 	Add to Quick Access Toolbar	Felvétel a gyorselérési eszköztárra
 	Remove from Quick Access Toolbar	Eltávolítás a gyorselérési eszköztárról
+	Hide Quick Access Toolbar	Gyorselérési eszköztár elrejtése
+	Show Quick Access Toolbar	Gyorselérési eszköztár megjelenítése
 	Customize the Ribbon…	Menüszalag testreszabása…
 	Customize Quick Access Toolbar…	Gyorselérési eszköztár testreszabása…
 	More Commands…	További parancsok…
@@ -2503,6 +2507,10 @@
 	Contains	Tartalmazza
 	Does not contain	Nem tartalmazza
 	{count} of {total} recipients will be merged.	{total} címzettből {count} kerül egyesítésre.
+	Find in list:	Keresés a listában:
+	Any field	Bármely mező
+	Matches: {count}	Találatok: {count}
+	Show only records that will be merged	Csak az egyesítendő rekordok megjelenítése
 	Undo Actions	Több művelet visszavonása
 	Undo History	Visszavonási előzmények
 	Undo 1 Action	1 művelet visszavonása
@@ -2652,3 +2660,37 @@
 	All Fonts	Összes betűtípus
 	Spike	Gyűjtő
 	Insert Spike	Beszúrás a gyűjtőből
+# Add Font status (#1789)
+	Added 1 font	1 betűtípus hozzáadva
+	Added {n} fonts	{n} betűtípus hozzáadva
+	{added}; {count} couldn't be read: {names}	{added}; {count} nem olvasható: {names}
+	{names} and {n} more	{names} és még {n}
+	{added}; {n} skipped (limit {max})	{added}; {n} kihagyva (korlát: {max})
+	nothing is selected	nincs kijelölve semmi
+	select a picture or shape first	előbb jelöljön ki egy képet vagy alakzatot
+	select recipients first	előbb válasszon címzetteket
+	select two or more pictures or shapes first (Shift+click)	jelöljön ki két vagy több képet vagy alakzatot (Shift+kattintás)
+	text boxes can't go inside a text box	szövegdoboz nem kerülhet szövegdobozba
+	the cursor isn't in a table	a kurzor nem táblázatban van
+	{name} options	{name} beállításai
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	Süllyesztett
+	In margin	Margón
+	Drop Cap Options…	Iniciálé beállításai…
+	Lines to drop:	Sorok száma:
+	Distance from text:	Távolság a szövegtől:
+	Distance from text	Távolság a szövegtől
+
+# Drop Cap disabled reasons (#2601)
+	the paragraph is empty	a bekezdés üres
+	the paragraph starts with a space	a bekezdés szóközzel kezdődik
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Méretarány zárolása
+	Relative to original picture size	Az eredeti képmérethez viszonyítva
+	Original size	Eredeti méret
+	{width} × {height} pixels	{width} × {height} képpont
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Írj be egy méretet bármilyen mértékegységben, például 5 cm vagy 300 px. A másik oldal követi, így a kép megtartja az arányait.
+
+	Import…	Importálás…
