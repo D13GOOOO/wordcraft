@@ -5907,6 +5907,30 @@ fn body_text_frames_go_where_the_frame_puts_them() {
     assert!((body.top - 72.0).abs() < 1.0 && (body.x - 72.0).abs() < 1.0, "the frames take no room: ({}, {})", body.x, body.top);
 }
 
+/// A footnote referenced in a body text frame sits at the bottom of the frame's page, as it does
+/// from a paragraph in the flow.
+#[test]
+fn footnotes_referenced_in_a_body_text_frame_are_placed() {
+    let frame = wordcraft_doc::props::TextFrame {
+        w: Some(150.0),
+        x: 300.0,
+        y: 400.0,
+        h_anchor: "page".into(),
+        v_anchor: "page".into(),
+        wrap: "around".into(),
+        ..Default::default()
+    };
+    let mut p = wordcraft_doc::Paragraph::with_text("Framed reference", Default::default());
+    p.props.frame = Some(frame);
+    let mut d = Document::new();
+    d.body = vec![wordcraft_doc::para_block(p), wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text("Body", Default::default()))];
+    let id = footnote(&mut d, &Pos::body(0, "Framed reference".len()), "Frame note payload.");
+    let l = lay(&d);
+    let c = l.caret(&d.start_of(StoryRef::Part(id))).expect("the frame's footnote is placed");
+    assert_eq!(c.page, 0);
+    assert!(c.top > 600.0, "at the page bottom: {c:?}");
+}
+
 /// Where a list paragraph's text starts when its style has indents of its own (measured in Word,
 /// `plan/word` R16): the list level's indents go on top of the most derived style that gives the
 /// list, so that style's own indent (and those of styles based on it) win, its base styles' don't
