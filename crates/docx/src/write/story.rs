@@ -520,7 +520,12 @@ impl Writer<'_> {
                         self.rev_open(w, props);
                         w.open("w:r", &[]);
                         self.rpr(w, &p);
-                        w.empty(mark, &[]);
+                        // A custom mark is plain text; the placeholder would turn it into a number.
+                        if custom.is_empty() {
+                            w.empty(mark, &[]);
+                        } else {
+                            w.leaf("w:t", &[("xml:space", "preserve")], custom);
+                        }
                         w.close("w:r");
                         self.rev_close(w, props);
                     }
@@ -1043,6 +1048,7 @@ impl Writer<'_> {
                     w.empty("a:srgbClr", &[("val", &c.hex())]);
                 }
                 w.close("a:solidFill");
+                line_dash(w, &extra.dash);
                 if ink {
                     w.empty("a:round", &[]);
                 }
@@ -1052,6 +1058,7 @@ impl Writer<'_> {
             None => {
                 w.open("a:ln", &[]);
                 w.empty("a:noFill", &[]);
+                line_dash(w, &extra.dash);
                 w.close("a:ln");
             }
         }
@@ -1486,6 +1493,28 @@ fn cust_geom(w: &mut W, f: &wordcraft_doc::freeform::Freeform, sw: f32, sh: f32)
     }
     w.close("a:pathLst");
     w.close("a:custGeom");
+}
+
+/// Explicit DrawingML outline dashes, before joins and arrowheads.
+fn line_dash(w: &mut W, dash: &wordcraft_doc::line_dash::LineDash) {
+    use wordcraft_doc::line_dash::{LineDash, MAX_DASH_STOPS};
+    if dash.is_solid() {
+        return;
+    }
+    if let Some(preset) = dash.ooxml() {
+        w.empty("a:prstDash", &[("val", preset)]);
+        return;
+    }
+    if let LineDash::Custom(stops) = dash {
+        if stops.is_empty() {
+            return;
+        }
+        w.open("a:custDash", &[]);
+        for (d, sp) in stops.iter().take(MAX_DASH_STOPS) {
+            w.empty("a:ds", &[("d", &d.to_string()), ("sp", &sp.to_string())]);
+        }
+        w.close("a:custDash");
+    }
 }
 
 /// A shape's `a:effectLst` (ECMA-376 Part 1 §20.1.8.26), children in schema order.

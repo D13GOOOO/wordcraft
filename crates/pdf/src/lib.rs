@@ -1,4 +1,4 @@
-//! WordCraft PDF export, written with `krilla`.
+//! WordCraft PDF export through the shared `craft-pdf` writer and Krilla drawing primitives.
 //!
 //! [`export`] lays the document out and draws each page's display list
 //! ([`wordcraft_layout::display::page_display`]) into a PDF page:
@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU16;
 use std::sync::Arc;
 
+use craft_pdf::write::{self, Metadata, WriteError, Writer, backend as krilla};
 use krilla::action::{Action, LinkAction};
 use krilla::annotation::{Annotation, LinkAnnotation, Target};
 use krilla::color::rgb;
@@ -33,7 +34,7 @@ use krilla::destination::XyzDestination;
 use krilla::error::KrillaError;
 use krilla::geom::{Path, PathBuilder, Point, Size, Transform};
 use krilla::image::Image;
-use krilla::metadata::{DateTime, Metadata};
+use krilla::metadata::DateTime;
 use krilla::num::NormalizedF32;
 use krilla::outline::{Outline, OutlineNode};
 use krilla::page::PageSettings;
@@ -66,6 +67,12 @@ pub enum PdfError {
     Write(String),
 }
 
+impl From<WriteError> for PdfError {
+    fn from(error: WriteError) -> Self {
+        Self::Write(error.to_string())
+    }
+}
+
 /// Export options.
 #[derive(Clone, Debug)]
 pub struct PdfOptions {
@@ -95,17 +102,23 @@ impl Default for PdfOptions {
 /// deletions are left out, as in Word's "No Markup" view. With `comments` each page carries the
 /// markup area with the comment balloons.
 pub fn export(doc: &Document, opts: &PdfOptions) -> Result<Vec<u8>, PdfError> {
-    let lo = LayoutOptions { hide_deleted: !opts.include_markup, comment_balloons: opts.comments, ..Default::default() };
-    let lay = layout(doc, &mut LayoutCache::new(), &lo);
-    export_layout(doc, &lay, opts)
+    write::guard(|| {
+        let lo = LayoutOptions { hide_deleted: !opts.include_markup, comment_balloons: opts.comments, ..Default::default() };
+        let lay = layout(doc, &mut LayoutCache::new(), &lo);
+        export_layout_inner(doc, &lay, opts)
+    })
 }
 
 /// Write an existing layout of `doc` as PDF.
 pub fn export_layout(doc: &Document, lay: &DocLayout, opts: &PdfOptions) -> Result<Vec<u8>, PdfError> {
+    write::guard(|| export_layout_inner(doc, lay, opts))
+}
+
+fn export_layout_inner(doc: &Document, lay: &DocLayout, opts: &PdfOptions) -> Result<Vec<u8>, PdfError> {
     let pages: Vec<usize> = match &opts.pages {
         Some(v) => {
             if let Some(bad) = v.iter().find(|p| **p >= lay.pages.len()) {
-                return Err(PdfError::BadPage(*bad + 1));
+                return Err(PdfError::BadPage(bad.saturating_add(1)));
             }
             v.clone()
         }
@@ -118,7 +131,7 @@ pub fn export_layout(doc: &Document, lay: &DocLayout, opts: &PdfOptions) -> Resu
     // the whole export. Draw that font's glyphs as outlines instead and write the document again.
     let mut outlined = HashSet::new();
     loop {
-        match write(doc, lay, opts, &pages, &outlined)? {
+        match write_attempt(doc, lay, opts, &pages, &outlined)? {
             Attempt::Done(bytes) => return Ok(bytes),
             Attempt::BadFont(id, msg) if outlined.len() < MAX_OUTLINED_FONTS && outlined.insert(id) => {
                 log::warn!("PDF: {msg}; its text is drawn as outlines");
@@ -138,10 +151,11 @@ enum Attempt {
     BadFont(u32, String),
 }
 
-fn write(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[usize], outlined: &HashSet<u32>) -> Result<Attempt, PdfError> {
+fn write_attempt(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[usize], outlined: &HashSet<u32>) -> Result<Attempt, PdfError> {
     let settings = krilla::SerializeSettings { compress_content_streams: opts.compress, enable_tagging: opts.tagged, ..Default::default() };
-    let mut pdf = krilla::Document::new_with(settings);
-    pdf.set_metadata(metadata(doc, opts));
+    let language = doc.styles.default_chr.lang.clone().filter(|l| !l.is_empty() && l.is_ascii());
+    let mut writer = Writer::new_with_language(settings, metadata(doc, opts), language);
+    let pdf = writer.document_mut();
 
     let mut ex = Exporter {
         doc,
@@ -149,6 +163,7 @@ fn write(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[usize], ou
         opts,
         out_index: pages.iter().enumerate().map(|(o, p)| (*p, o)).collect(),
         fonts: HashMap::new(),
+        font_error: None,
         outlined,
         cmaps: HashMap::new(),
         images: HashMap::new(),
@@ -162,7 +177,7 @@ fn write(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[usize], ou
         pdf.set_outline(o);
     }
     for &pi in pages {
-        let Some(page) = lay.pages.get(pi) else { return Err(PdfError::BadPage(pi + 1)) };
+        let Some(page) = lay.pages.get(pi) else { return Err(PdfError::BadPage(pi.saturating_add(1))) };
         let fit = Fit::of(page);
         let (w, h) = (clamp_side(fit.paper_w), clamp_side(page.h));
         let size = Size::from_wh(w, h).ok_or(PdfError::NoPages)?;
@@ -188,16 +203,22 @@ fn write(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[usize], ou
     if opts.tagged {
         pdf.set_tag_tree(ex.tag_tree());
     }
-    match pdf.finish() {
+    if let Some(error) = ex.font_error {
+        return Err(error);
+    }
+    match writer.finish() {
         Ok(bytes) => Ok(Attempt::Done(bytes)),
-        Err(KrillaError::Font(font, msg)) => {
-            let bad = ex.fonts.iter().find(|(_, (_, f))| f.as_ref() == Some(&font));
-            match bad {
-                Some((id, (face, _))) => Ok(Attempt::BadFont(*id, format!("font {} {} could not be embedded ({msg})", face.family, face.style))),
-                None => Err(PdfError::Write(format!("a font could not be embedded ({msg})"))),
+        Err(WriteError::Serialization(error)) => match *error {
+            KrillaError::Font(font, msg) => {
+                let bad = ex.fonts.iter().find(|(_, (_, f))| f.as_ref() == Some(&font));
+                match bad {
+                    Some((id, (face, _))) => Ok(Attempt::BadFont(*id, format!("font {} {} could not be embedded ({msg})", face.family, face.style))),
+                    None => Err(PdfError::Write(format!("a font could not be embedded ({msg})"))),
+                }
             }
-        }
-        Err(e) => Err(PdfError::Write(format!("{e:?}"))),
+            error => Err(PdfError::Write(format!("{error:?}"))),
+        },
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -363,32 +384,28 @@ fn clamp_side(v: f32) -> f32 {
 
 fn metadata(doc: &Document, opts: &PdfOptions) -> Metadata {
     let c = &doc.core;
-    let mut m = Metadata::new().creator("WordCraft".into()).producer("WordCraft".into());
+    let mut m = Metadata { creator: "WordCraft".into(), producer: "WordCraft".into(), ..Default::default() };
     let title = opts.title.clone().unwrap_or_else(|| c.title.clone());
     if !title.trim().is_empty() {
-        m = m.title(title);
+        m.title = Some(title);
     }
     let author = opts.author.clone().unwrap_or_else(|| c.creator.clone());
     if !author.trim().is_empty() {
-        m = m.authors(vec![author]);
+        m.authors = vec![author];
     }
     if !c.subject.trim().is_empty() {
-        m = m.description(c.subject.clone());
+        m.description = Some(c.subject.clone());
     } else if !c.description.trim().is_empty() {
-        m = m.description(c.description.clone());
+        m.description = Some(c.description.clone());
     }
     let kw: Vec<String> = c.keywords.split([',', ';']).map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect();
     if !kw.is_empty() {
-        m = m.keywords(kw);
-    }
-    if let Some(lang) = doc.styles.default_chr.lang.clone().filter(|l| !l.is_empty() && l.is_ascii()) {
-        m = m.language(lang);
+        m.keywords = kw;
     }
     let date = parse_iso(&c.created).or_else(|| now_unix().map(civil));
     if let Some((y, mo, d, h, mi, s)) = date {
-        m = m.creation_date(
-            DateTime::new(y.clamp(0, 9999) as u16).month(mo).day(d).hour(h).minute(mi).second(s).utc_offset_hour(0).utc_offset_minute(0),
-        );
+        m.created =
+            Some(DateTime::new(y.clamp(0, 9999) as u16).month(mo).day(d).hour(h).minute(mi).second(s).utc_offset_hour(0).utc_offset_minute(0));
     }
     m
 }
@@ -629,6 +646,7 @@ struct Exporter<'a> {
     out_index: HashMap<usize, usize>,
     /// Embedded fonts by face id (`None`: krilla can't read it).
     fonts: HashMap<u32, (FaceRef, Option<Font>)>,
+    font_error: Option<PdfError>,
     /// Faces whose glyphs are drawn as outlines because krilla can't subset them.
     outlined: &'a HashSet<u32>,
     cmaps: HashMap<u32, Arc<HashMap<u32, char>>>,
@@ -661,15 +679,21 @@ impl Exporter<'_> {
         if self.outlined.contains(&face.id()) {
             return None;
         }
+        let font_error = &mut self.font_error;
         self.fonts
             .entry(face.id())
             .or_insert_with(|| {
-                let data: krilla::Data = face.data().to_vec().into();
-                let font = if face.is_variable() {
-                    let coords: Vec<(krilla::text::Tag, f32)> = face.coords.iter().map(|(t, v)| (krilla::text::Tag::new(t), *v)).collect();
-                    Font::new_variable(data, face.index(), &coords)
-                } else {
-                    Font::new(data, face.index())
+                let variations = face.is_variable().then_some(face.coords.as_slice());
+                let font = match write::font(face.data(), face.index(), variations) {
+                    Ok(font) => Some(font),
+                    // Keep WordCraft's existing policy: unreadable faces are skipped.
+                    Err(WriteError::InvalidFont) => None,
+                    Err(error) => {
+                        // Allocation, validation or backend failures must fail the export,
+                        // rather than return a PDF with missing text.
+                        font_error.get_or_insert_with(|| error.into());
+                        None
+                    }
                 };
                 (*face, font)
             })
@@ -918,7 +942,7 @@ impl Exporter<'_> {
             }
             Draw::Line { x0, y0, x1, y1, width, color, stroke, alpha, .. } => self.line(s, (*x0, *y0, *x1, *y1), *width, *color, *stroke, *alpha),
             Draw::Image { rect, media, crop, alpha, .. } => self.picture(s, rect, media, crop, *alpha),
-            Draw::Path { segs, fill: f, stroke, stroke_width } => {
+            Draw::Path { segs, fill: f, stroke, stroke_width, dash } => {
                 let mut pb = PathBuilder::new();
                 append_path(&mut pb, &wordcraft_layout::display::seg_path(segs));
                 let Some(p) = pb.finish() else { return };
@@ -927,6 +951,7 @@ impl Exporter<'_> {
                     paint: rgb::Color::new(c.0, c.1, c.2).into(),
                     // Width 0 (or none) is a hairline.
                     width: if stroke_width.is_finite() && *stroke_width > 0.0 { stroke_width.clamp(0.25, 200.0) } else { 0.75 },
+                    dash: (!dash.is_empty()).then(|| StrokeDash { array: dash.clone(), offset: 0.0 }),
                     ..Default::default()
                 }));
                 if f.is_some() || stroke.is_some() {
@@ -965,7 +990,7 @@ impl Exporter<'_> {
                 s.draw_path(&p);
                 s.set_stroke(None);
             }
-            Draw::Shape { rect, kind, fill: f, stroke, stroke_width, effects, corner } => {
+            Draw::Shape { rect, kind, fill: f, stroke, stroke_width, effects, corner, dash } => {
                 let Some(p) = shape_path(*kind, rect, *corner) else { return };
                 let can_fill = *kind != ShapeKind::Line;
                 let fx = effects.sanitized();
@@ -989,6 +1014,7 @@ impl Exporter<'_> {
                 s.set_stroke(stroke.map(|c| Stroke {
                     paint: rgb::Color::new(c.0, c.1, c.2).into(),
                     width: if stroke_width.is_finite() { stroke_width.clamp(0.25, 200.0) } else { 0.75 },
+                    dash: (!dash.is_empty()).then(|| StrokeDash { array: dash.clone(), offset: 0.0 }),
                     ..Default::default()
                 }));
                 if f.is_some() && can_fill || stroke.is_some() {
@@ -997,7 +1023,7 @@ impl Exporter<'_> {
                 s.set_fill(None);
                 s.set_stroke(None);
             }
-            Draw::Art { path, fx, color, alpha } => {
+            Draw::Art { path, fx, color, alpha, .. } => {
                 for l in wordcraft_layout::wordart::art_layers(path, fx, *color, *alpha) {
                     let mut pb = PathBuilder::new();
                     append_path(&mut pb, &l.path);
