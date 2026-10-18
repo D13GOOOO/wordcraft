@@ -169,18 +169,39 @@ fn dash_ratio(value: &str) -> Option<u32> {
     Some(units.round() as u32)
 }
 
-/// A VML colour (`strokecolor`, `fillcolor`): `#rrggbb` or `#rgb` (Word follows it with the
-/// theme slot, as in `#4472c4 [3204]`), or a colour name.
+/// A VML colour (`strokecolor`, `fillcolor`): `#rrggbb`, `rrggbb`, `#rgb` or `rgb` (Word follows it
+/// with the theme slot, as in `#4472c4 [3204]` or `4472c4 [3204]`), an `rgb(...)` function, or a
+/// colour name.
 pub(crate) fn vml_color(v: &str) -> Option<Rgb> {
-    let v = v.split_whitespace().next()?;
-    if let Some(hex) = v.strip_prefix('#') {
-        if hex.len() == 3 && hex.is_ascii() {
-            let long: String = hex.chars().flat_map(|c| [c, c]).collect();
-            return Rgb::parse(&long);
+    let s = v.trim();
+    if let Some(inner) = s.strip_prefix("rgb(").or_else(|| s.strip_prefix("rgba(")) {
+        let nums: Vec<u8> = inner
+            .trim_end_matches(')')
+            .split(',')
+            .take(3)
+            .filter_map(|x| {
+                let x = x.trim();
+                if let Some(p) = x.strip_suffix('%') {
+                    p.trim().parse::<f32>().ok().map(|f| (f.clamp(0.0, 100.0) * 2.55).round() as u8)
+                } else {
+                    x.parse::<f32>().ok().map(|f| f.clamp(0.0, 255.0).round() as u8)
+                }
+            })
+            .collect();
+        if let [r, g, b] = nums[..] {
+            return Some(Rgb(r, g, b));
         }
+    }
+    let tok = s.split_whitespace().next()?;
+    let hex = tok.strip_prefix('#').unwrap_or(tok);
+    if hex.len() == 3 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        let long: String = hex.chars().flat_map(|c| [c, c]).collect();
+        return Rgb::parse(&long);
+    }
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return Rgb::parse(hex);
     }
-    super::drawing_color::preset_color(v)
+    super::drawing_color::preset_color(tok)
 }
 
 #[cfg(test)]
@@ -279,8 +300,13 @@ mod tests {
     #[test]
     fn vml_colours() {
         assert_eq!(vml_color("#ffc000 [3207]"), Some(Rgb(0xFF, 0xC0, 0)));
+        assert_eq!(vml_color("ffc000 [3207]"), Some(Rgb(0xFF, 0xC0, 0)));
         assert_eq!(vml_color("#f00"), Some(Rgb(0xFF, 0, 0)));
+        assert_eq!(vml_color("f00"), Some(Rgb(0xFF, 0, 0)));
         assert_eq!(vml_color("black"), Some(Rgb(0, 0, 0)));
+        assert_eq!(vml_color("Red"), Some(Rgb(0xFF, 0, 0)));
+        assert_eq!(vml_color("rgb(255, 128, 0)"), Some(Rgb(255, 128, 0)));
+        assert_eq!(vml_color("rgb(100%, 0%, 0%)"), Some(Rgb(255, 0, 0)));
         assert_eq!(vml_color("#é"), None);
         assert_eq!(vml_color(""), None);
     }

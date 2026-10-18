@@ -147,6 +147,7 @@
 	Apply to:	Прилагане към:
 	Whole document	Целия документ
 	This section	Този раздел
+	Selected text	Избрания текст
 	Fill	Запълване
 	Setting:	Настройка:
 	3-D	3-D
@@ -514,6 +515,10 @@
 	More templates →	Още шаблони →
 	Move or Resize	Преместване или преоразмеряване
 	Multilevel List	Многостепенен списък
+	Multilevel List Library	Библиотека с многостепенни списъци
+	Article I.	Член I.
+	Chapter 1	Глава 1
+	Section 1.01	Раздел 1.01
 	Multiple Pages	Няколко страници
 	Name (A–Z)	Име (А–Я)
 	Name:	Име:
@@ -2210,6 +2215,8 @@
 	Math AutoCorrect	Автокорекция на математически изрази
 	More >>	Още >>
 	Moves	Премествания
+	Moved from:	Преместено от:
+	Moved to:	Преместено в:
 	New document	Нов документ
 	No changes (read only)	Без промени (само за четене)
 	Only allow this kind of editing:	Разрешаване само на този вид редактиране:
@@ -2634,3 +2641,7 @@
 	Other:	Друго:
 	The number must be between 1 and {max}.	Числото трябва да е между 1 и {max}.
 	The measurement must be between {min} and {max}.	Размерът трябва да е между {min} и {max}.
+	Recently Used Fonts	Наскоро използвани шрифтове
+	All Fonts	Всички шрифтове
+	Spike	Натрупване
+	Insert Spike	Вмъкване на натрупаното
