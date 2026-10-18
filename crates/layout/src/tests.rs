@@ -6695,6 +6695,36 @@ fn body_text_frames_go_where_the_frame_puts_them() {
     assert!((body.top - 72.0).abs() < 1.0 && (body.x - 72.0).abs() < 1.0, "the frames take no room: ({}, {})", body.x, body.top);
 }
 
+/// A section break ends a run of paragraphs with the same frame: the paragraph after it, in the
+/// next section (on a new page), is a frame of its own at the frame's place, not stacked under the
+/// one before.
+#[test]
+fn a_section_break_ends_a_text_frame_run() {
+    let frame = wordcraft_doc::props::TextFrame {
+        w: Some(150.0),
+        x: 300.0,
+        y: 400.0,
+        h_anchor: "page".into(),
+        v_anchor: "page".into(),
+        wrap: "around".into(),
+        ..Default::default()
+    };
+    let framed = |text: &str, ends_section: bool| {
+        let mut p = wordcraft_doc::Paragraph::with_text(text, Default::default());
+        p.props.frame = Some(frame.clone());
+        if ends_section {
+            p.section = Some(Box::default());
+        }
+        wordcraft_doc::para_block(p)
+    };
+    let mut d = Document::new();
+    d.body = vec![framed("First section", true), framed("Second section", false)];
+    let l = lay(&d);
+    let (one, two) = (l.caret(&Pos::body(0, 0)).unwrap(), l.caret(&Pos::body(1, 0)).unwrap());
+    assert_eq!((one.page, two.page), (0, 1), "the next section starts a page");
+    assert!((two.x - 300.0).abs() < 1.0 && (two.top - 400.0).abs() < 1.0, "a frame of its own at the frame's place: ({}, {})", two.x, two.top);
+}
+
 /// A footnote referenced in a body text frame sits at the bottom of the frame's page, as it does
 /// from a paragraph in the flow.
 #[test]

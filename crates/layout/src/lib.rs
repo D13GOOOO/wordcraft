@@ -3409,9 +3409,11 @@ fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: 
         Some(Block::Para(q)) if frame_of(q).as_ref() == Some(&fr) => Some(q),
         _ => None,
     };
-    // Where the run of paragraphs with this frame starts (a page break before starts a new one):
-    // the frames are cut from there, so every paragraph of one finds the same first paragraph.
-    let starts_run = |b: usize| b == 0 || same(b).is_some_and(breaks_before) || same(b - 1).is_none();
+    // Where the run of paragraphs with this frame starts (a page break before, or a section break
+    // after the paragraph before, starts a new one): the frames are cut from there, so every
+    // paragraph of one finds the same first paragraph.
+    let ends_section = |q: &Paragraph| q.section.is_some();
+    let starts_run = |b: usize| b == 0 || same(b).is_some_and(breaks_before) || same(b - 1).is_none_or(ends_section);
     let start = match ctx.frame_run {
         Some((prev, start)) if prev.checked_add(1) == Some(block) && !starts_run(block) => start,
         _ => {
@@ -3425,7 +3427,7 @@ fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: 
     ctx.frame_run = Some((block, start));
     let first = start + (block - start) / MAX_FRAME_PARAS * MAX_FRAME_PARAS;
     let mut last = block;
-    while last - first + 1 < MAX_FRAME_PARAS && same(last + 1).is_some_and(|q| !breaks_before(q)) {
+    while last - first + 1 < MAX_FRAME_PARAS && same(last).is_some_and(|q| !ends_section(q)) && same(last + 1).is_some_and(|q| !breaks_before(q)) {
         last += 1;
     }
     ctx.fields.page = pb.number;
