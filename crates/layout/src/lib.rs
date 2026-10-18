@@ -3769,6 +3769,12 @@ fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc::Table, bl
         pb.y += row.height;
         pb.content_bottom = pb.content_bottom.max(pb.y);
     };
+    // Measured in Word: an at-least row's minimum height is reserved, not split. Where less room
+    // than that is left on a page that already holds something, the row starts the next page
+    // whole; a row taller than a page then splits from the top of that page.
+    let short_of_min = |ri: usize, room: f32| {
+        t.rows.get(ri).is_some_and(|r| r.props.height_rule == HeightRule::AtLeast && r.props.height.is_some_and(|h| h > room + 0.01))
+    };
     // Like Word, repeated header rows don't stay alone at the bottom of a page: when the first row
     // after them can't start under them there, the table starts on the next page.
     let first = header_rows.len();
@@ -3778,10 +3784,12 @@ fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc::Table, bl
     {
         let room = pb.bottom - pb.y - tl.rows.iter().take(first).map(|r| r.height).sum::<f32>();
         let splittable = !t.rows.get(first).is_some_and(|r| r.props.cant_split);
-        if row.height > room + 0.01 && !(splittable && table::split_row(row, room).is_some()) {
+        if row.height > room + 0.01 && (short_of_min(first, room) || !(splittable && table::split_row(row, room).is_some())) {
             pb.advance(block, body_top);
         }
     }
+    // For the move-on rule, the table's own header rows at the top of a page leave it empty.
+    let table_at_top = pb.at_top();
     for (ri, row) in tl.rows.iter().enumerate() {
         // Word never splits a row of an exact height: it moves on whole.
         let splittable = !header_rows.contains(&ri)
@@ -3792,6 +3800,8 @@ fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc::Table, bl
         let mut rest: Option<table::RowLayout> = None;
         // On a new page holding only the repeated header rows.
         let mut fresh = false;
+        // Nothing but this table's header rows above it on a page it started at the top of.
+        let under_top_headers = ri == first && table_at_top;
         // Each pass places the part of the row that fits, then breaks the page.
         for _ in 0..1000 {
             let cur = rest.as_ref().unwrap_or(row);
@@ -3814,15 +3824,11 @@ fn place_table(ctx: &mut Ctx, pb: &mut PageBuilder, t: &wordcraft_doc::Table, bl
             if pb.y + cur.height <= pb.bottom + 0.01 && !defer_kept {
                 break;
             }
-            // Measured in Word: a row with an at-least height doesn't split where less than that
-            // height is left; it starts the next page whole.
+            // An at-least row with less room than its minimum moves on whole, unless nothing
+            // is above it on this page (moving on would gain nothing).
             let room = pb.bottom - pb.y;
-            let short_of_min = rest.is_none()
-                && t.rows.get(ri).is_some_and(|r| {
-                    r.props.height_rule == wordcraft_doc::props::HeightRule::AtLeast
-                        && r.props.height.is_some_and(|h| h > room + 0.01 && h <= pb.bottom - body_top + 0.01)
-                });
-            let split = if splittable && !short_of_min && !defer_kept { table::split_row(cur, room) } else { None };
+            let moves_on = rest.is_none() && !pb.at_top() && !fresh && !under_top_headers && short_of_min(ri, room);
+            let split = if splittable && !moves_on && !defer_kept { table::split_row(cur, room) } else { None };
             match split {
                 Some((a, b)) => {
                     place(pb, &a);

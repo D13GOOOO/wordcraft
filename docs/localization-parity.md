@@ -196,6 +196,7 @@ WordCraft keeps 2,54 cm).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | The sentence-capital rule (English, Polish, Croatian, Italian, Turkish, Portuguese) skips the first word of a list item (#1741) |
 | 2026-10-16 | minor | Indonesian proofing (#498): id-ID spelling from the installed Hunspell `id_ID` dictionary (not bundled), Czech's dictionary-driven suggestions, repeated-word (hyphenated reduplication offered) and spacing checks with Indonesian messages; Review › Language, the status bar, Set Proofing Language and File › Options › Proofing list Indonesian; estimates unchanged |
 | 2026-10-16 | trivial | Read Aloud picks a voice for the sentence's language (run tag, else script) when the default voice doesn't speak it, reads Windows text as UTF-8 |
 | 2026-10-16 | trivial | Linked the new guide to installing the Hunspell dictionaries on Windows, macOS and Linux (`docs/spelling-dictionaries.md`, `pt_BR` as the example); estimates unchanged |
@@ -229,6 +230,7 @@ WordCraft keeps 2,54 cm).
 | 2026-10-13 | minor | Croatian interface catalog (2,507 entries, built-in style names shown translated), `hr-*` system locales, saved preference and font coverage checks; the template name "Letter" has its own `template` context so the paper size keeps its name; no Croatian proofing |
 | 2026-10-11 | minor | Hungarian interface catalog (2,419 entries, built-in style names shown translated; covers everything the interface audit finds), locale selection, saved preference and font coverage checks |
 | 2026-10-11 | minor | Turkish interface catalog (1,307 entries), locale selection, saved preference, Turkish casing in command search and font coverage checks; catalog sizes re-counted |
+| 2026-10-17 | trivial | English spelling (#1694): `-ically` adverbs come from their `-ic` adjective ("specifically", "scientifically"), so they're no longer flagged; other words don't take `-ally` ("desktopally" is still flagged) |
 | 2026-10-11 | trivial | English spelling (#520): our supplement `assets/spelling/en-extra.txt` adds ~220 common modern words the Moby list lacks ("desktop", "download", "email"…) |
 | 2026-10-10 | minor | Estonian interface catalog, locale selection, saved preference and font coverage checks; count labels put the noun first so they read right at 1 |
 | 2026-10-10 | minor | Serbian (Cyrillic and Latin) interface merged (#250) |
