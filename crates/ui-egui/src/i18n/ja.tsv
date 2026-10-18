@@ -2045,6 +2045,7 @@
 	Hyphenation zone:	ハイフネーション領域:
 	Italian	イタリア語
 	Croatian	クロアチア語
+	Indonesian	インドネシア語
 	Japanese	日本語
 	Korean	韓国語
 	Limit consecutive hyphens to:	連続するハイフンの上限:
@@ -2233,3 +2234,15 @@
 # Reading Mode column widths (#1040)
 	Narrow	狭い
 	Medium	中
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	分割する前にセルを結合する
+	Table size	表のサイズ
+	AutoFit behavior	自動調整
+	Initial column width:	列の幅の初期値:
+	AutoFit to contents	文字列の幅に合わせる
+	AutoFit to window	ウィンドウ幅に合わせる
+	Separate text at	文字列の区切り
+	Commas	カンマ
+	Other:	その他:
+	The number must be between 1 and {max}.	1 から {max} までの数値を指定してください。
+	The measurement must be between {min} and {max}.	{min} から {max} までの値を指定してください。
