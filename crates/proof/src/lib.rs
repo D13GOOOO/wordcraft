@@ -167,6 +167,22 @@ pub fn installed_dictionaries() -> Vec<(ProofLang, Option<std::path::PathBuf>)> 
     ]
 }
 
+/// Why the dictionary found for `lang` failed to load (unsupported encoding, too large, a parse
+/// error), if it was read and failed. Doesn't read anything itself: a dictionary nobody has
+/// checked yet reports `None` (#2830).
+pub fn dictionary_load_error(lang: ProofLang) -> Option<String> {
+    let key = match lang {
+        ProofLang::Pl => "pl_PL",
+        ProofLang::Pt => "pt_BR",
+        ProofLang::It => "it_IT",
+        ProofLang::Hr => "hr_HR",
+        ProofLang::Tr => "tr_TR",
+        ProofLang::Id => "id_ID",
+        _ => return None,
+    };
+    hunspell::load_error(key).map(|(_, reason)| reason)
+}
+
 /// A number that changes whenever a word is added to or removed from the user dictionary, or the
 /// dictionaries folder changes.
 pub fn dictionary_generation() -> u64 {
@@ -384,6 +400,23 @@ pub fn missing_dictionary(lang: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// The Hunspell name, `.dic` file and reason of a dictionary that is installed for this language
+/// but couldn't be read (unsupported `SET` encoding, too large, a parse error). `None` when it
+/// loaded, or when no file exists (then [`missing_dictionary`] names it). Reads the dictionary
+/// once (it is cached afterwards).
+pub fn unreadable_dictionary(lang: Option<&str>) -> Option<(&'static str, std::path::PathBuf, String)> {
+    let (proof_lang, loaded) = match ProofLang::from_tag(lang) {
+        ProofLang::Pl => (ProofLang::Pl, pl::has_dictionary()),
+        ProofLang::Pt => (ProofLang::Pt, pt::has_dictionary()),
+        _ => return None,
+    };
+    let name = dictionary_needed(proof_lang, false)?;
+    if loaded {
+        return None;
+    }
+    hunspell::load_error(name).map(|(file, reason)| (name, file, reason))
+}
+
 /// The Hunspell name `lang` needs when `installed` is false; only Polish and Portuguese use one.
 fn dictionary_needed(lang: ProofLang, installed: bool) -> Option<&'static str> {
     match lang {
@@ -407,14 +440,17 @@ pub fn is_correct(word: &str) -> bool {
 }
 
 /// The words every language's check accepts under `opts`: single letters, words without
-/// letters, words with digits (Ignore words that contain numbers) and words in capitals
-/// (Ignore words in UPPERCASE).
+/// letters, words with digits (Ignore words that contain numbers), words in capitals
+/// (Ignore words in UPPERCASE) and words in the user dictionary.
 fn accepted_by_options(word: &str, opts: &Options) -> bool {
     let w = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'').trim_matches('\'');
     w.chars().count() <= 1
         || !w.chars().any(char::is_alphabetic)
         || (opts.ignore_numbers && w.chars().any(|c| c.is_ascii_digit()))
         || (opts.ignore_uppercase && w.chars().all(|c| !c.is_lowercase()))
+        // The whole word: the languages split a hyphenated word into its parts, and an added
+        // `Unigranrio-RJ` is none of them (#2082).
+        || in_user_dictionary(&w.to_lowercase())
 }
 
 /// [`is_correct`] with the File › Options › Proofing choices.

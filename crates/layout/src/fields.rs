@@ -63,8 +63,8 @@ impl FieldCtx {
         self.page_from.iter().rev().find(|(from, _)| *from <= off).map_or(self.page, |(_, page)| *page)
     }
     /// A key for caches: the parts of the context a page-dependent paragraph depends on.
-    pub fn page_key(&self) -> (u32, u32, u32, u32, u64) {
-        (self.page, self.pages, self.section_pages, self.section, self.bookmarks_key)
+    pub fn page_key(&self) -> (u32, u32, u32, u32, u64, NumFormat) {
+        (self.page, self.pages, self.section_pages, self.section, self.bookmarks_key, self.page_format)
     }
     /// A key for caches of paragraph `p` with STYLEREF fields (0 when they show their stored
     /// result): a hash of the results its STYLEREF fields have on this page, so an edit to body
@@ -128,9 +128,10 @@ pub(crate) fn reference_link(instr: &str) -> Option<String> {
 pub fn format_switch(instr: &str) -> Option<NumFormat> {
     let mut it = instr.split_whitespace();
     while let Some(w) = it.next() {
-        if w == "\\*" {
-            let v = it.next()?;
-            return Some(match v {
+        if let Some(rest) = w.strip_prefix("\\*") {
+            let v = if rest.is_empty() { it.next()? } else { rest };
+            let v = v.split('\\').next().unwrap_or(v);
+            let fmt = match v {
                 "roman" => NumFormat::LowerRoman,
                 "ROMAN" | "Roman" => NumFormat::UpperRoman,
                 "alphabetic" => NumFormat::LowerLetter,
@@ -144,7 +145,8 @@ pub fn format_switch(instr: &str) -> Option<NumFormat> {
                 v if v.eq_ignore_ascii_case("ChineseNum2") => NumFormat::ChineseLegalSimplified,
                 v if v.eq_ignore_ascii_case("ChineseNum3") => NumFormat::IdeographDigital,
                 _ => continue,
-            });
+            };
+            return Some(fmt);
         }
     }
     None
@@ -189,13 +191,31 @@ pub fn field_text_on(instr: &str, result: &str, ctx: &FieldCtx, page: u32) -> (S
     }
 }
 
+/// Extract the bookmark target from a `PAGEREF` instruction.
+fn pageref_target(instr: &str) -> Option<&str> {
+    let mut parts = instr.split_whitespace();
+    let name = parts.next()?;
+    let after_name = &instr[instr.find(name)? + name.len()..];
+    let trimmed = after_name.trim_start();
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        let bookmark = rest.split('"').next()?;
+        if !bookmark.is_empty() {
+            return Some(bookmark);
+        }
+    }
+    let word = parts.next()?;
+    let target = word.split('\\').next().unwrap_or("").trim_matches('"');
+    if !target.is_empty() {
+        return Some(target);
+    }
+    None
+}
+
 /// The page a `PAGEREF` field's bookmark starts on, when known (see
 /// [`FieldCtx::bookmark_pages`]) and the field shows its number (`\p` shows "above" or "below").
 fn pageref_page(instr: &str, ctx: &FieldCtx) -> Option<(u32, NumFormat)> {
-    // The bookmark is the word after the field name, up to a switch written right after it.
-    let word = instr.split_whitespace().nth(1)?;
-    let target = word.split('\\').next().unwrap_or("").trim_matches('"');
-    if target.is_empty() || has_switch(instr, 'p') {
+    let target = pageref_target(instr)?;
+    if has_switch(instr, 'p') {
         return None;
     }
     ctx.bookmark_pages.get(target).copied()
@@ -228,6 +248,8 @@ mod tests {
         let ctx = FieldCtx { page: 4, pages: 12, ..Default::default() };
         assert_eq!(field_text("PAGE", "", &ctx), ("4".into(), true));
         assert_eq!(field_text(" PAGE \\* ROMAN ", "", &ctx).0, "IV");
+        assert_eq!(field_text("PAGE \\*roman", "", &ctx).0, "iv");
+        assert_eq!(field_text("PAGE \\*roman\\*MERGEFORMAT", "", &ctx).0, "iv");
         assert_eq!(field_text("NUMPAGES \\* CardText", "", &ctx).0, "Twelve");
         assert_eq!(field_text("NUMPAGES \\* CHINESENUM1", "", &ctx).0, "十二");
         assert_eq!(field_text("PAGE \\* ChineseNum2", "", &ctx).0, "肆");
@@ -250,7 +272,11 @@ mod tests {
 
     #[test]
     fn page_references_show_their_bookmarks_page() {
-        let pages = HashMap::from([("End_1".to_string(), (3, NumFormat::Decimal)), ("Intro".to_string(), (4, NumFormat::LowerRoman))]);
+        let pages = HashMap::from([
+            ("End_1".to_string(), (3, NumFormat::Decimal)),
+            ("Intro".to_string(), (4, NumFormat::LowerRoman)),
+            ("Chapter One".to_string(), (7, NumFormat::Decimal)),
+        ]);
         let ctx = FieldCtx { bookmark_pages: Arc::new(pages), bookmarks_key: 1, ..Default::default() };
         assert_eq!(field_text("PAGEREF End_1 \\* Arabic \\* MERGEFORMAT", "9", &ctx), ("3".into(), true));
         assert_eq!(field_text(" PAGEREF End_1 \\h ", "9", &ctx).0, "3");
@@ -259,6 +285,8 @@ mod tests {
         assert_eq!(field_text("PAGEREF Intro", "9", &ctx).0, "iv");
         assert_eq!(field_text("PAGEREF Intro \\* Arabic", "9", &ctx).0, "4");
         assert_eq!(field_text("PAGEREF \"End_1\"", "9", &ctx).0, "3");
+        assert_eq!(field_text("PAGEREF \"Chapter One\" \\h", "9", &ctx).0, "7");
+        assert_eq!(field_text("PAGEREF \"Chapter One\"\\h", "9", &ctx).0, "7");
         // Unknown bookmarks, "above"/"below" (\p) and a context without pages keep the result.
         assert_eq!(field_text("PAGEREF Missing", "9", &ctx), ("9".into(), false));
         for instr in ["PAGEREF End_1 \\p", "PAGEREF End_1 \\P", "PAGEREF End_1 \\p\\h", "PAGEREF End_1\\h\\p"] {

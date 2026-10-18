@@ -392,7 +392,12 @@ impl Document {
         if a.story != b.story {
             return Vec::new();
         }
-        self.para_paths(a.story).into_iter().filter(|p| *p >= a.path && *p <= b.path).collect()
+        // Only the blocks the range reaches are walked (not every paragraph of the story).
+        let mut out = Vec::new();
+        if let Some(bl) = self.story(a.story) {
+            crate::walk_between(bl, &mut Vec::new(), &mut out, 0, (&a.path.0, &b.path.0));
+        }
+        out
     }
 
     /// Delete `a..b`. Returns the position where the deletion collapsed to. On error the document
@@ -821,6 +826,27 @@ mod tests {
 
     fn doc(lines: &[&str]) -> Document {
         Document::from_text(&lines.join("\n"))
+    }
+
+    /// Paths between two positions are those of all the story's paragraphs between them.
+    #[test]
+    fn paths_between_matches_every_path_filtered() {
+        let mut d = doc(&["a", "b", "c", "d", "e"]);
+        let mut inner = Table::new(2, 2, 100.0);
+        inner.rows[1].cells[0].blocks.push(crate::para_block(crate::Paragraph::new()));
+        let mut t = Table::new(3, 2, 200.0);
+        t.rows[1].cells[1].blocks.insert(0, Arc::new(Block::Table(inner)));
+        d.insert_block(StoryRef::Body, &Path::top(2), Block::Table(t)).unwrap();
+        d.insert_block(StoryRef::Body, &Path::top(4), Block::Table(Table::new(1, 3, 200.0))).unwrap();
+        let all = d.para_paths(StoryRef::Body);
+        for a in &all {
+            for b in &all {
+                let (pa, pb) = (Pos { story: StoryRef::Body, path: a.clone(), off: 0 }, Pos { story: StoryRef::Body, path: b.clone(), off: 0 });
+                let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                let want: Vec<Path> = all.iter().filter(|p| *p >= lo && *p <= hi).cloned().collect();
+                assert_eq!(d.paths_between(&pa, &pb), want, "{a:?} {b:?}");
+            }
+        }
     }
 
     #[test]

@@ -868,7 +868,7 @@ pub fn autocorrect_word(s: &mut Session, on_enter: bool) -> Result<(), CmdError>
         for (c, rep) in letters.chars().rev().zip(reps.iter().rev()) {
             let from = end.saturating_sub(c.len_utf8());
             if rep.chars().ne(std::iter::once(c)) {
-                let props = para.props_of_char(from).clone();
+                let props = para.props_of_char(from).clone().without_symbol();
                 para.delete(from, end)?;
                 para.insert_text(from, rep, &props)?;
             }
@@ -910,7 +910,8 @@ pub fn autocorrect_word(s: &mut Session, on_enter: bool) -> Result<(), CmdError>
     if let Some(rep) = rep {
         let end = start + word.len();
         let para = s.doc.para_mut(f.story, &f.path)?;
-        let props = para.props_of_char(from).clone();
+        // The replacement is text: a symbol it replaces doesn't give it its symbol font (#2036).
+        let props = para.props_of_char(from).clone().without_symbol();
         para.delete(from, end)?;
         para.insert_text(from, &rep, &props)?;
         caret = (f.off + rep.len()).saturating_sub(end - from);
@@ -971,7 +972,7 @@ pub fn autocorrect_word(s: &mut Session, on_enter: bool) -> Result<(), CmdError>
         let para = s.doc.para_mut(f.story, &f.path)?;
         if let Some(c) = word.chars().next() {
             let up = upper_char(c, turkic);
-            let props = para.props_of_char(start).clone();
+            let props = para.props_of_char(start).clone().without_symbol();
             para.delete(start, start + c.len_utf8())?;
             para.insert_text(start, &up, &props)?;
             let off = (caret + up.len()).saturating_sub(c.len_utf8());
