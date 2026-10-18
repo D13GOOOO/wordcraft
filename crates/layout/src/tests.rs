@@ -6085,18 +6085,58 @@ fn body_text_frames_keep_page_breaks_and_stay_in_the_text_when_reflowed() {
     let c = read.caret(&Pos::body(0, 0)).unwrap();
     assert!(c.x < 230.0 && c.top < 390.0, "on the narrow page, in the text: ({}, {})", c.x, c.top);
 
-    // (After some text: frames take no room, so at the top of a page there is no break to make.)
-    d.body = vec![body(), framed("Attorney 1", false), framed("Attorney 2", true), body()];
-    let l = lay(&d);
-    let (one, two) = (l.caret(&Pos::body(1, 0)).unwrap(), l.caret(&Pos::body(2, 0)).unwrap());
-    assert_eq!((one.page, two.page), (0, 1), "the page break before starts a new page");
-    assert!((two.top - 400.0).abs() < 1.0, "at the top of its own frame there: {}", two.top);
+    // After body text, and on a page that holds only a frame (its lines leave the flow at the top).
+    for first in [vec![body()], vec![]] {
+        let n = first.len();
+        d.body = first.into_iter().chain([framed("Attorney 1", false), framed("Attorney 2", true), body()]).collect();
+        let l = lay(&d);
+        let (one, two) = (l.caret(&Pos::body(n, 0)).unwrap(), l.caret(&Pos::body(n + 1, 0)).unwrap());
+        assert_eq!((one.page, two.page), (0, 1), "the page break before starts a new page (after {n} body paragraphs)");
+        assert!((two.top - 400.0).abs() < 1.0, "at the top of its own frame there: {}", two.top);
+    }
 
     let brk = wordcraft_doc::para::PAGE_BREAK;
     d.body = vec![framed(&format!("Before{brk}After"), false), body()];
     let l = lay(&d);
     let after = l.caret(&Pos::body(0, format!("Before{brk}").len())).unwrap();
     assert_eq!(after.page, 1, "the text after the hard break is on the next page");
+
+    // A hard column break keeps the paragraph in the flow too.
+    let brk = wordcraft_doc::para::COLUMN_BREAK;
+    d.body = vec![framed(&format!("Before{brk}After"), false), body()];
+    let c = lay(&d).caret(&Pos::body(0, 0)).unwrap();
+    assert!((c.x - 72.0).abs() < 1.0, "in the flow, at the margin: {}", c.x);
+}
+
+/// A run of more than 64 paragraphs with one frame is cut into frames of 64 from its start: the
+/// 65th paragraph starts a new frame at the frame's place, and the ones after it stack under it
+/// instead of landing on one another.
+#[test]
+fn a_long_run_of_framed_paragraphs_is_cut_into_whole_frames() {
+    let frame = wordcraft_doc::props::TextFrame {
+        w: Some(150.0),
+        x: 300.0,
+        y: 100.0,
+        h_anchor: "page".into(),
+        v_anchor: "page".into(),
+        wrap: "around".into(),
+        ..Default::default()
+    };
+    let mut d = Document::new();
+    d.body = (0..130)
+        .map(|i| {
+            let mut p = wordcraft_doc::Paragraph::with_text(&format!("Line {i}"), Default::default());
+            p.props.frame = Some(frame.clone());
+            wordcraft_doc::para_block(p)
+        })
+        .collect();
+    let l = lay(&d);
+    let top = |b: usize| l.caret(&Pos::body(b, 0)).unwrap().top;
+    assert!((top(64) - top(0)).abs() < 0.5, "a new frame at the frame's place: {} vs {}", top(64), top(0));
+    assert!((top(128) - top(0)).abs() < 0.5, "and another: {}", top(128));
+    for b in (0..63).chain(64..127) {
+        assert!(top(b + 1) > top(b) + 1.0, "paragraph {} under {b}: {} vs {}", b + 1, top(b + 1), top(b));
+    }
 }
 
 /// Where a list paragraph's text starts when its style has indents of its own (measured in Word,

@@ -686,6 +686,10 @@ struct Ctx<'a> {
     /// Cache-key hashes of the table-style text formatting cells were laid out with
     /// ([`Ctx::table_key`]).
     table_keys: Vec<(para::CellText, u64)>,
+    /// The last body paragraph placed in a text frame and where its run of paragraphs with the
+    /// same frame starts (see [`place_framed_para`]), so the next one finds the run's start
+    /// without scanning back.
+    frame_run: Option<(usize, usize)>,
 }
 
 impl Ctx<'_> {
@@ -1703,6 +1707,16 @@ impl PageBuilder<'_> {
             Some(first) => self.seps.sep_h(first.cont) + self.notes.iter().map(|n| n.h).sum::<f32>(),
         }
     }
+    /// Whether body text or a table is on the current page already (a text frame's lines are,
+    /// though they leave `y` at the top).
+    fn has_body_content(&self) -> bool {
+        self.pages.last().is_some_and(|pg| {
+            pg.items
+                .iter()
+                .skip(self.page_items_start)
+                .any(|it| matches!(it, Placed::Lines { story: StoryRef::Body, .. } | Placed::Cell { story: StoryRef::Body, .. }))
+        })
+    }
     /// The lowest bottom of the body text and tables on the current page.
     fn body_floor(&self) -> f32 {
         let Some(pg) = self.pages.last() else { return self.top };
@@ -2054,6 +2068,7 @@ fn layout_pass(
         pct_base: None,
         quiet_marks: Vec::new(),
         mirror: false,
+        frame_run: None,
         table_keys: Vec::new(),
     };
     let sections = doc.sections();
@@ -3075,8 +3090,11 @@ fn place_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize, 
 }
 
 /// The most paragraphs one text frame in the body stacks: a longer run of paragraphs with the same
-/// frame is stacked from the paragraph this many before.
+/// frame is cut into frames of this many, counted from the run's start.
 const MAX_FRAME_PARAS: usize = 64;
+/// How far back a run of paragraphs with the same frame is looked for when its start isn't known
+/// yet (a longer run's start is taken from there).
+const MAX_FRAME_RUN: usize = 4096;
 
 /// A body paragraph in a text frame (`w:framePr`, a form or letterhead laid out in frames, #2406):
 /// placed apart, where its frame goes on the page, like a floating object; the text around wraps
@@ -3086,20 +3104,33 @@ const MAX_FRAME_PARAS: usize = 64;
 /// breaks the page. Returns false for a paragraph that isn't placed in a frame.
 fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize, body_top: f32) -> bool {
     let doc = ctx.doc;
-    let frame_of = |q: &Paragraph| doc.styles.resolve_para(&q.props).frame.filter(|_| !q.text.contains(wordcraft_doc::para::PAGE_BREAK));
+    let hard_break = |q: &Paragraph| q.text.contains(wordcraft_doc::para::PAGE_BREAK) || q.text.contains(wordcraft_doc::para::COLUMN_BREAK);
+    let frame_of = |q: &Paragraph| doc.styles.resolve_para(&q.props).frame.filter(|_| !hard_break(q));
     let breaks_before = |q: &Paragraph| doc.styles.resolve_para(&q.props).page_break_before;
     let Some(fr) = frame_of(p) else { return false };
-    if breaks_before(p) && !pb.at_top() {
+    // A page holding only frames is still not empty: their lines don't move `pb.y`.
+    if breaks_before(p) && (!pb.at_top() || pb.has_body_content()) {
         pb.new_page(block, body_top);
     }
     let same = |b: usize| match doc.body.get(b).map(|b| &**b) {
         Some(Block::Para(q)) if frame_of(q).as_ref() == Some(&fr) => Some(q),
         _ => None,
     };
-    let mut first = block;
-    while block - first < MAX_FRAME_PARAS && first > 0 && !same(first).is_some_and(breaks_before) && same(first - 1).is_some() {
-        first -= 1;
-    }
+    // Where the run of paragraphs with this frame starts (a page break before starts a new one):
+    // the frames are cut from there, so every paragraph of one finds the same first paragraph.
+    let starts_run = |b: usize| b == 0 || same(b).is_some_and(breaks_before) || same(b - 1).is_none();
+    let start = match ctx.frame_run {
+        Some((prev, start)) if prev.checked_add(1) == Some(block) && !starts_run(block) => start,
+        _ => {
+            let mut start = block;
+            while block - start < MAX_FRAME_RUN && !starts_run(start) {
+                start -= 1;
+            }
+            start
+        }
+    };
+    ctx.frame_run = Some((block, start));
+    let first = start + (block - start) / MAX_FRAME_PARAS * MAX_FRAME_PARAS;
     let mut last = block;
     while last - first + 1 < MAX_FRAME_PARAS && same(last + 1).is_some_and(|q| !breaks_before(q)) {
         last += 1;
