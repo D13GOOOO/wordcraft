@@ -6085,9 +6085,10 @@ fn body_text_frames_keep_page_breaks_and_stay_in_the_text_when_reflowed() {
     let c = read.caret(&Pos::body(0, 0)).unwrap();
     assert!(c.x < 230.0 && c.top < 390.0, "on the narrow page, in the text: ({}, {})", c.x, c.top);
 
-    d.body = vec![framed("Attorney 1", false), framed("Attorney 2", true), body()];
+    // (After some text: frames take no room, so at the top of a page there is no break to make.)
+    d.body = vec![body(), framed("Attorney 1", false), framed("Attorney 2", true), body()];
     let l = lay(&d);
-    let (one, two) = (l.caret(&Pos::body(0, 0)).unwrap(), l.caret(&Pos::body(1, 0)).unwrap());
+    let (one, two) = (l.caret(&Pos::body(1, 0)).unwrap(), l.caret(&Pos::body(2, 0)).unwrap());
     assert_eq!((one.page, two.page), (0, 1), "the page break before starts a new page");
     assert!((two.top - 400.0).abs() < 1.0, "at the top of its own frame there: {}", two.top);
 
