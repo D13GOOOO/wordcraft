@@ -144,10 +144,12 @@ pub struct Services {
     /// Desktop: the HTML on the system clipboard — another program's formatted copy (a Word
     /// document, a web page) — if any. Paste keeps its formatting (#687); see [`system_clipboard`].
     pub clipboard_html: Option<Box<dyn Fn() -> Option<String>>>,
-    /// Desktop: put HTML on the system clipboard with its plain-text alternative (html, text), for
-    /// a copy holding an equation (as MathML, #816). `true` when both are there; otherwise the
-    /// copy's text goes through egui as usual.
-    pub set_clipboard_html: Option<Box<dyn Fn(&str, &str) -> bool>>,
+    /// Desktop: put HTML on the system clipboard with its plain-text alternative (html, text, and
+    /// for a copy of one equation alone its MathML, else empty), so other programs keep the
+    /// formatting (#1523) and equations (#816). The MathML goes in the platform's MathML formats
+    /// as well, which Word reads a pasted equation from (#1297). `true` when the HTML and text are
+    /// there; otherwise the copy's text goes through egui as usual.
+    pub set_clipboard_html: Option<Box<dyn Fn(&str, &str, &str) -> bool>>,
     /// Desktop: the RTF on the system clipboard, where the platform offers it (#687).
     pub clipboard_rtf: Option<Box<dyn Fn() -> Option<String>>>,
     /// Desktop: the names of the formats on the system clipboard (MIME types, Windows format
@@ -256,6 +258,9 @@ pub struct UiState {
     #[serde(rename = "dark", skip_serializing)]
     pub(crate) legacy_dark: Option<bool>,
     pub nav_tab: String,
+    /// View › Navigation Pane: open or closed as the person left it, kept between runs (#2526).
+    /// The session owns it while running (see [`WordApp::prefs`]).
+    pub nav_pane: bool,
     pub show_discord: bool,
     /// User name (File › Options) for comments and tracked changes; empty keeps the default.
     pub author: String,
@@ -351,6 +356,7 @@ impl Default for UiState {
             animations: theme::Animations::default(),
             legacy_dark: None,
             nav_tab: "headings".into(),
+            nav_pane: false,
             show_discord: true,
             author: String::new(),
             window: None,
@@ -680,6 +686,7 @@ impl WordApp {
         ui.read_aloud_rate = self.session.read_aloud.rate();
         ui.read_aloud_skip_citations = self.session.read_aloud.skip_citations;
         ui.dark_page = self.session.view.dark_mode;
+        ui.nav_pane = self.session.view.nav_pane;
         ui.keyboard = self.session.keymap.clone();
         ui.ribbon = self.session.ribbon.clone();
         ui.ink_pens = self.session.view.draw.pens.clone();
@@ -722,6 +729,7 @@ impl WordApp {
         self.session.read_aloud.set_rate(self.ui.read_aloud_rate);
         self.session.read_aloud.skip_citations = self.ui.read_aloud_skip_citations;
         self.session.view.dark_mode = self.ui.dark_page;
+        self.session.view.nav_pane = self.ui.nav_pane;
         // Keys for commands this version doesn't have are dropped.
         self.session.keymap = std::mem::take(&mut self.ui.keyboard);
         let reg = self.session.registry.clone();
@@ -1224,6 +1232,8 @@ impl WordApp {
                 "saveAs" => {
                     self.save_as_dialog();
                 }
+                "exportPdf" => self.export_dialog("pdf"),
+                "exportPng" => self.export_dialog("png"),
                 "insertPicture" => self.pick_picture(),
                 "addFont" => self.pick_font(),
                 "loadSystemFonts" => self.load_system_fonts(),
@@ -2306,6 +2316,9 @@ fn input_dialog(id: &str, params: &Value) -> Option<&'static str> {
         "table.formula" if !has("formula") => Some("tableFormula"),
         // Sort without settings asks for the column, order and header row (#1200).
         "table.sort" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableSort"),
+        // Split Cells and Convert Text to Table without settings ask for them (#2592).
+        "table.split" if params.as_object().is_none_or(|m| m.is_empty()) => Some("splitCells"),
+        "table.fromText" if params.as_object().is_none_or(|m| m.is_empty()) => Some("textToTable"),
         // Tabs, Borders and Shading, and Page Borders without settings show their dialogs (#320).
         "para.tabs" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tabs"),
         "para.borders" if params.as_object().is_none_or(|m| m.is_empty()) => Some("borders"),
@@ -3088,6 +3101,133 @@ mod tests {
         assert!((a.canvas.scroll_offset.y - at - notch).abs() < 0.5, "a notch scrolls {notch}: {}", a.canvas.scroll_offset.y - at);
     }
 
+    /// Web Layout (#1876): text wraps to the work area, re-wraps once a resize has settled (not on
+    /// every frame of a drag) and at once on a zoom, and the width is clamped. Print Layout keeps its
+    /// page width and Draft keeps its 800 pt column after a visit to Web Layout.
+    #[test]
+    fn web_layout_fills_the_window_width() {
+        let ctx = egui::Context::default();
+        let mut a = app();
+        a.run("text.insert", json!({"text": "A long paragraph that wraps across the work area. ".repeat(200)})).unwrap();
+        let mut t = 0.0;
+        // One frame `dt` seconds after the last one, in a window `w` wide.
+        let mut frame = |a: &mut WordApp, w: f32, dt: f64| {
+            t += dt;
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, 740.0));
+            let input = egui::RawInput { events: vec![], time: Some(t), screen_rect: Some(screen), ..Default::default() };
+            ctx.run_ui(input, |ui| {
+                a.logic(ui.ctx());
+                a.ui(ui);
+            })
+            .drop_without_applying_deltas();
+        };
+        let lines = |a: &mut WordApp| {
+            a.session
+                .layout()
+                .pages
+                .iter()
+                .flat_map(|p| p.items.iter())
+                .map(|it| if let wordcraft_layout::Placed::Lines { l0, l1, .. } = it { l1 - l0 } else { 0 })
+                .sum::<usize>()
+        };
+        let tick = 1.0 / 60.0;
+        for _ in 0..3 {
+            frame(&mut a, 1400.0, tick);
+        }
+        let print_lines = lines(&mut a);
+        a.run("view.draft", json!({})).unwrap();
+        frame(&mut a, 1400.0, tick);
+        let draft_lines = lines(&mut a);
+        a.run("view.webLayout", json!({})).unwrap();
+        frame(&mut a, 1400.0, tick);
+        let wide = a.session.view.web_width;
+        assert!((900.0..1400.0).contains(&wide), "entering Web Layout fills the window at once, not 800: {wide}");
+        let wide_lines = lines(&mut a);
+        frame(&mut a, 1400.0, tick);
+        assert_eq!(a.session.view.web_width, wide, "no change without a resize");
+        let page = a.canvas.page_rects[0];
+        assert!(page.left() < 4.0, "page starts at the left edge: {page:?}");
+        // A window drag: the width holds while the size keeps changing, then follows once it settles.
+        for w in [1300.0, 1100.0, 900.0, 700.0, 500.0] {
+            frame(&mut a, w, tick);
+            assert_eq!(a.session.view.web_width, wide, "no relayout mid-drag at {w}");
+        }
+        frame(&mut a, 500.0, 0.2);
+        let narrow = a.session.view.web_width;
+        assert!((144.0..500.0).contains(&narrow), "{narrow}");
+        assert!(lines(&mut a) > wide_lines, "narrower window wraps more");
+        // A zoom re-wraps at once: at 200% the window holds half as many points.
+        frame(&mut a, 1400.0, 0.2);
+        frame(&mut a, 1400.0, 0.2);
+        let at_100 = a.session.view.web_width;
+        a.run("view.zoom", json!({"value": 200})).unwrap();
+        frame(&mut a, 1400.0, tick);
+        let at_200 = a.session.view.web_width;
+        assert!((at_200 - at_100 / 2.0).abs() < 2.0, "200% halves the width: {at_100} -> {at_200}");
+        a.run("view.zoom", json!({"value": 100})).unwrap();
+        frame(&mut a, 20.0, 0.2);
+        frame(&mut a, 20.0, 0.2);
+        assert!(a.session.view.web_width >= 144.0);
+        frame(&mut a, 1400.0, 0.2);
+        frame(&mut a, 1400.0, 0.2);
+        a.run("view.draft", json!({})).unwrap();
+        frame(&mut a, 1400.0, tick);
+        assert_eq!(a.session.layout().pages[0].w, 800.0, "Draft keeps its column after Web Layout");
+        assert_eq!(lines(&mut a), draft_lines, "Draft wraps as before Web Layout");
+        a.run("view.printLayout", json!({})).unwrap();
+        for _ in 0..3 {
+            frame(&mut a, 1400.0, tick);
+        }
+        assert_eq!(lines(&mut a), print_lines, "Print Layout is unchanged");
+    }
+
+    /// Read Mode turns columns with the keyboard (#1772): Right/Page Down forward, Left/Page Up back.
+    #[test]
+    fn reading_mode_keys_turn_columns() {
+        let ctx = egui::Context::default();
+        let mut a = app();
+        a.run("text.insert", json!({"text": "One readable paragraph in many narrow columns. ".repeat(300)})).unwrap();
+        a.run("caret.set", json!({"pos": wordcraft_doc::Pos::body(0, 0)})).unwrap();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 740.0));
+        let mut t = 0.0;
+        let mut frame = |a: &mut WordApp, events: Vec<egui::Event>| {
+            t += 1.0 / 60.0;
+            let input = egui::RawInput { events, time: Some(t), screen_rect: Some(screen), ..Default::default() };
+            ctx.run_ui(input, |ui| {
+                a.logic(ui.ctx());
+                a.ui(ui);
+            })
+            .drop_without_applying_deltas();
+        };
+        for _ in 0..3 {
+            frame(&mut a, vec![]);
+        }
+        a.run("view.readMode", json!({})).unwrap();
+        for _ in 0..3 {
+            frame(&mut a, vec![]);
+        }
+        let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        let step = a.session.view.read_width * a.canvas.scale + 18.0;
+        assert!(a.canvas.focused, "the canvas has the keyboard");
+        frame(&mut a, vec![key(egui::Key::PageDown)]);
+        for _ in 0..30 {
+            frame(&mut a, vec![]);
+        }
+        assert!((a.canvas.scroll_offset.x - step).abs() < 1.0, "Page Down turns one column: {}", a.canvas.scroll_offset.x);
+        frame(&mut a, vec![key(egui::Key::ArrowRight)]);
+        for _ in 0..30 {
+            frame(&mut a, vec![]);
+        }
+        assert!((a.canvas.scroll_offset.x - 2.0 * step).abs() < 1.0, "Right turns one column: {}", a.canvas.scroll_offset.x);
+        frame(&mut a, vec![key(egui::Key::ArrowLeft)]);
+        for _ in 0..30 {
+            frame(&mut a, vec![]);
+        }
+        assert!((a.canvas.scroll_offset.x - step).abs() < 1.0, "Left turns back: {}", a.canvas.scroll_offset.x);
+        frame(&mut a, vec![key(egui::Key::Escape)]);
+        assert!(!a.session.view.read_mode, "Escape leaves Read Mode");
+    }
+
     /// Reading Mode: reflowed viewport-height columns, horizontal wheel/navigation, exit restores
     /// Print Layout without editing or changing the document's page setup.
     #[test]
@@ -3120,7 +3260,8 @@ mod tests {
         assert_eq!(a.canvas.cols, rects.len(), "one unwrapped row");
         assert!((rects[0].top() - rects[1].top()).abs() < 0.1);
         assert!(rects[1].left() > rects[0].right());
-        assert!((rects[0].height() - (a.canvas.canvas_rect.unwrap().height() - 36.0)).abs() < 2.0);
+        // Full height, less the top gap and the page-turn bar's strip at the bottom (#1772).
+        assert!((rects[0].height() - (a.canvas.canvas_rect.unwrap().height() - 62.0)).abs() < 2.0);
         let initial_width = a.session.view.read_width;
         // A simple mouse click in a later visible column must neither pull that column
         // to the leading edge nor select text under the stationary, held pointer.
@@ -5680,6 +5821,32 @@ mod tests {
         let mut second = app();
         second.apply_prefs(serde_json::from_slice(&saved).unwrap());
         assert!(second.session.view.dark_mode);
+    }
+
+    /// #2526: the Navigation pane stays as the person left it at the next launch, and a
+    /// `ui.json` from before the setting leaves it closed.
+    #[test]
+    fn navigation_pane_visibility_survives_restart() {
+        let mut first = app();
+        assert!(!first.session.view.nav_pane);
+        first.session.view.nav_pane = true;
+        let saved = serde_json::to_vec(&first.prefs()).unwrap();
+
+        let mut second = app();
+        second.apply_prefs(serde_json::from_slice(&saved).unwrap());
+        assert!(second.session.view.nav_pane, "the pane is open again");
+
+        let mut closed = app();
+        closed.session.view.nav_pane = true;
+        closed.session.view.nav_pane = false;
+        let saved = serde_json::to_vec(&closed.prefs()).unwrap();
+        let mut third = app();
+        third.apply_prefs(serde_json::from_slice(&saved).unwrap());
+        assert!(!third.session.view.nav_pane, "a closed pane stays closed");
+
+        let mut old = app();
+        old.apply_prefs(serde_json::from_str(r#"{"navTab": "headings"}"#).unwrap());
+        assert!(!old.session.view.nav_pane, "no saved value: closed");
     }
 
     #[test]
