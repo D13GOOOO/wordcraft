@@ -179,6 +179,8 @@ pub fn field_text_on(instr: &str, result: &str, ctx: &FieldCtx, page: u32) -> (S
         "TITLE" if result.is_empty() => (ctx.title.to_string(), false),
         "AUTHOR" if result.is_empty() => (ctx.author.to_string(), false),
         "FILENAME" if result.is_empty() => (ctx.filename.to_string(), false),
+        // ASK and SET only assign text to a bookmark: they never show a result (ECMA-376 §17.16.5).
+        "ASK" | "SET" => (String::new(), false),
         "STYLEREF" => match &ctx.styleref {
             Some((ix, at)) => (ix.eval(instr, *at), true),
             None => (result.to_string(), false),
@@ -233,6 +235,17 @@ mod tests {
         assert_eq!(field_name("=SUM(ABOVE)"), "SUM(ABOVE)");
         assert_eq!(field_code_text(" PAGE \\* ROMAN "), "{ PAGE \\* ROMAN }");
         assert_eq!(field_code_text(""), "{  }");
+    }
+
+    /// #1765: ASK and SET only assign text to a bookmark; they show nothing, whatever result is stored.
+    #[test]
+    fn ask_and_set_show_nothing() {
+        let ctx = FieldCtx::default();
+        assert_eq!(field_text(r#" ASK Nominativo "Inserire nome" \d "«NOME»" "#, "«NOME» «COGNOME»", &ctx), (String::new(), false));
+        assert_eq!(field_text(r#"SET Codice "COD""#, "COD", &ctx), (String::new(), false));
+        assert_eq!(field_text("set Codice COD", "COD", &ctx).0, "");
+        // Other fields still show their stored result.
+        assert_eq!(field_text("MERGEFIELD NOME", "«NOME»", &ctx).0, "«NOME»");
     }
 
     #[test]

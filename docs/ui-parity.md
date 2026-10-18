@@ -87,6 +87,7 @@ Find selects the Results tab, including when it prefills selected text. Editing 
 | 2026-10-16 | trivial | A mouse drag that edits a table (column or row border, move handle) leaves the view where it is; typing still follows the caret (#1738) |
 | 2026-10-16 | trivial | Ctrl/⌘+wheel only zooms: a coast or wheel notch still gliding stops instead of scrolling the page on top of the zoom (#1743) |
 | 2026-10-16 | trivial | The Spike: Ctrl+F3 (⌘F3 on macOS) cuts the selection to the end of the Spike, Ctrl+Shift+F3 (⌘⇧F3) inserts everything collected and empties it; it is the AutoText entry "Spike", so Quick Parts inserts it without emptying it. Per session, not saved between launches |
+| 2026-10-15 | trivial | Table Layout › Cell Margins opens with current table defaults; unchanged margins and per-cell overrides stay intact until edits are confirmed (#1960) |
 | 2026-10-13 | trivial | New/Modify Table Style: No Border on a part that inherits its lines hides them; emptying the font box makes the part's font inherited again (#1288) |
 | 2026-10-14 | trivial | Tab stops edited on the ruler: corner kind selector, click to set, drag to move or off to clear, per-kind markers mirrored for RTL; each gesture one `para.tabs` call and one undo step; Rulers 85% → 90% |
 | 2026-10-12 | trivial | Tables on the page: one selected cell (Select Cell, or a click along its left edge) is a cell selection when its border is dragged: the border moves in its row only (#962) |
