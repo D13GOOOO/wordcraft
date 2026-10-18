@@ -5455,6 +5455,10 @@ fn word_xml_and_web_pages_saved_as_doc_open_by_content() {
     // A web page in an unknown extension is still plain text, other XML still no Word document.
     assert!(text(&crate::io::open_bytes("page.log", pages[1].as_bytes()).unwrap()).contains("<html>"));
     assert!(crate::io::open_bytes("note.doc", b"<?xml version=\"1.0\"?><note>hi</note>").is_err());
+    // Nor is XML whose root only starts like `html`.
+    for xml in [&b"<htmlish>text</htmlish>"[..], b"<!DOCTYPE htmlish><htmlish>text</htmlish>"] {
+        assert!(crate::io::open_bytes("other.doc", xml).is_err(), "{:?}", String::from_utf8_lossy(xml));
+    }
 }
 
 /// #569: a playlist (.m3u / .m3u8) — or any file with an extension WordCraft doesn't know —

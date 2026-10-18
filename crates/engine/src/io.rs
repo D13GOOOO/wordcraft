@@ -309,7 +309,9 @@ fn looks_like_web_page(bytes: &[u8]) -> bool {
         let Some(rest) = skip.and_then(|i| t.get(i..)) else { return false };
         t = rest.trim_start();
     }
-    t.starts_with("<!doctype html") || t.starts_with("<html")
+    // The tag name ends there: `<htmlish>` is some other XML, not a web page.
+    let tag = |name: &str| t.strip_prefix(name).is_some_and(|rest| rest.is_empty() || rest.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/'));
+    tag("<!doctype html") || tag("<html")
 }
 
 /// A file whose extension names no format WordCraft knows (`.m3u`, `.log`, `.ini`, none…),
