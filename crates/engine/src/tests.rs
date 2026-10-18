@@ -5452,12 +5452,6 @@ fn word_xml_and_web_pages_saved_as_doc_open_by_content() {
             assert!(t.contains("Báo cáo") && t.contains("tháng 9") && !t.contains('<'), "page {i} as {name}: {t:?}");
         }
     }
-    // A Single File Web Page (MHTML), as wiki and report exports write it for Word.
-    let mht = "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"b1\"; type=\"text/html\"\r\n\r\n--b1\r\nContent-Type: text/html; charset=\"utf-8\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<html><body><p>B=C3=A1o c=C3=A1o th=C3=A1ng 9</p></body></html>\r\n--b1--\r\n";
-    for name in ["export.doc", "export.mht", "export.MHTML"] {
-        let doc = crate::io::open_bytes(name, mht.as_bytes()).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert_eq!(text(&doc).trim(), "Báo cáo tháng 9", "{name}");
-    }
     // A web page in an unknown extension is still plain text, other XML still no Word document.
     assert!(text(&crate::io::open_bytes("page.log", pages[1].as_bytes()).unwrap()).contains("<html>"));
     assert!(crate::io::open_bytes("note.doc", b"<?xml version=\"1.0\"?><note>hi</note>").is_err());

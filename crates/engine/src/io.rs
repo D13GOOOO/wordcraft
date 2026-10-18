@@ -18,8 +18,6 @@ pub const OPEN_EXTS: &[&str] = &[
     "markdown",
     "html",
     "htm",
-    "mht",
-    "mhtml",
     "rtf",
     "odt",
     "tex",
@@ -255,7 +253,7 @@ pub(crate) fn fit_pictures(doc: &mut Document) {
 /// Does the file hold a different document format than its Word or RTF extension says? An RTF
 /// file saved as `.doc` (as accounting systems and report generators often save their
 /// documents), a `.docx` package renamed `.doc`, a Word 97-2003 file renamed `.docx`, a Word XML
-/// Document (2003 or Flat OPC) or a web page (HTML or MHTML) saved as `.doc` (#2853): Word opens
+/// Document (2003 or Flat OPC) or a web page saved as `.doc` (#2853): Word opens
 /// each by what it holds, so they go through [`open_by_content`] instead of failing.
 fn signature_contradicts(ext: &str, bytes: &[u8]) -> bool {
     let expected = match ext {
@@ -274,8 +272,6 @@ fn signature_contradicts(ext: &str, bytes: &[u8]) -> bool {
         "xml"
     } else if looks_like_web_page(bytes) {
         "html"
-    } else if wordcraft_formats::mhtml::is_mhtml(bytes) {
-        "mhtml"
     } else {
         return false;
     };
@@ -318,7 +314,7 @@ fn looks_like_web_page(bytes: &[u8]) -> bool {
 
 /// A file whose extension names no format WordCraft knows (`.m3u`, `.log`, `.ini`, none…),
 /// opened by what it holds, as Word does: a Word document or RTF file by its signature, a Word
-/// XML Document by its root element, a web page (HTML or MHTML) under a Word or RTF name as one
+/// XML Document by its root element, a web page under a Word or RTF name as one
 /// (#2853), any other text through the plain-text import with encoding detection (#569).
 /// Anything else is refused with a clear error rather than shown as garbage.
 fn open_by_content(
@@ -341,9 +337,6 @@ fn open_by_content(
         (wordcraft_docx::read_xml(bytes).map_err(|e| format!("{name}: {e}"))?, false)
     } else if matches!(ext, "doc" | "dot" | "docx" | "docm" | "dotx" | "dotm" | "rtf") && looks_like_web_page(bytes) {
         let opened = crate::io_ext::open("html", bytes, page).unwrap_or_else(|| Err(format!("{name}: can't open web pages")));
-        (opened?, false)
-    } else if matches!(ext, "doc" | "dot" | "docx" | "docm" | "dotx" | "dotm" | "rtf") && wordcraft_formats::mhtml::is_mhtml(bytes) {
-        let opened = crate::io_ext::open("mht", bytes, page).unwrap_or_else(|| Err(format!("{name}: can't open web archives")));
         (opened?, false)
     } else if wordcraft_formats::txt::is_text(bytes) {
         (wordcraft_formats::txt::import_on(bytes, page), false)
