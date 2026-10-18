@@ -6056,6 +6056,48 @@ fn footnotes_referenced_in_a_body_text_frame_are_placed() {
     assert!(c.top > 600.0, "at the page bottom: {c:?}");
 }
 
+/// A body text frame in Read Mode stays in the reflowed text (its page offsets are for the paper);
+/// a framed paragraph with a page break before goes on the next page, in a frame of its own; one
+/// with a hard page break in it stays in the flow, so the text after the break is on the next page.
+#[test]
+fn body_text_frames_keep_page_breaks_and_stay_in_the_text_when_reflowed() {
+    let frame = wordcraft_doc::props::TextFrame {
+        w: Some(150.0),
+        x: 300.0,
+        y: 400.0,
+        h_anchor: "page".into(),
+        v_anchor: "page".into(),
+        wrap: "around".into(),
+        ..Default::default()
+    };
+    let framed = |text: &str, break_before: bool| {
+        let mut p = wordcraft_doc::Paragraph::with_text(text, Default::default());
+        p.props.frame = Some(frame.clone());
+        p.props.page_break_before = break_before.then_some(true);
+        wordcraft_doc::para_block(p)
+    };
+    let body = || wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text("Body", Default::default()));
+
+    let mut d = Document::new();
+    d.body = vec![framed("Attorney 1", false), body()];
+    let opts = LayoutOptions { view: ViewMode::Read, web_width: 230.0, read_height: 390.0, ..Default::default() };
+    let read = layout(&d, &mut LayoutCache::new(), &opts);
+    let c = read.caret(&Pos::body(0, 0)).unwrap();
+    assert!(c.x < 230.0 && c.top < 390.0, "on the narrow page, in the text: ({}, {})", c.x, c.top);
+
+    d.body = vec![framed("Attorney 1", false), framed("Attorney 2", true), body()];
+    let l = lay(&d);
+    let (one, two) = (l.caret(&Pos::body(0, 0)).unwrap(), l.caret(&Pos::body(1, 0)).unwrap());
+    assert_eq!((one.page, two.page), (0, 1), "the page break before starts a new page");
+    assert!((two.top - 400.0).abs() < 1.0, "at the top of its own frame there: {}", two.top);
+
+    let brk = wordcraft_doc::para::PAGE_BREAK;
+    d.body = vec![framed(&format!("Before{brk}After"), false), body()];
+    let l = lay(&d);
+    let after = l.caret(&Pos::body(0, format!("Before{brk}").len())).unwrap();
+    assert_eq!(after.page, 1, "the text after the hard break is on the next page");
+}
+
 /// Where a list paragraph's text starts when its style has indents of its own (measured in Word,
 /// `plan/word` R16): the list level's indents go on top of the most derived style that gives the
 /// list, so that style's own indent (and those of styles based on it) win, its base styles' don't

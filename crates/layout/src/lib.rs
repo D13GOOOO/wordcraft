@@ -3055,7 +3055,9 @@ fn para_notes(doc: &Document, p: &Paragraph, pl: &ParaLayout) -> Vec<(usize, u32
 /// continuous section takes no room (Word for Windows: the text after it follows right on, and
 /// columns balanced above it don't count it).
 fn place_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize, body_top: f32) {
-    if !pb.web && place_framed_para(ctx, pb, p, block) {
+    // Views that reflow the text (Web, Draft, Outline and Read Mode) keep framed paragraphs in
+    // it: the frame's page offsets are for the paper, not the reflowed page.
+    if !pb.web && ctx.opts.view != ViewMode::Read && place_framed_para(ctx, pb, p, block, body_top) {
         return;
     }
     if !pb.web && ctx.quiet_marks.binary_search(&block).is_ok() {
@@ -3079,20 +3081,27 @@ const MAX_FRAME_PARAS: usize = 64;
 /// A body paragraph in a text frame (`w:framePr`, a form or letterhead laid out in frames, #2406):
 /// placed apart, where its frame goes on the page, like a floating object; the text around wraps
 /// around the frame, and it takes no room in the flow. Consecutive paragraphs with the same frame
-/// share it, stacked one under the other (Word). Returns false for a paragraph in no frame.
-fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize) -> bool {
+/// share it, stacked one under the other (Word). A page break before starts a new page and a
+/// frame of its own there; a paragraph with a hard page break in it stays in the flow, which
+/// breaks the page. Returns false for a paragraph that isn't placed in a frame.
+fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: usize, body_top: f32) -> bool {
     let doc = ctx.doc;
-    let Some(fr) = doc.styles.resolve_para(&p.props).frame else { return false };
+    let frame_of = |q: &Paragraph| doc.styles.resolve_para(&q.props).frame.filter(|_| !q.text.contains(wordcraft_doc::para::PAGE_BREAK));
+    let breaks_before = |q: &Paragraph| doc.styles.resolve_para(&q.props).page_break_before;
+    let Some(fr) = frame_of(p) else { return false };
+    if breaks_before(p) && !pb.at_top() {
+        pb.new_page(block, body_top);
+    }
     let same = |b: usize| match doc.body.get(b).map(|b| &**b) {
-        Some(Block::Para(q)) if doc.styles.resolve_para(&q.props).frame.as_ref() == Some(&fr) => Some(q),
+        Some(Block::Para(q)) if frame_of(q).as_ref() == Some(&fr) => Some(q),
         _ => None,
     };
     let mut first = block;
-    while block - first < MAX_FRAME_PARAS && first > 0 && same(first - 1).is_some() {
+    while block - first < MAX_FRAME_PARAS && first > 0 && !same(first).is_some_and(breaks_before) && same(first - 1).is_some() {
         first -= 1;
     }
     let mut last = block;
-    while last - first + 1 < MAX_FRAME_PARAS && same(last + 1).is_some() {
+    while last - first + 1 < MAX_FRAME_PARAS && same(last + 1).is_some_and(|q| !breaks_before(q)) {
         last += 1;
     }
     ctx.fields.page = pb.number;
