@@ -6824,6 +6824,92 @@ fn body_text_frames_keep_page_breaks_and_stay_in_the_text_when_reflowed() {
     assert!((c.x - 72.0).abs() < 1.0, "in the flow, at the margin: {}", c.x);
 }
 
+/// A body text frame placed against the text area (`vAnchor="margin"`), like the city and year
+/// at the foot of a title page.
+fn body_frame(y_align: &str) -> wordcraft_doc::props::TextFrame {
+    wordcraft_doc::props::TextFrame {
+        w: Some(468.0),
+        x_align: Some("center".into()),
+        y_align: Some(y_align.into()),
+        h_anchor: "margin".into(),
+        v_anchor: "margin".into(),
+        wrap: "notBeside".into(),
+        ..Default::default()
+    }
+}
+
+/// Paragraphs `texts` (those in `framed` in `frame`) as a document's body.
+fn framed_doc(texts: &[&str], framed: &[usize], frame: &wordcraft_doc::props::TextFrame) -> Document {
+    let mut d = Document::new();
+    d.body = texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let mut p = wordcraft_doc::Paragraph::with_text(t, Default::default());
+            p.props.space_before = Some(0.0);
+            p.props.space_after = Some(0.0);
+            if framed.contains(&i) {
+                p.props.frame = Some(frame.clone());
+            }
+            wordcraft_doc::para_block(p)
+        })
+        .collect();
+    d
+}
+
+/// Text frames in the body (`w:framePr`) are placed apart, like floating objects: the city and
+/// year at the foot of a title page (`vAnchor="margin" yAlign="bottom"`) sit at the bottom of the
+/// text area, one under the other — consecutive paragraphs with the same frame share it — and
+/// take no room in the flow. WordCraft laid them out as ordinary paragraphs where they stood.
+#[test]
+fn body_text_frames_at_the_foot_of_the_page_share_one_frame() {
+    let d = framed_doc(&["Title", "City", "2026", "After"], &[1, 2], &body_frame("bottom"));
+    let l = lay(&d);
+    let at = |i: usize| l.caret(&Pos { story: StoryRef::Body, path: Path::top(i), off: 0 }).unwrap();
+    let (title, city, year, after) = (at(0), at(1), at(2), at(3));
+    assert_eq!(l.pages.len(), 1);
+    assert!(after.top - title.top < 30.0, "the frame takes no room: the text after it goes on below the title: {} vs {}", after.top, title.top);
+    let s = d.sections().first().map(|(_, s)| (*s).clone()).unwrap();
+    let foot = s.page_h - s.margin_bottom;
+    assert!(year.top > city.top + 5.0, "one under the other: {} vs {}", city.top, year.top);
+    assert!(
+        year.top + year.height <= foot + 0.5 && year.top + year.height > foot - 20.0,
+        "at the foot of the text area: {} vs {foot}",
+        year.top + year.height
+    );
+}
+
+/// A frame at the foot of the page after text that already runs down there would cover it: it
+/// moves to the next page with its paragraphs, as a floating table does, and the empty paragraph
+/// after it that carries the section break (it can't go in the frame) starts no blank page.
+#[test]
+fn body_text_frame_after_a_full_page_moves_to_the_next() {
+    let lines: Vec<String> = (0..80).map(|i| format!("Line {i}")).collect();
+    let plain: Vec<&str> = lines.iter().map(String::as_str).collect();
+    // as many lines as fill the first page
+    let full = {
+        let l = lay(&framed_doc(&plain, &[], &body_frame("bottom")));
+        (0..plain.len()).take_while(|&i| l.caret(&Pos { story: StoryRef::Body, path: Path::top(i), off: 0 }).is_some_and(|c| c.page == 0)).count()
+    };
+    let mut texts: Vec<&str> = plain[..full].to_vec();
+    texts.extend(["City", "2026", "", "Next section"]);
+    let mut d = framed_doc(&texts, &[full, full + 1], &body_frame("bottom"));
+    // the empty paragraph ends the first section, the next one starts on a new page
+    let sect = d.last_section.clone();
+    if let Some(wordcraft_doc::Block::Para(p)) = d.body.get_mut(full + 2).map(Arc::make_mut) {
+        p.section = Some(Box::new(sect));
+    }
+    let l = lay(&d);
+    let at = |i: usize| l.caret(&Pos { story: StoryRef::Body, path: Path::top(i), off: 0 }).unwrap();
+    let city = at(full);
+    for i in 0..full {
+        let c = at(i);
+        assert!(c.page != city.page || c.top + c.height <= city.top + 0.5, "line {i} under the frame: {} vs {}", c.top + c.height, city.top);
+    }
+    assert_eq!(city.page, 1, "the frame moved off the full page");
+    assert_eq!(at(full + 3).page, 2, "no blank page between the frame and the next section");
+}
+
 /// A run of more than 64 paragraphs with one frame is cut into frames of 64 from its start: the
 /// 65th paragraph starts a new frame at the frame's place, and the ones after it stack under it
 /// instead of landing on one another.

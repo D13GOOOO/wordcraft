@@ -3495,8 +3495,25 @@ fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: 
         None => y,
     };
     let float = frame_float(&fr);
-    let page = PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror };
-    let r = float_rect(Some(page), (col_x, col_w), pb.y, fw, h, &float);
+    let mut page = PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror };
+    let mut r = float_rect(Some(page), (col_x, col_w), pb.y, fw, h, &float);
+    // Like a floating table (#534), a frame that doesn't fit below the text before it moves to the
+    // next page with its paragraphs: one placed relative to the paragraph when it would run off
+    // the page, one placed on the page or margin (at the foot of the text area, say) when it would
+    // also cover the text already on the page.
+    if block == first && !pb.at_top() {
+        let moves = if float.v_rel == Anchor::Paragraph {
+            r.bottom() > pb.bottom + 0.01
+        } else {
+            let covers_text = pb.page().is_some_and(|page| page.items.iter().any(|item| placed_intersects(item, &r)));
+            covers_text && pb.y + h > pb.bottom + 0.01
+        };
+        if moves {
+            pb.advance(block, body_top);
+            page = PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror };
+            r = float_rect(Some(page), (pb.col_x(), pb.col_w()), pb.y, fw, h, &float);
+        }
+    }
     // The frame's first paragraph makes the text around keep clear of the whole frame.
     if block == first
         && let Some(area) = wrap_area(r, &float, None)
