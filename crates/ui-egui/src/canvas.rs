@@ -45,6 +45,9 @@ pub struct CanvasState {
     /// revision: finding out walks every paragraph, too slow for every frame (#811).
     markup_facts: std::cell::Cell<Option<((u64, u64), [bool; 3])>>,
     pub scroll_to_caret: bool,
+    /// Set while a command runs for a mouse drag on a table: the pointer is already
+    /// on the target, so the view stays put instead of following the caret (#1738).
+    pub keep_view: bool,
     /// A heading navigation click aligns its page against the navigation pane, not just visible.
     pub(crate) nav_to_caret: bool,
     /// Touchpad travel not yet converted to an entire reading-column turn.
@@ -151,6 +154,13 @@ pub struct CanvasState {
     /// The last key ran an Alt shortcut: the text its key sends (it may arrive a frame later)
     /// isn't typed. The next key press clears it.
     pub(crate) swallow_text: bool,
+    /// An input method's `DeleteSurrounding` just erased text with this formatting: the text it
+    /// sends next replaces it, keeps the formatting and joins the same undo step
+    /// (`keys::delete_surrounding`, #1480).
+    pub(crate) ime_join_text: Option<wordcraft_doc::props::CharProps>,
+    /// An automatic change (AutoCorrect, AutoFormat) altered the text around the caret: the
+    /// input method is asked to start afresh (#1480).
+    pub(crate) ime_reset: bool,
     /// Alt+numpad entry in progress: the digits typed while Alt is held (#961).
     pub(crate) alt_code: String,
     /// The character an Alt code just typed: if the platform also sends its own composed
@@ -191,6 +201,7 @@ impl Default for CanvasState {
             page_keys: PageKeys::default(),
             markup_facts: std::cell::Cell::new(None),
             scroll_to_caret: true,
+            keep_view: false,
             nav_to_caret: false,
             read_wheel_accum: 0.0,
             read_viewport: Settle::default(),
@@ -232,6 +243,8 @@ impl Default for CanvasState {
             mini_dismissed: None,
             pasted: false,
             swallow_text: false,
+            ime_join_text: None,
+            ime_reset: false,
             alt_code: String::new(),
             alt_code_echo: None,
             wheel: Default::default(),
@@ -961,6 +974,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         }
         let pct = (app.canvas.scale / PX_PER_PT * zoom_delta * 100.0).clamp(if reading { 75.0 } else { 10.0 }, if reading { 150.0 } else { 500.0 });
         let id = if reading { "view.readTextSize" } else { "view.zoom" };
+        app.canvas.wheel.cancel();
         let _ = app.run(id, json!({"value": pct}));
     }
     let avail = if app.session.view.read_mode { area.size() } else { area.size() - vec2(SCROLLBAR, 0.0) };
@@ -1417,6 +1431,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         }
         // Caret.
         let focused = resp.has_focus() || app.canvas.focused;
+        // After an automatic change, the web's text agent starts afresh (`keys::note_automatic_change`).
+        // Only there: on X11 an interrupt recreates the input context and fcitx drops later keys (#1169).
+        let ime_reset = std::mem::take(&mut app.canvas.ime_reset) && cfg!(target_arch = "wasm32") && app.canvas.ime_preedit.is_empty();
         // Editing an equation: shade it and draw the caret inside it.
         let mut math_caret = false;
         if let Some(m) = app.session.math.clone()
@@ -1450,7 +1467,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                             rect: cr,
                             cursor_rect: cr,
                             purpose: Default::default(),
-                            should_interrupt_composition: false,
+                            should_interrupt_composition: ime_reset,
                         });
                     });
                 }
@@ -1488,8 +1505,12 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
             let cr = Rect::from_min_max(pos2(x, y0), pos2(x + 1.0, y1));
             if focused {
                 ui.ctx().output_mut(|o| {
-                    o.ime =
-                        Some(egui::output::IMEOutput { rect: cr, cursor_rect: cr, purpose: Default::default(), should_interrupt_composition: false });
+                    o.ime = Some(egui::output::IMEOutput {
+                        rect: cr,
+                        cursor_rect: cr,
+                        purpose: Default::default(),
+                        should_interrupt_composition: ime_reset,
+                    });
                 });
             }
             if !app.canvas.ime_preedit.is_empty() {
@@ -2495,7 +2516,8 @@ fn mouse(app: &mut WordApp, ui: &Ui, resp: &egui::Response, rects: &[Rect], layo
         && let Some(link) = link_under(app, layout, page, x, y, &pos)
     {
         let key = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
-        let tip = format!("{link}\n{}", crate::i18n::fmt(tl!("{key}+Click to follow link"), &[("key", key)]));
+        let target = if is_generated_bookmark_link(&link) { tl!("Current Document").to_string() } else { link };
+        let tip = format!("{target}\n{}", crate::i18n::fmt(tl!("{key}+Click to follow link"), &[("key", key)]));
         egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new("link_tip"), egui::PopupAnchor::Pointer).show(|ui| {
             ui.label(tip);
         });
@@ -2990,6 +3012,7 @@ fn context_menu(app: &mut WordApp, ui: &mut Ui) {
         // The TOC field sits in the table's heading; its entries are plain paragraphs.
         ui.separator();
         item(ui, app, tl!("Update Field"), "references.updateToc", json!({}));
+        item(ui, app, tl!("Remove Table of Contents"), "references.removeToc", json!({}));
     }
     let selected_object = wordcraft_engine::cmd::objects::selected(&app.session).is_some();
     if selected_object || app.session.sel.focus.path.cell().is_some() {
@@ -3168,6 +3191,12 @@ fn link_under(app: &WordApp, layout: &DocLayout, page: usize, x: f32, y: f32, po
     })
 }
 
+/// A link to a hidden bookmark (`#_Toc…`, `#_Ref…`): a name the program made, which nobody
+/// chose or sees, so the hover tip says where it goes instead of showing it (#2177).
+fn is_generated_bookmark_link(link: &str) -> bool {
+    link.strip_prefix("#_").is_some()
+}
+
 /// Whether Ctrl/⌘+click may hand a document's hyperlink to the system: web and email links only,
 /// so a document can't launch `file:` paths, programs or custom-scheme handlers.
 fn is_followable_link(url: &str) -> bool {
@@ -3200,6 +3229,16 @@ mod tests {
     /// What `page_image` replaced: the raster un-premultiplied, for egui to premultiply again.
     fn by_straight_alpha(img: &wordcraft_render::Rendered) -> egui::ColorImage {
         egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.to_straight())
+    }
+
+    /// #2177: only a link to a program-made hidden bookmark hides its name in the hover tip.
+    #[test]
+    fn hover_tip_hides_generated_bookmark_names_only() {
+        assert!(is_generated_bookmark_link("#_Toc123456"));
+        assert!(is_generated_bookmark_link("#_Ref42"));
+        assert!(!is_generated_bookmark_link("#Chapter1"));
+        assert!(!is_generated_bookmark_link("https://example.com/_x"));
+        assert!(!is_generated_bookmark_link(""));
     }
 
     #[test]
@@ -4103,6 +4142,41 @@ mod tests {
         }
         let text = h.state().session.doc.plain_text(StoryRef::Body);
         assert_eq!(text.matches("Fresh heading").count(), 2, "the new heading is listed in the table: {text}");
+    }
+
+    /// #2179: the context menu on a table of contents entry also offers Remove Table of Contents.
+    #[test]
+    fn context_menu_on_a_toc_entry_removes_the_table() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_engine::sample::report()), Default::default());
+        a.run("caret.docStart", json!({})).unwrap();
+        a.run("references.toc", json!({})).unwrap();
+        let is_entry = |b: &wordcraft_doc::Block| b.as_para().is_some_and(|p| p.props.style.as_deref() == Some("TOC1"));
+        let entry = a.session.doc.body.iter().position(|b| is_entry(b)).expect("a TOC entry");
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        for _ in 0..6 {
+            h.step();
+        }
+        let c = h.state_mut().session.layout().caret(&Pos::body(entry, 2)).expect("the entry is laid out");
+        let at = page_to_screen(h.state_mut(), c.page, c.x + 1.0, c.top + c.height / 2.0).expect("on screen");
+        h.event(egui::Event::PointerMoved(at));
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() });
+            h.step();
+        }
+        h.step();
+        h.get_by_label_contains("Remove Table of Contents").click();
+        for _ in 0..3 {
+            h.step();
+        }
+        assert!(!h.state().session.doc.body.iter().any(|b| is_entry(b)), "the table is gone");
     }
 
     /// #996: on macOS a Control-click is the right-click (the trackpad's and the one-button
