@@ -686,6 +686,37 @@ mod tests {
         assert!(h.query_by_label("Recent").is_none(), "New has no Recent list");
     }
 
+    /// Clicking the back arrow closes the File page and gives the keyboard back to the page,
+    /// without naming as focused a widget the frame didn't draw: with accessibility on (a screen
+    /// reader, or any UI Automation client on Windows) AccessKit ends the program over that, and
+    /// 0.8.0 vanished after Blank document, File, then the back arrow. The test harness always runs
+    /// AccessKit.
+    #[test]
+    fn back_arrow_returns_to_the_page_with_accessibility_on() {
+        let a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Services::default());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(4);
+        assert!(h.state().canvas.widget_id.is_some(), "the page has been drawn");
+        h.state_mut().run("ui.backstage", json!({"value": true})).unwrap();
+        h.run_steps(4);
+        // The arrow heads the File page's side bar; it has no label to find it by.
+        let arrow = egui::pos2(100.0, 32.0);
+        h.event(egui::Event::PointerMoved(arrow));
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: arrow, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        }
+        h.run_steps(4);
+        assert!(!h.state().ui.backstage, "the arrow closes the File page");
+        assert!(h.state().canvas.focused, "and the page has the keyboard");
+    }
+
     /// #260: File › Info's Title and Author fields dropped every keystroke (they edited a copy
     /// re-read each frame and only wrote it back when the field lost focus), so a save had no
     /// title or author. Typing now lands in the document as it happens, one undo step per field,

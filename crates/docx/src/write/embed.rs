@@ -531,6 +531,38 @@ impl super::Writer<'_> {
             Self::ink_transform(c, from, to, float, depth + 1);
         }
     }
+
+    /// Put a group or canvas member kept from a file (native ink and its picture fallback) at
+    /// `frame` ([x, y, w, h] in points, in the group's space, as the group is written): its
+    /// `w14:xfrm` and the fallback's `a:xfrm` get that offset and extent and the member's turn.
+    /// It rewrites every `w14:xfrm` and `a:xfrm` under `e` and doesn't descend into them: right
+    /// for the forms Word writes (the content part's own transform and one `pic:pic` fallback's
+    /// `pic:spPr/a:xfrm`); a fallback holding several transforms (a group) would get one frame.
+    pub(super) fn place_member(e: &mut El, frame: [f32; 4], float: &Float, depth: usize) {
+        if depth > MAX_DEPTH {
+            return;
+        }
+        if matches!(e.name.as_str(), "w14:xfrm" | "a:xfrm") {
+            e.attrs.retain(|(k, _)| !matches!(k.as_str(), "rot" | "flipH" | "flipV"));
+            for (k, v) in super::story::spin_attrs(float.spin()) {
+                e.attrs.push((k.to_string(), v));
+            }
+            let [x, y, w, h] = frame.map(|v| v.clamp(-MAX_LEN_PT, MAX_LEN_PT));
+            e.kids.retain(|k| !matches!(k, xml::Node::El(c) if matches!(c.name.as_str(), "a:off" | "a:ext")));
+            let el = |name: &str, attrs: [(&str, String); 2]| {
+                xml::Node::El(El { name: name.to_string(), attrs: attrs.map(|(k, v)| (k.to_string(), v)).to_vec(), kids: Vec::new() })
+            };
+            e.kids.insert(0, el("a:ext", [("cx", emu(w.max(0.0))), ("cy", emu(h.max(0.0)))]));
+            e.kids.insert(0, el("a:off", [("x", emu(x)), ("y", emu(y))]));
+            return;
+        }
+        for c in e.kids.iter_mut().filter_map(|k| match k {
+            xml::Node::El(c) => Some(c),
+            _ => None,
+        }) {
+            Self::place_member(c, frame, float, depth + 1);
+        }
+    }
 }
 
 /// Set an extent's `cx` and `cy` (those it has) to `w` × `h` points.

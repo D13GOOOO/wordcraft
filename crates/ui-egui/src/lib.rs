@@ -71,6 +71,7 @@ pub mod print_page;
 pub mod printing;
 pub mod read_aloud;
 pub mod ribbon;
+pub mod ribbon_fit;
 pub mod ruler_tabs;
 pub mod scroll;
 pub mod system_clipboard;
@@ -237,6 +238,10 @@ pub struct UiState {
     #[serde(skip)]
     pub print: print_page::PrintSettings,
     pub ribbon_collapsed: bool,
+    /// The Quick Access Toolbar shows in the title bar (#1945). Its menu's Hide Quick Access
+    /// Toolbar takes it away; Show Quick Access Toolbar (the ribbon's right-click menu, Customize
+    /// Ribbon › Quick Access Toolbar) brings it back. Kept between runs.
+    pub quick_access_toolbar: bool,
     pub recent: Vec<String>,
     /// Symbols inserted from the Symbol dialog, most recent first (#321).
     pub recent_symbols: Vec<dialogs_insert::RecentSymbol>,
@@ -356,6 +361,7 @@ impl Default for UiState {
             backstage_page: "home".into(),
             print: print_page::PrintSettings::default(),
             ribbon_collapsed: false,
+            quick_access_toolbar: true,
             recent: Vec::new(),
             recent_symbols: Vec::new(),
             recent_colors: Vec::new(),
@@ -615,6 +621,8 @@ pub struct WordApp {
     /// the session's document, no document is open: the window shows no page and only the File
     /// tab, Help and settings work. See [`WordApp::has_document`].
     no_document: Option<u64>,
+    /// Comment and reply text typed but not yet written to the document (#1348).
+    pub(crate) comment_drafts: panes::CommentDrafts,
 }
 
 /// The answer to "Do you want to save changes?" (`ui.saveChanges`).
@@ -711,6 +719,7 @@ impl WordApp {
             info_editing: None,
             recovery_seen: false,
             no_document: None,
+            comment_drafts: Default::default(),
         }
     }
 
@@ -835,6 +844,11 @@ impl WordApp {
     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        // Comment text still being typed is written first, so a save or export has it and a
+        // close, New or Open counts it as a change (#1348). A draft the document refuses is not
+        // part of it: saving and exporting go on without it (the refusal stays on the status
+        // line), and replacing the document asks Save / Don't Save / Cancel about it.
+        let refused = if flushes_comment_drafts(id, &params) { panes::flush_comment_drafts(self).err() } else { None };
         if id == "file.recover" && params.as_object().is_none_or(|p| p.is_empty()) {
             self.ui.backstage = true;
             self.ui.backstage_page = "recover".into();
@@ -846,7 +860,7 @@ impl WordApp {
             self.dialog = dialogs::Dialog::open(name, self);
             return Ok(json!({"pending": name}));
         }
-        if (self.session.dirty || self.save_unconfirmed()) && discards_document(id, &params) {
+        if (self.session.dirty || self.save_unconfirmed() || refused.is_some()) && discards_document(id, &params) {
             let name = self.prompt_name();
             self.dialog = Some(dialogs::Dialog::SaveChanges {
                 name,
@@ -874,6 +888,10 @@ impl WordApp {
         }
         let applied = applied_font(id, &params);
         let r = self.execute_user(id, params);
+        // A save error already on the status line is the reason to see; the refusal shows otherwise.
+        if let (Some(e), true) = (refused, r.is_ok()) {
+            self.status(e);
+        }
         if let (Ok(_), Some(name)) = (&r, applied) {
             push_recent_font(&mut self.ui.recent_fonts, &name);
         }
@@ -1278,8 +1296,16 @@ impl WordApp {
             self.status(tl!("Wait for the print job to finish submitting before closing."));
             return false;
         }
+        if self.quit_requested {
+            return true;
+        }
         // No document open (#1129): nothing to save.
-        if self.quit_requested || !self.session.dirty || !self.has_document() {
+        if !self.has_document() {
+            return true;
+        }
+        // A comment draft the document refuses is an unsaved change: the prompt can drop it.
+        let refused = panes::flush_comment_drafts(self).is_err();
+        if !self.session.dirty && !self.save_unconfirmed() && !refused {
             return true;
         }
         // `quit`: once the prompt is answered the window closes too, not just the document.
@@ -1495,6 +1521,17 @@ impl WordApp {
             "ui.collapseRibbon" => {
                 self.ui.ribbon_collapsed = !self.ui.ribbon_collapsed;
                 json!({"collapsed": self.ui.ribbon_collapsed})
+            }
+            "ui.quickAccessToolbar" => {
+                // Hide Quick Access Toolbar (its menu) and Show Quick Access Toolbar (the ribbon's
+                // right-click menu, Customize Ribbon), #1945: `value` true shows the toolbar in
+                // the title bar, false hides it; no value toggles it.
+                match p.get("value") {
+                    None => self.ui.quick_access_toolbar = !self.ui.quick_access_toolbar,
+                    Some(Value::Bool(on)) => self.ui.quick_access_toolbar = *on,
+                    Some(_) => return Some(Err("`value` must be true or false".into())),
+                }
+                json!({"quickAccessToolbar": self.ui.quick_access_toolbar})
             }
             "ui.keytips" => {
                 if let Some(v) = p.get("value") {
@@ -2058,7 +2095,7 @@ impl WordApp {
     /// Tell the host whether the document has unsaved changes ([`Services::on_dirty`]).
     fn report_dirty(&self) {
         if let Some(f) = &self.services.on_dirty {
-            f(self.session.dirty);
+            f(self.session.dirty || panes::has_comment_drafts(self));
         }
     }
 
@@ -2137,7 +2174,7 @@ impl WordApp {
             // Control input belongs to this window's remembered widget even while another app
             // is active. Give only this input frame egui focus, without requesting OS activation.
             raw.focused = true;
-            if let (Some(ctx), Some(id)) = (&self.ctx, self.canvas.widget_id) {
+            if let (Some(ctx), Some((id, _))) = (&self.ctx, self.canvas.widget_id) {
                 // Canvas keys run before painting updates last frame's native focus flag.
                 self.canvas.focused = ctx.memory(|m| m.has_focus(id));
             }
@@ -2266,7 +2303,13 @@ impl WordApp {
             // `focused` flag (which gates the keys) isn't recomputed until then either. Claim both
             // now, or the click swallows the first keystroke.
             self.canvas.focused = true;
-            if let Some(id) = self.canvas.widget_id {
+            // Only a page this pass drew. The File page's back arrow closes the File page in the
+            // pass that drew it instead of the page, and focus on a widget missing from the pass
+            // names a node AccessKit doesn't have: with accessibility on, AccessKit ends the program
+            // over that. `want_focus` hands the keyboard over next frame instead.
+            if let Some((id, pass)) = self.canvas.widget_id
+                && pass == ctx.cumulative_pass_nr()
+            {
                 ctx.memory_mut(|m| m.request_focus(id));
             }
             // The canvas reads keys before it takes focus back (#1107), so it counts as focused
@@ -2474,6 +2517,8 @@ fn input_dialog(id: &str, params: &Value) -> Option<&'static str> {
         "table.properties" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableProperties"),
         // Cell Margins without settings shows the dialog; values continue through the same command.
         "table.cellMargins" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableCellMargins"),
+        // Size without a size (Picture Format › Size's launcher) shows the Size dialog (#2573).
+        "picture.size" if params.as_object().is_none_or(|m| m.is_empty()) => Some("pictureSize"),
         // Formula without one asks for it, suggested from the numbers next to the cell (#1201).
         "table.formula" if !has("formula") => Some("tableFormula"),
         // Sort without settings asks for the column, order and header row (#1200).
@@ -2555,6 +2600,7 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.dialog"
             | "ui.closeDialog"
             | "ui.collapseRibbon"
+            | "ui.quickAccessToolbar"
             | "ui.keytips"
             | "ui.dark"
             | "ui.theme"
@@ -2571,11 +2617,30 @@ pub(crate) fn works_without_document(id: &str) -> bool {
     ) || id.starts_with("help.")
 }
 
+/// Commands that save, export, print, send or replace the document: comment text still being
+/// typed is written before them (#1348).
+fn flushes_comment_drafts(id: &str, params: &Value) -> bool {
+    matches!(
+        id,
+        "file.save"
+            | "file.saveAs"
+            | "file.saveTemplate"
+            | "file.open"
+            | "file.exportPdf"
+            | "file.exportPng"
+            | "file.print"
+            | "file.printPdf"
+            | "file.share"
+            | "ui.print"
+            | "ui.printSubmit"
+    ) || discards_document(id, params)
+}
+
 /// User commands that replace or close the document (`file.open` without a path only shows the
 /// file picker; the open that follows is checked). Envelopes, Labels and Finish & Merge make a
 /// new document in its place; a merge written to a file (`path`) and an envelope added to this
 /// document (`add`) leave it alone.
-fn discards_document(id: &str, params: &Value) -> bool {
+pub(crate) fn discards_document(id: &str, params: &Value) -> bool {
     match id {
         "file.new" | "file.close" | "mailings.labels" => true,
         "mailings.envelopes" => params.get("add").and_then(Value::as_bool) != Some(true),
@@ -2836,6 +2901,34 @@ mod tests {
         let old: UiState = serde_json::from_str(r#"{"tab":"Insert"}"#).unwrap();
         assert!(old.caret_animation && old.tab == "Insert");
         assert_eq!(a.run("ui.caretAnimation", json!({"value": true})).unwrap()["caretAnimation"], true);
+    }
+
+    /// #1945: showing or hiding the Quick Access Toolbar is a UI command (no value toggles it),
+    /// kept between runs; settings saved before it existed show the toolbar; it works with no
+    /// document open, like the other interface settings.
+    #[test]
+    fn quick_access_toolbar_is_a_ui_command_and_survives_a_restart() {
+        let mut a = app();
+        assert!(a.ui.quick_access_toolbar, "shown by default");
+        assert_eq!(a.run("ui.quickAccessToolbar", json!({})).unwrap(), json!({"quickAccessToolbar": false}), "no value toggles it");
+        assert_eq!(a.run("ui.quickAccessToolbar", json!({})).unwrap(), json!({"quickAccessToolbar": true}));
+        assert_eq!(a.run("ui.quickAccessToolbar", json!({"value": false})).unwrap(), json!({"quickAccessToolbar": false}));
+        for junk in [json!({"value": "no"}), json!({"value": 0}), json!({"value": null}), json!({"value": [true]})] {
+            assert!(a.run("ui.quickAccessToolbar", junk).is_err());
+        }
+        assert!(!a.ui.quick_access_toolbar, "a rejected value keeps the setting");
+        let saved = serde_json::to_string(&a.prefs()).unwrap();
+        assert!(saved.contains(r#""quickAccessToolbar":false"#), "{saved}");
+        let mut b = app();
+        b.apply_prefs(serde_json::from_str(&saved).unwrap());
+        assert!(!b.ui.quick_access_toolbar, "hidden after a restart");
+        let old: UiState = serde_json::from_str(r#"{"tab":"Insert"}"#).unwrap();
+        assert!(old.quick_access_toolbar && old.tab == "Insert", "older settings show the toolbar");
+        assert_eq!(a.run("ui.quickAccessToolbar", json!({"value": true})).unwrap()["quickAccessToolbar"], true);
+        let mut c = app();
+        c.start_screen();
+        assert!(!c.has_document());
+        assert_eq!(c.run("ui.quickAccessToolbar", json!({"value": false})).unwrap()["quickAccessToolbar"], false, "works without a document");
     }
 
     fn harness(a: WordApp) -> egui_kittest::Harness<'static, WordApp> {
@@ -6875,6 +6968,24 @@ mod tests {
         assert!(theme::Tokens::get(&ctx).dark);
     }
 
+    /// #537: where winit reports no OS theme (Linux), System follows the desktop portal's answer
+    /// and pins the window to it, so GNOME's client-side title bar matches the interface and
+    /// follows a theme switch made while the app runs.
+    #[test]
+    fn system_theme_pins_the_title_bar_to_the_desktop_answer() {
+        use egui::{SystemTheme, ViewportCommand};
+        let ctx = egui::Context::default();
+        let mut a = app();
+        a.run("ui.theme", json!({"value": "system"})).unwrap();
+        for dark in [false, true, false] {
+            a.desktop_dark = Some(dark);
+            let sent = theme_frame(&ctx, &mut a, None);
+            let want = if dark { SystemTheme::Dark } else { SystemTheme::Light };
+            assert!(sent.contains(&ViewportCommand::SetTheme(want)), "desktop dark {dark}: {sent:?}");
+            assert_eq!(theme::Tokens::get(&ctx).dark, dark);
+        }
+    }
+
     /// #312: Dark page darkens only the pages; the interface keeps following its own setting.
     #[test]
     fn dark_page_leaves_the_interface_theme_alone() {
@@ -7194,10 +7305,12 @@ mod tests {
         )
         .unwrap();
         a.run("mailings.editRecipients", json!({})).unwrap();
-        let Some(dialogs::Dialog::RecipientList { rows, filter, .. }) = &a.dialog else { panic!() };
+        let Some(dialogs::Dialog::RecipientList { rows, filter, fields, .. }) = &a.dialog else { panic!() };
         assert_eq!(rows.len(), 3, "every record, not only the filtered ones");
         assert!(filter.open);
-        let params = filter.params();
+        let params = filter.params(fields);
+        // A rule or sort key on a field renamed or removed in the table drops (#1287).
+        assert_eq!(filter.params(&["Name".to_string()]), json!({"rules": [], "sort": [{"field": "Name", "descending": true}]}));
         assert_eq!(params["rules"], json!([{"field": "City", "op": "equal", "value": "London", "join": "and"}]));
         assert_eq!(params["sort"], json!([{"field": "Name", "descending": true}]));
         // Applying the dialog's filter to a reloaded list gives the same records.
@@ -7206,6 +7319,151 @@ mod tests {
         let names: Vec<&str> = a.session.merge.rows.iter().map(|r| r[0].as_str()).collect();
         assert_eq!(names, ["Grace", "Ada"]);
         assert!(open_filters("recipients")[0].1.contains(&"xls"));
+    }
+
+    /// #1576: Find in list and "only records that will be merged" hide rows from the grid
+    /// without touching the list; the shown rows keep their real indices for edit and remove.
+    #[test]
+    fn recipient_list_search_and_merged_view() {
+        let fields: Vec<String> = vec!["Name".into(), "City".into()];
+        let rows: Vec<Vec<String>> = [["Ada", "London"], ["Alan", "Wilmslow"], ["Grace", "LONDON"], ["Émile", "Paris"]]
+            .iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect();
+        let none = dialogs::visible_recipients(&rows, None, "", false);
+        assert_eq!(none, [0, 1, 2, 3], "no search, no filter: every row");
+        // Search: any cell, any case, including non-ASCII.
+        assert_eq!(dialogs::visible_recipients(&rows, None, "london", false), [0, 2]);
+        assert_eq!(dialogs::visible_recipients(&rows, None, "  AL ", false), [1], "trimmed, any case");
+        assert_eq!(dialogs::visible_recipients(&rows, None, "émi", false), [3]);
+        let greek = vec![vec!["ΟΣ".to_string()], vec!["ος".to_string()], vec!["Αλφα".to_string()]];
+        assert_eq!(dialogs::visible_recipients(&greek, None, "ος", false), [0, 1], "final sigma matches capital sigma");
+        assert_eq!(dialogs::visible_recipients(&rows, None, "ÉMI", false), [3]);
+        assert!(dialogs::visible_recipients(&rows, None, "zzz", false).is_empty());
+        // Filter only: City = London keeps Ada and Grace.
+        let mut filter = dialogs::RecipientFilter::default();
+        filter.rules.push(dialogs::FilterRow {
+            field: "City".into(),
+            op: wordcraft_engine::cmd::mailings::FilterOp::Equal,
+            value: "London".into(),
+            or: false,
+        });
+        let order = dialogs::merge_order(&fields, &rows, &filter).unwrap();
+        assert_eq!(order, [Some(1), None, Some(2), None]);
+        assert_eq!(dialogs::visible_recipients(&rows, Some(&order), "", false), [0, 1, 2, 3], "unchecked: excluded rows still shown");
+        assert_eq!(dialogs::visible_recipients(&rows, Some(&order), "", true), [0, 2]);
+        // Both: search within the merged records.
+        assert_eq!(dialogs::visible_recipients(&rows, Some(&order), "grace", true), [2]);
+        assert!(dialogs::visible_recipients(&rows, Some(&order), "alan", true).is_empty());
+        // No filter: only_merged hides nothing.
+        assert_eq!(dialogs::visible_recipients(&rows, None, "", true), [0, 1, 2, 3]);
+        // Removing the first shown row removes the real record, not row 0.
+        let shown = dialogs::visible_recipients(&rows, None, "grace", false);
+        let mut edited = rows.clone();
+        edited.remove(shown[0]);
+        assert_eq!(edited.iter().map(|r| r[0].as_str()).collect::<Vec<_>>(), ["Ada", "Alan", "Émile"]);
+        // Hostile order (shorter than the list) never panics; missing entries count as excluded.
+        assert_eq!(dialogs::visible_recipients(&rows, Some(&[Some(1)]), "", true), [0]);
+        // The view settings don't reach the merge.
+        let mut viewed = filter.clone();
+        viewed.find = "grace".into();
+        viewed.only_merged = true;
+        assert_eq!(viewed.params(&fields), filter.params(&fields));
+    }
+
+    /// #1576 review: while a cell is edited the grid keeps its rows, so a record the edit stops
+    /// matching stays put instead of sliding another record under the cursor; and New Entry
+    /// shows every row, so the new, empty entry can't be hidden.
+    #[test]
+    fn recipient_grid_holds_its_rows_while_a_cell_is_edited() {
+        let mut held = None;
+        // Not editing: whatever matches now.
+        assert_eq!(dialogs::hold_rows(vec![0, 2], &mut held, false, 4), [0, 2]);
+        assert_eq!(held, None);
+        // Editing starts: the rows shown then are held…
+        assert_eq!(dialogs::hold_rows(vec![0, 2], &mut held, true, 4), [0, 2]);
+        // …even when the edit makes row 0 stop matching.
+        assert_eq!(dialogs::hold_rows(vec![2], &mut held, true, 4), [0, 2]);
+        // A held row past the end of a shrunk list is dropped, never indexed.
+        assert_eq!(dialogs::hold_rows(vec![], &mut held, true, 1), [0]);
+        // Editing ends: the view catches up.
+        assert_eq!(dialogs::hold_rows(vec![2], &mut held, false, 4), [2]);
+        assert_eq!(held, None);
+        assert_eq!(dialogs::hold_rows(vec![1], &mut held, true, 4), [1], "a new edit holds the new rows");
+
+        let mut filter = dialogs::RecipientFilter { find: "grace".into(), only_merged: true, held: Some(vec![1]), ..Default::default() };
+        filter.show_all();
+        assert!(filter.find.is_empty() && !filter.only_merged && filter.held.is_none());
+    }
+
+    /// #1576: the real Edit Recipient List grid in a harness (the dialog body, without the app
+    /// around it): Find, merged-only, an edit while the search hides rows, remove, New Entry.
+    #[test]
+    fn recipient_grid_edits_the_right_record_through_the_ui() {
+        use egui_kittest::kittest::Queryable;
+        type State = (WordApp, Vec<String>, Vec<Vec<String>>, String, dialogs::RecipientFilter);
+        let rows = [["Ada", "London"], ["Alan", "Wilmslow"], ["Grace", "London"], ["Émile", "Paris"]];
+        let mut filter = dialogs::RecipientFilter::default();
+        let rule =
+            dialogs::FilterRow { field: "City".into(), op: wordcraft_engine::cmd::mailings::FilterOp::Equal, value: "London".into(), or: false };
+        filter.rules.push(rule);
+        let state: State = (
+            app(),
+            vec!["Name".into(), "City".into()],
+            rows.iter().map(|r| r.iter().map(|c| c.to_string()).collect()).collect(),
+            String::new(),
+            filter,
+        );
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(900.0, 600.0)).build_ui_state(
+            |ui, s: &mut State| {
+                let (app, fields, rows, message, filter) = s;
+                dialogs::recipient_list(app, ui, fields, rows, message, filter);
+            },
+            state,
+        );
+        h.run_steps(4);
+        // Text boxes in order: Find, two field names, then the visible records' cells.
+        let cells = |h: &egui_kittest::Harness<'_, State>| h.query_all_by_role(egui::accesskit::Role::TextInput).count().saturating_sub(3) / 2;
+        let names = |h: &egui_kittest::Harness<'_, State>| h.state().2.iter().map(|r| r[0].clone()).collect::<Vec<_>>();
+        // Find in list: the first text box. Grace is the only match.
+        let find = h.query_all_by_role(egui::accesskit::Role::TextInput).next().unwrap();
+        find.click();
+        h.run_steps(2);
+        h.query_all_by_role(egui::accesskit::Role::TextInput).next().unwrap().type_text("grace");
+        h.run_steps(3);
+        assert_eq!(h.state().4.find, "grace");
+        assert!(cells(&h) == 1, "search hides the other rows");
+        // Merged-only on top of it: still Grace (London is kept).
+        h.get_by_label("Show only records that will be merged").click();
+        h.run_steps(3);
+        assert!(h.state().4.only_merged && cells(&h) == 1);
+        // Edit Grace's cell to something the search no longer matches: the row stays, and the
+        // edit lands on record 2, not on the first visible row's index.
+        h.query_all_by_role(egui::accesskit::Role::TextInput).nth(3).unwrap().click();
+        h.run_steps(2);
+        h.event(egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers { command: true, ..Default::default() },
+        });
+        h.query_all_by_role(egui::accesskit::Role::TextInput).nth(3).unwrap().type_text("Zed");
+        h.run_steps(3);
+        assert_eq!(names(&h), ["Ada", "Alan", "Zed", "Émile"]);
+        assert_eq!(h.state().4.held, Some(vec![2]), "rows are held while the cell has the keyboard");
+        assert_eq!(cells(&h), 1);
+        // Remove the one shown record: the third "×" (two are field headers).
+        let xs: Vec<_> = h.get_all_by_label("×").collect();
+        xs[2].click();
+        h.run_steps(3);
+        assert_eq!(names(&h), ["Ada", "Alan", "Émile"]);
+        assert!(h.state().4.held.is_none());
+        // New Entry clears the view and appends an empty record.
+        h.get_by_label("New Entry").click();
+        h.run_steps(3);
+        assert_eq!(h.state().2, vec![vec!["Ada", "London"], vec!["Alan", "Wilmslow"], vec!["Émile", "Paris"], vec!["", ""]]);
+        assert!(h.state().4.find.is_empty() && !h.state().4.only_merged);
     }
 
     /// #240: Select Recipients needs data, so clicking it opens the recipient list instead of

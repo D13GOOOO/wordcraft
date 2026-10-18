@@ -798,6 +798,8 @@
 	Space before/after:	Espacement avant/après :
 	Spacing	Espacement
 	Spacing (pt):	Espacement (pt) :
+	Kerning for fonts:	Crénage pour les polices :
+	Points and above	points et plus
 	Speech	Parole
 	Spelling & Grammar	Orthographe et grammaire
 	Spelling &\nGrammar	Orthographe et\ngrammaire
@@ -1474,6 +1476,8 @@
 	Customize Ribbon	Personnaliser le ruban
 	Add to Quick Access Toolbar	Ajouter à la barre d’outils Accès rapide
 	Remove from Quick Access Toolbar	Supprimer de la barre d’outils Accès rapide
+	Hide Quick Access Toolbar	Masquer la barre d’outils Accès rapide
+	Show Quick Access Toolbar	Afficher la barre d’outils Accès rapide
 	Customize the Ribbon…	Personnaliser le ruban…
 	Customize Quick Access Toolbar…	Personnaliser la barre d’outils Accès rapide…
 	More Commands…	Plus de commandes…
@@ -2122,6 +2126,10 @@
 	Contains	Contient
 	Does not contain	Ne contient pas
 	{count} of {total} recipients will be merged.	{count} destinataires sur {total} seront fusionnés.
+	Find in list:	Rechercher dans la liste :
+	Any field	N’importe quel champ
+	Matches: {count}	Correspondances : {count}
+	Show only records that will be merged	Afficher uniquement les enregistrements fusionnés
 	Undo Actions	Annuler plusieurs actions
 	Undo History	Historique des annulations
 	Undo 1 Action	Annuler 1 action
@@ -2675,3 +2683,20 @@
 	✓ None	✓ Aucun
 preview	Title	Titre
 template	Letter	Lettre
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	Dans le texte
+	In margin	Dans la marge
+	Drop Cap Options…	Options de lettrine…
+	Lines to drop:	Hauteur (lignes) :
+	Distance from text:	Distance du texte :
+	Distance from text	Distance du texte
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Verrouiller les proportions
+	Relative to original picture size	Proportionnellement à la taille d'origine de l'image
+	Original size	Taille d'origine
+	{width} × {height} pixels	{width} × {height} pixels
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Tapez une taille dans n'importe quelle unité, par exemple 5 cm ou 300 px. L'autre côté suit, et l'image garde ses proportions.
+
+	Import…	Importer…

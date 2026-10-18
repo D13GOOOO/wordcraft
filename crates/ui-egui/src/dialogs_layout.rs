@@ -1,12 +1,12 @@
 //! Layout, Review and Mailings dialogs (#407): Line Numbers (Layout › Line Numbers › Line
 //! Numbering Options…), Hyphenation (Hyphenation Options… and Manual…), Language (Review ›
 //! Language), Envelopes and Labels (Mailings › Create), Formula (Table Layout › Data, #1201)
-//! Sort (Table Layout › Data, #1200), Split Cells (Table Layout › Merge) and Convert Text to Table
-//! (Insert › Table, #2592). Each ends by running a command (`layout.lineNumbers`,
-//! `layout.hyphenation`, `layout.manualHyphenation` with `caret.set` and `text.optionalHyphen`,
-//! `review.language`, `mailings.envelopes`, `mailings.labels`, `table.formula`, `table.sort`,
-//! `table.split`, `table.fromText`), so
-//! scripts and agents get the same result without the dialog. Shown through
+//! Sort (Table Layout › Data, #1200), Split Cells (Table Layout › Merge), Convert Text to Table
+//! (Insert › Table, #2592) and Size (Picture Format › Size, #2573). Each ends by running a
+//! command (`layout.lineNumbers`, `layout.hyphenation`, `layout.manualHyphenation` with
+//! `caret.set` and `text.optionalHyphen`, `review.language`, `mailings.envelopes`,
+//! `mailings.labels`, `table.formula`, `table.sort`, `table.split`, `table.fromText`,
+//! `picture.size`), so scripts and agents get the same result without the dialog. Shown through
 //! [`crate::dialogs::Dialog::Layout`].
 
 use egui::{Ui, vec2};
@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use wordcraft_doc::section::LineNumberRestart;
 use wordcraft_engine::cmd::mailings::{ENVELOPE_SIZES, LABEL_PRODUCTS};
+use wordcraft_engine::cmd::objects::fit_size;
 
 use crate::WordApp;
 use crate::options::MeasureExt;
@@ -33,6 +34,7 @@ pub enum LayoutDialog {
     Sort(SortForm),
     SplitCells(SplitCellsForm),
     TextToTable(TextToTableForm),
+    Size(SizeForm),
 }
 
 impl LayoutDialog {
@@ -48,6 +50,7 @@ impl LayoutDialog {
             LayoutDialog::Sort(_) => "tableSort",
             LayoutDialog::SplitCells(_) => "splitCells",
             LayoutDialog::TextToTable(_) => "textToTable",
+            LayoutDialog::Size(_) => "pictureSize",
         }
     }
 
@@ -64,6 +67,7 @@ impl LayoutDialog {
             LayoutDialog::Sort(_) => "Sort",
             LayoutDialog::SplitCells(_) => "Split Cells",
             LayoutDialog::TextToTable(_) => "Convert Text to Table",
+            LayoutDialog::Size(_) => "Size",
         }
     }
 }
@@ -81,6 +85,7 @@ pub fn open(name: &str, app: &mut WordApp) -> Option<LayoutDialog> {
         "tableSort" => LayoutDialog::Sort(SortForm::read(app)?),
         "splitCells" => LayoutDialog::SplitCells(SplitCellsForm::read(app)?),
         "textToTable" => LayoutDialog::TextToTable(TextToTableForm::read(app)?),
+        "pictureSize" => LayoutDialog::Size(SizeForm::read(app)?),
         _ => return None,
     })
 }
@@ -98,6 +103,7 @@ pub fn body(app: &mut WordApp, ui: &mut Ui, d: &mut LayoutDialog) -> bool {
         LayoutDialog::Sort(f) => sort_ui(app, ui, f),
         LayoutDialog::SplitCells(f) => split_cells_ui(app, ui, f),
         LayoutDialog::TextToTable(f) => text_to_table_ui(app, ui, f),
+        LayoutDialog::Size(f) => size_ui(app, ui, f),
     }
 }
 
@@ -904,7 +910,12 @@ impl SplitCellsForm {
         } else {
             return None;
         };
-        (self.rows > limit).then(|| crate::i18n::fmt(tl!("The number must be between 1 and {max}."), &[("max", &limit.to_string())]))
+        if self.rows > limit {
+            return Some(crate::i18n::fmt(tl!("The number must be between 1 and {max}."), &[("max", &limit.to_string())]));
+        }
+        // A merged cell splits into a divisor of its height, as in Word (the engine refuses the rest).
+        let divides = self.cells <= 1 && self.height > 1 && self.rows > 1 && !self.height.is_multiple_of(self.rows);
+        divides.then(|| crate::i18n::fmt(tl!("The number must be a divisor of {max}."), &[("max", &self.height.to_string())]))
     }
 
     /// `table.split` parameters for OK.
@@ -1091,6 +1102,216 @@ fn text_to_table_ui(app: &mut WordApp, ui: &mut Ui, f: &mut TextToTableForm) -> 
         // Out of range: Word's message, and the dialog stays open.
         f.error = f.check();
         return f.error.is_none() && run(app, "table.fromText", f.params());
+    }
+    cancel
+}
+
+// ---------------------------------------------------------------------------------------------
+// Size
+
+/// The Size dialog's fields (Picture Format › Size launcher, #2573) for the selected picture or
+/// shape. Lengths are in points; the fields show them in the interface unit.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizeForm {
+    /// Where the object sized is (the selected one when the dialog opened).
+    pub at: wordcraft_doc::Pos,
+    pub width: f32,
+    pub height: f32,
+    /// Changing one side changes the other in proportion (on for pictures, as in Word).
+    pub lock: bool,
+    /// The scale counts from the original size; otherwise from the size the dialog opened with.
+    pub relative: bool,
+    /// The size the dialog opened with.
+    pub start: (f32, f32),
+    /// What the crop leaves of the picture's original size: Reset's size. None for a shape, or a
+    /// picture whose image can't be read.
+    pub original: Option<(f32, f32)>,
+    /// The original size before the crop, and a bitmap's pixels, as shown.
+    pub uncropped: Option<(f32, f32)>,
+    pub pixels: Option<(u32, u32)>,
+    /// What the form was read from (see [`seen`]).
+    #[serde(skip)]
+    seen: Seen,
+}
+
+/// An object's picture, crop and size, bit for bit: what [`SizeForm::follow`] compares.
+type Seen = (String, [u32; 4], [u32; 2]);
+
+fn seen(o: &wordcraft_doc::para::InlineObject) -> Seen {
+    let (w, h) = o.frame().map_or((0.0, 0.0), |(w, h, _)| (w, h));
+    match o {
+        wordcraft_doc::para::InlineObject::Image { media, crop, .. } => (media.clone(), crop.map(f32::to_bits), [w.to_bits(), h.to_bits()]),
+        _ => (String::new(), [0; 4], [w.to_bits(), h.to_bits()]),
+    }
+}
+
+impl SizeForm {
+    /// The selected picture's or shape's size; None when nothing that has one is selected.
+    pub fn read(app: &WordApp) -> Option<SizeForm> {
+        use wordcraft_doc::para::InlineObject;
+        let (at, o) = wordcraft_engine::cmd::objects::selected(&app.session)?;
+        let (w, h, _) = o.frame()?;
+        let full = match &o {
+            InlineObject::Image { media, .. } => wordcraft_engine::cmd::objects::original_size(&app.session, media),
+            _ => None,
+        };
+        let original = wordcraft_engine::cmd::objects::cropped_original_size(&app.session, &o);
+        Some(SizeForm {
+            at,
+            width: w,
+            height: h,
+            lock: matches!(o, InlineObject::Image { .. }),
+            relative: original.is_some(),
+            start: (w, h),
+            original,
+            uncropped: full.map(|f| (f.w, f.h)),
+            pixels: full.and_then(|f| f.pixels),
+            seen: seen(&o),
+        })
+    }
+
+    /// Follow the selection: dialogs aren't modal, so a click on the page may pick another object,
+    /// and the ribbon or the handles may crop, change or resize this one. The form then starts over
+    /// on what is selected, or there is nothing to size (false: close the dialog). OK and Reset
+    /// never work from numbers read from another object or an older state of this one.
+    pub fn follow(&mut self, app: &WordApp) -> bool {
+        match wordcraft_engine::cmd::objects::selected(&app.session) {
+            Some((at, o)) if at == self.at && seen(&o) == self.seen => true,
+            Some(_) => SizeForm::read(app).map(|f| *self = f).is_some(),
+            None => false,
+        }
+    }
+
+    /// What the scale counts from.
+    fn base(&self) -> (f32, f32) {
+        match self.original {
+            Some(o) if self.relative => o,
+            _ => self.start,
+        }
+    }
+
+    /// The width and height as percentages of [`Self::base`].
+    pub fn scale(&self) -> (f32, f32) {
+        let (bw, bh) = self.base();
+        (self.width / bw.max(0.01) * 100.0, self.height / bh.max(0.01) * 100.0)
+    }
+
+    /// A new width; locked, the height follows in proportion, both kept within 1–4000 pt by one
+    /// factor (as `picture.size` does), so the limit never changes the shape.
+    pub fn set_width(&mut self, w: f32) {
+        if self.lock && self.width > 0.0 {
+            (self.width, self.height) = fit_size(w, self.height * w / self.width, true);
+        } else {
+            self.width = fit_size(w, self.height, false).0;
+        }
+    }
+
+    /// A new height; locked, the width follows (see [`Self::set_width`]).
+    pub fn set_height(&mut self, h: f32) {
+        if self.lock && self.height > 0.0 {
+            (self.width, self.height) = fit_size(self.width * h / self.height, h, true);
+        } else {
+            self.height = fit_size(self.width, h, false).1;
+        }
+    }
+
+    /// The width as a percentage of [`Self::base`].
+    pub fn set_scale_width(&mut self, percent: f32) {
+        self.set_width(self.base().0 * percent / 100.0);
+    }
+
+    /// The height as a percentage of [`Self::base`].
+    pub fn set_scale_height(&mut self, percent: f32) {
+        self.set_height(self.base().1 * percent / 100.0);
+    }
+
+    /// Reset: the picture's original size, less what is cropped; one past 4000 pt (a large photo)
+    /// shrinks as a whole.
+    pub fn reset(&mut self) {
+        if let Some((w, h)) = self.original {
+            (self.width, self.height) = fit_size(w, h, true);
+        }
+    }
+
+    /// `picture.size` parameters: both sides, as set here.
+    pub fn params(&self) -> Value {
+        json!({"width": self.width, "height": self.height, "lockAspect": false})
+    }
+}
+
+/// The Size dialog; returns true to close it.
+fn size_ui(app: &mut WordApp, ui: &mut Ui, f: &mut SizeForm) -> bool {
+    if !f.follow(app) {
+        return true;
+    }
+    let unit = unit();
+    let k = unit.pt_per_unit();
+    // A length in the interface unit that takes any typed unit (`300 px` too), applied once typed
+    // (Enter, Tab or a click elsewhere, OK included) so a half-typed number never resizes the other
+    // side; `None` until its value changes (while
+    // typing, the field reports each keystroke as a change). The range bounds what is typed or
+    // dragged only: a value already outside it (a 1 px picture is 0.75 pt) is shown as it is, not
+    // clamped, which egui would report as a change and so apply unasked.
+    let length = |ui: &mut Ui, label: &str, pt: f32| {
+        let name = ui.label(tl!(label));
+        let was = pt / k;
+        let mut v = was;
+        let field =
+            egui::DragValue::new(&mut v).speed(1.0 / k).range(1.0 / k..=4000.0 / k).clamp_existing_to_range(false).measure(unit).max_decimals(2);
+        let changed = ui.add(field.update_while_editing(false)).labelled_by(name.id).changed();
+        (changed && v != was).then_some(v * k)
+    };
+    let percent = |ui: &mut Ui, label: &str, was: f32| {
+        let name = ui.label(tl!(label));
+        let mut v = was;
+        let field = egui::DragValue::new(&mut v).speed(1.0).range(1.0..=10_000.0).clamp_existing_to_range(false).suffix(" %").max_decimals(1);
+        let changed = ui.add(field.update_while_editing(false)).labelled_by(name.id).changed();
+        (changed && v != was).then_some(v)
+    };
+    heading(ui, "Size");
+    egui::Grid::new("size_lengths").num_columns(4).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+        if let Some(h) = length(ui, "Height:", f.height) {
+            f.set_height(h);
+        }
+        if let Some(w) = length(ui, "Width:", f.width) {
+            f.set_width(w);
+        }
+        ui.end_row();
+    });
+    heading(ui, "Scale");
+    let (sw, sh) = f.scale();
+    egui::Grid::new("size_scale").num_columns(4).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+        if let Some(p) = percent(ui, "Height:", sh) {
+            f.set_scale_height(p);
+        }
+        if let Some(p) = percent(ui, "Width:", sw) {
+            f.set_scale_width(p);
+        }
+        ui.end_row();
+    });
+    ui.checkbox(&mut f.lock, tl!("Lock aspect ratio"));
+    ui.add_enabled(f.original.is_some(), egui::Checkbox::new(&mut f.relative, tl!("Relative to original picture size")));
+    if let Some((w, h)) = f.uncropped {
+        heading(ui, "Original size");
+        ui.horizontal(|ui| {
+            ui.label(format!("{} {}", tl!("Height:"), crate::options::length(h)));
+            ui.add_space(12.0);
+            ui.label(format!("{} {}", tl!("Width:"), crate::options::length(w)));
+            if let Some((pw, ph)) = f.pixels {
+                ui.add_space(12.0);
+                let (pw, ph) = (pw.to_string(), ph.to_string());
+                ui.weak(crate::i18n::fmt(tl!("{width} × {height} pixels"), &[("width", &pw), ("height", &ph)]));
+            }
+            ui.add_space(12.0);
+            if ui.button(tl!("Reset")).clicked() {
+                f.reset();
+            }
+        });
+    }
+    let (ok, cancel) = buttons(ui, "OK", true);
+    if ok {
+        return run(app, "picture.size", f.params());
     }
     cancel
 }
@@ -1389,6 +1610,30 @@ mod tests {
         assert!(a.dialog.is_none(), "no dialog outside a table");
     }
 
+    /// #2592, as Word does: for a merged cell the dialog's message says the row count must
+    /// divide its height (or lie in 1 to the height); the engine refuses the same counts and the
+    /// document stays as it was.
+    #[test]
+    fn split_cells_dialog_checks_a_merged_cells_row_count() {
+        let cell = |r: u32, c: u32| json!({"story": "body", "path": [0, r, c, 0], "off": 0});
+        let mut a = table_app(3, &["A", "B", "C", "D", "E", "F", "G", "H", "I"]);
+        a.run("select.range", json!({"anchor": cell(0, 0), "focus": cell(2, 0)})).unwrap();
+        a.run("table.merge", json!({})).unwrap();
+        a.run("caret.set", json!({"pos": cell(0, 0)})).unwrap();
+        a.run("ui.dialog", json!({"name": "splitCells"})).unwrap();
+        let LayoutDialog::SplitCells(mut f) = form(&mut a) else { panic!("split cells") };
+        assert_eq!(f.height, 3);
+        for (rows, ok) in [(1, true), (2, false), (3, true), (4, false)] {
+            f.rows = rows;
+            assert_eq!(f.check().is_none(), ok, "rows {rows}");
+        }
+        f.rows = 2;
+        assert!(f.check().is_some_and(|m| m.contains("divisor of 3")));
+        let (depth, shape) = (a.session.undo_depth(), table_shape(&a));
+        assert!(a.run("table.split", f.params()).is_err());
+        assert_eq!((a.session.undo_depth(), table_shape(&a)), (depth, shape));
+    }
+
     /// #2592, as Word does: Split Cells starts with twice the selected columns and the selected
     /// rows; Merge is off and greyed for one cell. Unticking it splits each cell on its own: one
     /// row and two columns again.
@@ -1533,5 +1778,234 @@ mod tests {
         (f.row, f.col) = (3, 2);
         assert_eq!(a.session.run("mailings.labels", &f.params()).unwrap()["filled"], 1);
         assert!(product_label(f.product).contains("63.5 × 33.9 mm (A4)"));
+    }
+
+    /// A `w`×`h` pixel PNG, base64 for `insert.picture`.
+    fn png_data(w: u32, h: u32) -> String {
+        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([200, 30, 30, 255]));
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        wordcraft_engine::cmd::insert::base64_encode(&png)
+    }
+
+    /// An app with a `w`×`h` pixel picture, inserted and selected as by Insert › Pictures.
+    fn picture_app(w: u32, h: u32) -> WordApp {
+        let mut a = WordApp::new(Session::new(wordcraft_doc::Document::new()), Services::default());
+        a.run("insert.picture", json!({"data": png_data(w, h)})).unwrap();
+        a
+    }
+
+    fn selected_size(a: &WordApp) -> (f32, f32) {
+        let (_, o) = wordcraft_engine::cmd::objects::selected(&a.session).unwrap();
+        o.frame().map(|(w, h, _)| (w, h)).unwrap()
+    }
+
+    /// #2573: Picture Format › Size's launcher (`picture.size` without a size) opens the Size
+    /// dialog on the selected picture: its size, the scale of its original size, Lock aspect ratio
+    /// and Reset; OK resizes it in one undo step.
+    #[test]
+    fn size_dialog_scales_locks_and_resets_the_picture() {
+        let mut a = picture_app(40, 20);
+        assert_eq!(selected_size(&a), (30.0, 15.0), "40×20 px at 96 ppi");
+        a.run("picture.size", json!({"width": 60.0, "height": 15.0, "lockAspect": false})).unwrap();
+        assert_eq!(a.run("picture.size", json!({})).unwrap(), json!({"pending": "pictureSize"}));
+        assert_eq!(selected_size(&a), (60.0, 15.0), "opening the dialog changes nothing");
+        let LayoutDialog::Size(mut f) = form(&mut a) else { panic!("size") };
+        assert!(f.lock && f.relative, "a picture opens locked, scaled from its original size");
+        assert_eq!((f.original, f.uncropped, f.pixels), (Some((30.0, 15.0)), Some((30.0, 15.0)), Some((40, 20))));
+        assert_eq!(f.scale(), (200.0, 100.0));
+        // Locked, the other side follows in proportion, in size and in scale.
+        f.set_scale_height(200.0);
+        assert_eq!((f.width, f.height, f.scale()), (120.0, 30.0, (400.0, 200.0)));
+        f.set_width(60.0);
+        assert_eq!((f.width, f.height), (60.0, 15.0));
+        f.lock = false;
+        f.set_height(45.0);
+        assert_eq!((f.width, f.height), (60.0, 45.0), "unlocked, one side alone");
+        f.reset();
+        assert_eq!((f.width, f.height, f.scale()), (30.0, 15.0, (100.0, 100.0)), "Reset: the original size");
+        f.relative = false;
+        assert_eq!(f.scale(), (50.0, 100.0), "from the size the dialog opened with");
+        f.set_scale_width(150.0);
+        assert_eq!((f.width, f.height), (90.0, 15.0));
+        a.run("picture.size", f.params()).unwrap();
+        assert_eq!(selected_size(&a), (90.0, 15.0));
+        a.run("edit.undo", json!({})).unwrap();
+        assert_eq!(selected_size(&a), (60.0, 15.0), "one undo step");
+    }
+
+    /// #2573: a cropped picture's Reset is what the crop leaves of the original; a shape opens the
+    /// dialog unlocked with no original size; with nothing selected nothing opens.
+    #[test]
+    fn size_dialog_follows_the_crop_and_shapes_have_no_original() {
+        let mut a = picture_app(40, 20);
+        a.run("picture.crop", json!({"left": 0.25, "right": 0.25})).unwrap();
+        a.run("picture.size", json!({})).unwrap();
+        let LayoutDialog::Size(mut f) = form(&mut a) else { panic!("size") };
+        assert_eq!((f.original, f.uncropped), (Some((15.0, 15.0)), Some((30.0, 15.0))));
+        f.reset();
+        assert_eq!((f.width, f.height), (15.0, 15.0));
+
+        let mut a = app();
+        assert!(!crate::widgets::enabled(&a, "picture.size"), "nothing to size");
+        let _ = a.run("ui.dialog", json!({"name": "pictureSize"}));
+        assert!(a.dialog.is_none());
+        a.run("insert.shape", json!({"kind": "rectangle"})).unwrap();
+        a.run("picture.size", json!({})).unwrap();
+        let LayoutDialog::Size(f) = form(&mut a) else { panic!("size") };
+        assert!(!f.lock && !f.relative && f.original.is_none() && f.uncropped.is_none());
+        assert_eq!(f.scale(), (100.0, 100.0));
+    }
+
+    /// #2573 review: locked, a side past 4000 pt shrinks the other with it instead of flattening
+    /// the picture, and so does Reset for a photo larger than 4000 pt; under 1 pt likewise.
+    #[test]
+    fn size_dialog_keeps_the_proportions_at_the_limits() {
+        let close = |(w, h): (f32, f32), (ew, eh): (f32, f32)| (w - ew).abs() < 0.01 && (h - eh).abs() < 0.01;
+        let mut a = picture_app(6000, 30);
+        a.run("picture.size", json!({})).unwrap();
+        let LayoutDialog::Size(mut f) = form(&mut a) else { panic!("size") };
+        assert_eq!(f.original, Some((4500.0, 22.5)), "6000×30 px at 96 ppi");
+        f.reset();
+        assert!(close((f.width, f.height), (4000.0, 20.0)), "Reset: {}×{}", f.width, f.height);
+        a.run("picture.size", f.params()).unwrap();
+        assert!(close(selected_size(&a), (4000.0, 20.0)), "applied: {:?}", selected_size(&a));
+        (f.width, f.height) = (15.0, 30.0);
+        f.set_width(4000.0);
+        assert_eq!((f.width, f.height), (2000.0, 4000.0));
+        f.set_height(0.5);
+        assert_eq!((f.width, f.height), (1.0, 2.0));
+        f.lock = false;
+        f.set_width(9000.0);
+        assert_eq!((f.width, f.height), (4000.0, 2.0), "unlocked, one side alone");
+    }
+
+    /// #2573 review: dialogs aren't modal. Cropping the picture or picking another one while the
+    /// Size dialog is open starts the form over, so OK never sizes a picture with stale numbers;
+    /// with nothing left to size the dialog closes.
+    #[test]
+    fn size_dialog_follows_the_selection() {
+        let mut a = picture_app(40, 20);
+        a.run("picture.size", json!({})).unwrap();
+        let LayoutDialog::Size(mut f) = form(&mut a) else { panic!("size") };
+        f.set_width(300.0);
+        assert!(f.follow(&a) && f.width == 300.0, "the same picture keeps the edits");
+        // Cropped from the ribbon meanwhile: read again, Reset is what the new crop leaves.
+        a.run("picture.crop", json!({"left": 0.25, "right": 0.25})).unwrap();
+        assert!(f.follow(&a));
+        assert_eq!((f.width, f.original), (30.0, Some((15.0, 15.0))));
+        a.run("select.collapse", json!({"end": true})).unwrap();
+        a.run("insert.picture", json!({"data": png_data(20, 40)})).unwrap();
+        assert!(f.follow(&a), "another picture selected");
+        assert_eq!((f.width, f.height, f.original), (15.0, 30.0, Some((15.0, 30.0))));
+        a.run("select.collapse", json!({"end": true})).unwrap();
+        a.run("text.insert", json!({"text": " caption"})).unwrap();
+        assert!(!f.follow(&a), "nothing to size");
+    }
+
+    /// #2573 review: the Size dialog end to end. Its launcher (`picture.size` without a size)
+    /// opens it; a height typed in pixels changes nothing until OK, which sizes the picture in
+    /// proportion as one undo step and closes the dialog.
+    #[test]
+    fn size_dialog_typed_height_applies_on_ok_in_proportion() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        let mut a = picture_app(40, 20);
+        a.run("picture.size", json!({})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(4);
+        // The Size section's Height (the Scale section has one too, after it).
+        h.get_all_by_role_and_label(Role::SpinButton, "Height:").next().expect("the height field").click();
+        h.run_steps(2);
+        h.get_all_by_role_and_label(Role::SpinButton, "Height:").next().expect("editing").type_text("60 px");
+        h.key_press(egui::Key::Enter);
+        h.run_steps(2);
+        assert!(h.state().dialog.is_some());
+        assert_eq!(selected_size(h.state()), (30.0, 15.0), "nothing applies before OK");
+        h.get_by_role_and_label(Role::Button, "OK").click();
+        h.run_steps(2);
+        assert!(h.state().dialog.is_none(), "OK closes the dialog");
+        assert_eq!(selected_size(h.state()), (90.0, 45.0), "60 px = 45 pt high, the width follows");
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        assert_eq!(selected_size(h.state()), (30.0, 15.0), "one undo step");
+    }
+
+    /// #2573 review: a value outside a field's range (a 1 px picture enlarged past 10000%) is shown
+    /// as it is. egui would otherwise clamp it on the first frame and report a change, which the
+    /// form would take as an edit and OK would apply unasked.
+    #[test]
+    fn size_dialog_leaves_out_of_range_values_alone() {
+        let mut a = picture_app(1, 1);
+        a.run("picture.size", json!({"width": 100.0, "height": 100.0, "lockAspect": false})).unwrap();
+        a.run("picture.size", json!({})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(4);
+        let Some(Dialog::Layout(d)) = &h.state().dialog else { panic!("the Size dialog is open") };
+        let LayoutDialog::Size(f) = d.as_ref() else { panic!("size") };
+        assert!((f.scale().0 - 100.0 / 0.75 * 100.0).abs() < 1.0, "13333%: {:?}", f.scale());
+        assert_eq!((f.width, f.height), (100.0, 100.0), "the form keeps the size");
+        assert_eq!(selected_size(h.state()), (100.0, 100.0));
+    }
+
+    /// #2573 review: a typed size is kept when the field loses focus, as text fields do: typing a
+    /// height and going straight for OK (a real click: press, then release frames later) applies
+    /// it. Taking it only on Enter would throw the typed size away. Esc cancels, applying nothing.
+    #[test]
+    fn size_dialog_typed_height_then_ok_without_enter_applies_it() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        let harness = |a: WordApp| {
+            egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+                |ui, app: &mut WordApp| {
+                    let ctx = ui.ctx().clone();
+                    app.logic(&ctx);
+                    app.ui(ui);
+                },
+                a,
+            )
+        };
+        let mut a = picture_app(40, 20);
+        a.run("picture.size", json!({})).unwrap();
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_all_by_role_and_label(Role::SpinButton, "Height:").next().expect("the height field").click();
+        h.run_steps(2);
+        h.get_all_by_role_and_label(Role::SpinButton, "Height:").next().expect("editing").type_text("60 px");
+        h.run_steps(2);
+        let ok = h.get_by_role_and_label(Role::Button, "OK").rect().center();
+        h.event(egui::Event::PointerMoved(ok));
+        h.event(egui::Event::PointerButton { pos: ok, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: ok, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(2);
+        assert!(h.state().dialog.is_none(), "OK closes the dialog");
+        assert_eq!(selected_size(h.state()), (90.0, 45.0), "the typed height, in proportion");
+
+        // Esc throws the typing away and, as Cancel, closes the dialog: nothing applied.
+        let mut a = picture_app(40, 20);
+        a.run("picture.size", json!({})).unwrap();
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_all_by_role_and_label(Role::SpinButton, "Height:").next().expect("the height field").click();
+        h.run_steps(2);
+        h.get_all_by_role_and_label(Role::SpinButton, "Height:").next().expect("editing").type_text("60 px");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        assert!(h.state().dialog.is_none(), "Esc cancels the dialog");
+        assert_eq!(selected_size(h.state()), (30.0, 15.0), "nothing applied");
     }
 }

@@ -125,7 +125,15 @@ pub fn specs() -> Vec<CommandSpec> {
         // membership and drop cap stay. ⌘Q quits on macOS, so Word for Mac uses ⌃Q.
         CommandSpec::new("para.reset", "Reset Paragraph Formatting", "Home › Paragraph", |s, _| {
             fmt(s, &|p| {
-                *p = ParaProps { style: p.style.take(), numbering: p.numbering.take(), drop_cap: p.drop_cap.take(), ..Default::default() }
+                *p = ParaProps {
+                    style: p.style.take(),
+                    numbering: p.numbering.take(),
+                    drop_cap: p.drop_cap.take(),
+                    drop_cap_margin: p.drop_cap_margin.take(),
+                    drop_cap_distance: p.drop_cap_distance.take(),
+                    drop_cap_font: p.drop_cap_font.take(),
+                    ..Default::default()
+                }
             })
         })
         .key(super::mac_or("Ctrl+Q", "Mod+Q")),
@@ -941,7 +949,8 @@ fn create_style(s: &mut Session, v: &Value) -> CmdResult {
         st.para = para.props.clone();
         st.para.style = None;
         st.para.numbering = None;
-        st.chr = para.props_at(s.sel.focus.off).clone();
+        // A symbol's own font is the symbol's, not the style's.
+        st.chr = para.props_at(s.sel.focus.off).clone().without_symbol();
         st.chr.style = None;
         st.chr.link = None;
         st.chr.ins = None;
@@ -996,7 +1005,8 @@ fn update_to_match(s: &mut Session, v: &Value) -> CmdResult {
     if !matches!(target.kind, StyleKind::Paragraph | StyleKind::Character) {
         return Err(CmdError::Failed(format!("`{}` can't be updated to match the selection", target.name)));
     }
-    let direct = if s.sel.is_collapsed() { para.props_at(a.off) } else { para.props_of_char(a.off) }.clone();
+    // A symbol's own font is the symbol's, not the style's.
+    let direct = if s.sel.is_collapsed() { para.props_at(a.off) } else { para.props_of_char(a.off) }.clone().without_symbol();
     let para_style = para.props.style.clone().unwrap_or_else(|| "Normal".into());
     // How the selection looks: document defaults, its paragraph style chain, its character
     // style chain, direct formatting (the resolve order, before defaults are filled in).

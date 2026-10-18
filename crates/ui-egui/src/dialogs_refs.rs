@@ -13,6 +13,8 @@ use wordcraft_engine::cmd::references::FieldCode;
 
 use crate::WordApp;
 use crate::dialogs::{Dialog, buttons};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::file_dialogs::{AfterPick, Asked, FileDialogRequest};
 use crate::theme::{Tokens, semibold};
 
 #[derive(Clone, Debug, Serialize)]
@@ -240,8 +242,9 @@ impl CaptionForm {
                 labels.push(l.clone());
             }
         }
-        // In a table the caption is for the table.
-        let in_table = app.session.sel.focus.path.depth() > 0
+        // In a table the caption is for the table, unless a picture or shape in it is selected.
+        let in_table = wordcraft_engine::cmd::objects::object_selection(&app.session).is_none()
+            && app.session.sel.focus.path.depth() > 0
             && app
                 .session
                 .doc
@@ -1064,6 +1067,8 @@ fn source_ui(app: &mut WordApp, ui: &mut Ui, f: &mut SourceForm) -> Next {
     if ok || cancel { Next::Close } else { Next::Stay }
 }
 
+/// The Source Manager: the document's sources with New…, Import…, Edit…, Delete and Insert
+/// Citation; each button runs the command an agent would.
 fn sources_ui(app: &mut WordApp, ui: &mut Ui, selected: &mut Option<usize>) -> Next {
     let t = Tokens::get(ui.ctx());
     let list: Vec<String> = app
@@ -1096,6 +1101,14 @@ fn sources_ui(app: &mut WordApp, ui: &mut Ui, selected: &mut Option<usize>) -> N
     ui.horizontal(|ui| {
         if ui.button(tl!("New…")).clicked() {
             next = go(RefsDialog::Source(Box::new(SourceForm::new(false, true))));
+        }
+        // Import… (desktop): a Word bibliography file (`b:Sources`, Word's own Sources.xml) adds
+        // its sources to this document (#2640); the list above follows on the next frame.
+        #[cfg(not(target_arch = "wasm32"))]
+        if ui.button(tl!("Import…")).clicked()
+            && let Asked::Done(Err(e)) = app.ask_file(FileDialogRequest::Open { purpose: "sources".into() }, AfterPick::Sources)
+        {
+            app.status(e);
         }
         if ui.add_enabled(src.is_some(), egui::Button::new(tl!("Edit…"))).clicked()
             && let Some(s) = &src
@@ -1292,5 +1305,54 @@ mod tests {
         a.run("references.sources", json!({"add": src})).unwrap();
         assert!(a.session.doc.plain_text(StoryRef::Body).contains("(Rivera, 2025)"), "{}", a.session.doc.plain_text(StoryRef::Body));
         assert_eq!(a.session.doc.sources.len(), 1);
+    }
+
+    /// #2640: the Source Manager's Import… asks the host's file dialog for a Word bibliography
+    /// file (`b:Sources`, Word's own `Sources.xml`) and adds its sources to the document, shown
+    /// in the list at once.
+    #[test]
+    fn the_source_manager_imports_a_word_sources_file() {
+        use egui_kittest::kittest::Queryable;
+
+        let dir = std::env::temp_dir().join(format!("wc-refs-import-sources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Sources.xml");
+        std::fs::write(
+            &path,
+            r#"<b:Sources xmlns:b="http://schemas.openxmlformats.org/officeDocument/2006/bibliography">
+  <b:Source><b:Tag>Riv21</b:Tag><b:SourceType>Book</b:SourceType><b:Title>Shared Spaces</b:Title><b:Year>2021</b:Year></b:Source>
+  <b:Source><b:Tag>Oka19</b:Tag><b:SourceType>Book</b:SourceType><b:Title>Kilns and Clay</b:Title><b:Year>2019</b:Year></b:Source>
+</b:Sources>"#,
+        )
+        .unwrap();
+
+        let mut a = app("Studios matter ");
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let (seen, picked) = (asked.clone(), path.to_string_lossy().to_string());
+        a.services.pick_open = Some(Box::new(move |purpose| {
+            *seen.borrow_mut() = purpose.to_string();
+            Some(picked.clone())
+        }));
+        assert_eq!(a.run("references.sources", json!({})).unwrap(), json!({"pending": "sourceManager"}));
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        h.get_by_label("Import…").click();
+        for _ in 0..4 {
+            h.step();
+        }
+        assert_eq!(*asked.borrow(), "sources", "the host can offer Word sources files");
+        assert_eq!(h.state().session.doc.sources.len(), 2);
+        assert!(h.state().status_msg.as_ref().is_some_and(|(m, _)| m.contains("Imported 2 sources")), "{:?}", h.state().status_msg);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
