@@ -514,19 +514,30 @@ impl Document {
     /// tables, headers and notes keep their text without labels.
     pub fn copy_text(&self, f: &Fragment, a: &Pos, b: &Pos) -> String {
         let (a, b) = order(a, b);
-        if a.story != crate::StoryRef::Body || a.path.0.len() != 1 || b.path.0.len() != 1 {
+        if a.story != crate::StoryRef::Body {
             return f.clipboard_text();
         }
-        let (first, last) = (a.path.last(), b.path.last());
-        let whole_one = first != last || (a.off == 0 && self.para(a.story, &a.path).is_some_and(|p| b.off >= p.len()));
+        // The path each copied block comes from, as `copy_blocks` copies them: the blocks between
+        // two places in one container, or every paragraph between them when the selection
+        // crosses a table (the ones in its cells included).
+        let sources: Vec<Path> = if a.path.parent() == b.path.parent() {
+            (a.path.last()..=b.path.last()).map(|i| a.path.with_last(i)).collect()
+        } else {
+            self.paths_between(&a, &b).into_iter().filter(|p| self.para(a.story, p).is_some()).collect()
+        };
+        let whole_one = a.path != b.path || (a.off == 0 && self.para(a.story, &a.path).is_some_and(|p| b.off >= p.len()));
         let labels = self.body_list_labels();
         let mut labelled = f.clone();
         let mut any = false;
-        for (k, blk) in labelled.blocks.iter_mut().enumerate() {
-            let i = first.saturating_add(k);
-            let start_copied = if i == first { a.off == 0 } else { true };
-            let reached = !(i == last && b.off == 0 && i != first);
-            let (Block::Para(p), Some(Some((label, level)))) = (blk, labels.get(i)) else { continue };
+        for (blk, path) in labelled.blocks.iter_mut().zip(&sources) {
+            // Only top-level paragraphs get labels; the ones in tables keep their text.
+            if path.0.len() != 1 {
+                continue;
+            }
+            let (is_first, is_last) = (*path == a.path, *path == b.path);
+            let start_copied = !is_first || a.off == 0;
+            let reached = !(is_last && b.off == 0 && !is_first);
+            let (Block::Para(p), Some(Some((label, level)))) = (blk, labels.get(path.last())) else { continue };
             if !(start_copied && reached && whole_one) {
                 continue;
             }

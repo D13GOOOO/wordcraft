@@ -1131,6 +1131,33 @@ fn copied_list_labels_follow_what_the_selection_covers() {
     assert_eq!(copy(&mut s, Pos::body(0, 0), Pos::body(0, 5)), "Intro", "no list, no label");
 }
 
+/// #2015: a selection that crosses a table (Select All in a document that starts with one, or a
+/// list down into a table) keeps the labels of the list paragraphs outside the table; the
+/// paragraphs in its cells keep their text without labels.
+#[test]
+fn copied_list_labels_survive_a_selection_across_a_table() {
+    use wordcraft_doc::{Block, Path, Table};
+    let cell_table = |s: &mut Session, at: usize| {
+        s.doc.insert_block(StoryRef::Body, &Path::top(at), Block::Table(Table::new(1, 1, 300.0))).unwrap();
+        let cell = Path(vec![at as u32, 0, 0, 0]);
+        s.doc.para_mut(StoryRef::Body, &cell).unwrap().insert_text(0, "Cell", &Default::default()).unwrap();
+        Pos { story: StoryRef::Body, path: cell, off: 0 }
+    };
+    let copy = |s: &mut Session, a: Pos, b: Pos| {
+        run(s, "select.range", json!({"anchor": a, "focus": b}));
+        run(s, "edit.copy", json!({}));
+        s.clipboard_text.clone()
+    };
+    // A table first: from its cell to the end of the last bullet.
+    let mut s = session_with_lists();
+    let cell = cell_table(&mut s, 0);
+    assert_eq!(copy(&mut s, cell, Pos::body(5, 7)), "Cell\nIntro\n1.\tItem 1\n2.\tItem 2\n•\tPoint A\n•\tPoint B");
+    // A table last: from the first item down into its cell.
+    let mut s = session_with_lists();
+    let cell = cell_table(&mut s, 5);
+    assert_eq!(copy(&mut s, Pos::body(1, 0), Pos { off: 4, ..cell }), "1.\tItem 1\n2.\tItem 2\n•\tPoint A\n•\tPoint B\nCell");
+}
+
 fn bold_at(s: &Session, block: usize, off: usize) -> bool {
     let pos = Pos { story: StoryRef::Body, path: wordcraft_doc::Path::top(block), off };
     s.doc.para_at(&pos).and_then(|p| p.props_of_char(off).bold).unwrap_or(false)
