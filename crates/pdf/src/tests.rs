@@ -1300,9 +1300,42 @@ fn rtl_sample() -> Document {
     d
 }
 
+/// The `/ActualText` of each marked-content sequence (BMC/BDC) on a page, in content-stream order.
+fn actual_texts(page: &hayro_syntax::page::Page<'_>) -> Vec<Option<String>> {
+    use hayro_syntax::content::ops::TypedInstruction;
+    use hayro_syntax::object::{Object, String as PdfString};
+    let mut out = Vec::new();
+    let mut ops = page.typed_operations();
+    while let Some(op) = ops.next() {
+        match op {
+            TypedInstruction::BeginMarkedContent(_) => out.push(None),
+            TypedInstruction::BeginMarkedContentWithProperties(bdc) => out.push(match bdc.1 {
+                Object::Dict(d) => d.get::<PdfString<'_>>("ActualText").map(|s| pdf_text_string(s.as_bytes())),
+                _ => None,
+            }),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A PDF text string: UTF-16BE or UTF-8 after a byte order mark, else (near enough) PDFDocEncoding.
+fn pdf_text_string(b: &[u8]) -> String {
+    if let Some(utf16) = b.strip_prefix(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = utf16.as_chunks::<2>().0.iter().map(|&c| u16::from_be_bytes(c)).collect();
+        String::from_utf16_lossy(&units)
+    } else if let Some(utf8) = b.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        String::from_utf8_lossy(utf8).into_owned()
+    } else {
+        b.iter().map(|&c| char::from(c)).collect()
+    }
+}
+
 /// Each glyph's Unicode text in content-stream order, with its baseline y and its outline's left
-/// and right edges (none for a space); `None` text for a glyph without a ToUnicode entry of its
-/// own (a cluster's extra glyph, covered by ActualText).
+/// and right edges (none for a space). Inside a marked-content sequence with `/ActualText` (a
+/// cluster whose glyphs' ToUnicode entries can't spell it), that text goes with the first glyph and
+/// the rest have none, as PDFium and poppler read it; elsewhere a glyph without a ToUnicode entry
+/// has `None` text.
 type StreamGlyph = (Option<String>, f64, Option<(f64, f64)>);
 fn stream_glyphs(bytes: &[u8]) -> Vec<StreamGlyph> {
     use hayro_interpret::font::Glyph;
@@ -1311,21 +1344,40 @@ fn stream_glyphs(bytes: &[u8]) -> Vec<StreamGlyph> {
         interpret_page,
     };
     use hayro_syntax::Pdf;
-    struct Units(Vec<StreamGlyph>);
+    #[derive(Default)]
+    struct Units {
+        glyphs: Vec<StreamGlyph>,
+        /// The page's ActualText per marked-content sequence, and how many have begun.
+        actual: Vec<Option<String>>,
+        begun: usize,
+        /// Open sequences: the ActualText still to hand out (emptied by the first glyph).
+        open: Vec<Option<String>>,
+    }
     impl Device<'_> for Units {
         fn set_soft_mask(&mut self, _: Option<SoftMask<'_>>) {}
         fn set_blend_mode(&mut self, _: BlendMode) {}
         fn draw_path(&mut self, _: &kurbo::BezPath, _: kurbo::Affine, _: &Paint<'_>, _: &PathDrawMode) {}
         fn push_clip_path(&mut self, _: &ClipPath) {}
         fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'_>>, _: BlendMode) {}
+        fn begin_marked_content(&mut self, _: &[u8], _: Option<i32>) {
+            self.open.push(self.actual.get(self.begun).cloned().flatten());
+            self.begun += 1;
+        }
+        fn end_marked_content(&mut self) {
+            self.open.pop();
+        }
         fn draw_glyph(&mut self, g: &Glyph<'_>, t: kurbo::Affine, gt: kurbo::Affine, _: &Paint<'_>, mode: &GlyphDrawMode) {
             if matches!(mode, GlyphDrawMode::Stroke(_)) {
                 return;
             }
-            let text = match g.as_unicode() {
-                Some(hayro_cmap::BfString::Char(c)) => Some(c.to_string()),
-                Some(hayro_cmap::BfString::String(s)) => Some(s),
-                None => None,
+            let text = if let Some(actual) = self.open.iter_mut().find_map(Option::as_mut) {
+                Some(std::mem::take(actual)).filter(|s| !s.is_empty())
+            } else {
+                match g.as_unicode() {
+                    Some(hayro_cmap::BfString::Char(c)) => Some(c.to_string()),
+                    Some(hayro_cmap::BfString::String(s)) => Some(s),
+                    None => None,
+                }
             };
             let edges = match g {
                 Glyph::Outline(o) if !o.outline().elements().is_empty() => {
@@ -1335,7 +1387,7 @@ fn stream_glyphs(bytes: &[u8]) -> Vec<StreamGlyph> {
                 }
                 _ => None,
             };
-            self.0.push((text, (t * gt * kurbo::Point::ZERO).y, edges));
+            self.glyphs.push((text, (t * gt * kurbo::Point::ZERO).y, edges));
         }
         fn draw_image(&mut self, _: Image<'_, '_>, _: kurbo::Affine) {}
         fn pop_clip_path(&mut self) {}
@@ -1343,18 +1395,40 @@ fn stream_glyphs(bytes: &[u8]) -> Vec<StreamGlyph> {
     }
     let pdf = Pdf::new(bytes.to_vec()).expect("parse");
     let cache = InterpreterCache::new();
-    let mut out = Units(Vec::new());
+    let mut out = Units::default();
     for page in pdf.pages().iter() {
+        out.actual = actual_texts(page);
+        out.begun = 0;
         let mut ctx = Context::new(kurbo::Affine::IDENTITY, kurbo::Rect::new(0.0, 0.0, 1.0, 1.0), &cache, pdf.xref(), InterpreterSettings::default());
         interpret_page(page, &mut ctx, &mut out);
     }
-    out.0
+    out.glyphs
+}
+
+/// One glyph drawn for two different letters: ToUnicode can map it to only one, so krilla wraps
+/// the other in an ActualText span, and `stream_glyphs` reads the span's text (#1773). Whether
+/// shaping reuses a glyph like this depends on the font: Noto Naskh Arabic draws a dotted letter
+/// as a dotless body that other letters share, so the RTL tests met it only where it's installed.
+#[test]
+fn stream_glyphs_read_actual_text() {
+    let font = Font::new(wordcraft_fonts::bundled()[0].to_vec().into(), 0).unwrap();
+    let glyph = |range| KrillaGlyph::new(GlyphId::new(10), 0.5, 0.0, 0.0, 0.0, range, None);
+    let mut pdf = krilla::Document::new();
+    let mut page = pdf.start_page_with(PageSettings::new(Size::from_wh(200.0, 100.0).unwrap()));
+    let mut s = page.surface();
+    s.draw_glyphs(Point::from_xy(10.0, 50.0), &[glyph(0..1), glyph(1..2)], font, "AB", 12.0, false);
+    s.finish();
+    page.finish();
+    let bytes = pdf.finish().unwrap();
+    let texts: Vec<_> = stream_glyphs(&bytes).into_iter().map(|(t, ..)| t).collect();
+    assert_eq!(texts, [Some("A".to_string()), Some("B".to_string())]);
 }
 
 /// Words as PDF viewers' text extraction (PDFium in Chrome and Edge, pdf.js, poppler) reads them:
 /// glyphs are taken to be in visual order, so a word in a right-to-left script is read with its
 /// glyphs reversed. Words end at spaces, at a jump back to the left, and where the
-/// baseline moves (more than a raised mark does).
+/// baseline moves (more than a raised mark does). ActualText is read as PDFium and poppler read
+/// it; pdf.js ignores it.
 fn viewer_words(bytes: &[u8]) -> Vec<String> {
     let mut words = Vec::new();
     let mut word: Vec<String> = Vec::new();

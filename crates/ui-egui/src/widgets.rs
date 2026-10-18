@@ -227,18 +227,25 @@ pub fn split(
     let (r, resp) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::click());
     keytip_badge(ui, r, id, tip);
     let (ar, aresp) = ui.allocate_exact_size(vec2(11.0, 22.0), Sense::click());
+    let on = enabled(app, id);
     bg(ui, r, &resp, checked, &t);
     bg(ui, ar, &aresp, false, &t);
     let ic = Rect::from_center_size(r.center(), vec2(17.0, 17.0));
-    icons::paint(ui.painter(), ic, icon, t.icon, t.accent);
+    let (c, a) = if on { (t.icon, t.accent) } else { (t.text_disabled, t.text_disabled) };
+    icons::paint(ui.painter(), ic, icon, c, a);
     if let Some(sw) = swatch {
+        let sw = if on { sw } else { t.text_disabled };
         ui.painter().rect_filled(Rect::from_min_max(pos2(r.min.x + 4.0, r.max.y - 5.0), pos2(r.max.x - 4.0, r.max.y - 2.0)), 0.0, sw);
     }
-    icons::paint(ui.painter(), Rect::from_center_size(ar.center(), vec2(DROPDOWN, DROPDOWN)), "dropdown", t.icon, t.accent);
+    icons::paint(ui.painter(), Rect::from_center_size(ar.center(), vec2(DROPDOWN, DROPDOWN)), "dropdown", c, a);
     let resp = tooltip(app, resp, tip, id);
     command_menu(&resp, app, id);
-    if resp.clicked() {
+    if resp.clicked() && on {
         run_from_ribbon(app, id, params);
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, on, tip));
+    if !on {
+        return;
     }
     egui::Popup::menu(&aresp).show(|ui| {
         ui.set_min_width(180.0);
