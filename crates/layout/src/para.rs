@@ -616,6 +616,13 @@ pub(crate) fn push_caps(rc: &ResolvedChar, c: char, out: &mut String) {
     if rc.caps || (rc.small_caps && c.is_lowercase()) { out.extend(c.to_uppercase()) } else { out.push(c) }
 }
 
+/// The OpenType ligature features a `w14:ligatures` value sets, each on or off. Required
+/// ligatures (`rlig`, Arabic lam-alef) are never turned off.
+pub(crate) fn ligature_features(l: wordcraft_doc::props::Ligatures) -> [wordcraft_fonts::Feature; 4] {
+    let f = |tag: &[u8; 4], on: bool| wordcraft_fonts::feature_value(tag, on as u32);
+    [f(b"liga", l.standard), f(b"clig", l.contextual), f(b"hlig", l.historical), f(b"dlig", l.discretional)]
+}
+
 /// Whether `c`'s capital is more than one character (ß → SS), so All Caps draws more
 /// characters than the document holds.
 fn caps_expands(c: char) -> bool {
@@ -1020,7 +1027,18 @@ impl<'a> Builder<'a> {
                 }
             };
             // The shaper kerns by default; Word kerns only when Kerning for fonts covers the size.
-            let features: &[wordcraft_fonts::Feature] = if rc.kerned() { &[] } else { &no_kern };
+            // Without `w14:ligatures` the shaper's default (standard and contextual) stays.
+            let [kern_off] = no_kern;
+            let all = match rc.ligatures {
+                Some(l) => {
+                    let [a, b, c, d] = ligature_features(l);
+                    [kern_off, a, b, c, d]
+                }
+                None => [kern_off; 5],
+            };
+            let from = usize::from(rc.kerned());
+            let to = if rc.ligatures.is_some() { all.len() } else { 1 };
+            let features: &[wordcraft_fonts::Feature] = all.get(from..to).unwrap_or_default();
             let shaped = if use_levels {
                 wordcraft_fonts::shape_run(&st.face, shape_text, features, map, key.rtl)
             } else {
@@ -1827,9 +1845,11 @@ fn ptab_stop(align: PTabAlign, base: PTabBase, leader: TabLeader, width: f32, in
 }
 
 fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u32, level: Option<&Level>) {
+    // Narrow cells and float spans must retain their usable width.
+    const MIN_LINE_WIDTH: f32 = 1.0;
     let suffix = level.map(|l| l.suffix);
     let rp = pl.rp.clone();
-    let width = env.width.max(12.0);
+    let width = env.width.max(MIN_LINE_WIDTH);
     let base_right = (width - rp.indent_right).max(1.0);
     let default_tab = env.doc.settings.default_tab;
     let first_left = rp.indent_left + rp.indent_first;
@@ -1911,7 +1931,7 @@ fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u32, level: Optio
                         narrowed = !rest.is_empty() || a > lo || b < base_right;
                         row_rest = rest;
                         row_first = lines.len();
-                        break (a, b.max(a + 12.0));
+                        break (a, b.max(a + MIN_LINE_WIDTH));
                     }
                     Err(below) if below > top && guard < 50 => {
                         top = below;
@@ -1919,7 +1939,7 @@ fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u32, level: Optio
                     }
                     Ok((None, _)) | Err(_) => {
                         row_first = lines.len();
-                        break (lo, base_right.max(lo + 12.0));
+                        break (lo, base_right.max(lo + MIN_LINE_WIDTH));
                     }
                 }
             }
@@ -2199,7 +2219,9 @@ fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u32, level: Optio
             // Spaces and tabs never make a line taller, whatever their size: Word sizes a line by
             // its other characters (a line of only them takes the paragraph mark's), measured in
             // Word for Windows with 9 pt text and 11–20 pt tabs, spaces and ideographic spaces.
-            if matches!(c.kind, ClKind::Marker | ClKind::Space | ClKind::Tab) || c0 + k < dropped {
+            // Floating and hidden drawings have no inline extent; their anchor font takes no height.
+            let anchor = matches!(c.kind, ClKind::Object(_)) && c.adv == 0.0 && c.obj_h == 0.0;
+            if matches!(c.kind, ClKind::Marker | ClKind::Space | ClKind::Tab) || anchor || c0 + k < dropped {
                 continue;
             }
             if let Some(st) = pl.styles.get(c.style as usize) {
@@ -2207,8 +2229,9 @@ fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u32, level: Optio
                 // and descent, and grows above the baseline to fit a taller picture.
                 let (a, d) = if matches!(c.kind, ClKind::Object(_)) && c.obj_h > 0.0 {
                     if pl.maths.iter().any(|(k, _)| c.kind == ClKind::Object(*k)) {
-                        // An equation is text: its ascent and descent count like the text's.
-                        (c.obj_h, c.obj_d)
+                        // Exact spacing keeps the run's baseline; tall math may overflow the
+                        // fixed line box without moving adjacent text up by its denominator.
+                        if matches!(rp.line_spacing, LineSpacing::Exactly(_)) { (st.ascent, st.descent) } else { (c.obj_h, c.obj_d) }
                     } else {
                         obj_asc = obj_asc.max(c.obj_h);
                         (st.ascent, st.descent)

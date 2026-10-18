@@ -2291,3 +2291,9 @@
 	All Fonts	Kõik fondid
 	Spike	Koguja
 	Insert Spike	Lisa kogujast
+# Add Font status (#1789)
+	Added 1 font	Lisati 1 font
+	Added {n} fonts	Lisati {n} fonti
+	{added}; {count} couldn't be read: {names}	{added}; {count} ei õnnestunud lugeda: {names}
+	{names} and {n} more	{names} ja veel {n}
+	{added}; {n} skipped (limit {max})	{added}; {n} jäeti vahele (piir {max})

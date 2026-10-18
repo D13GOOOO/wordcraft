@@ -2269,3 +2269,9 @@
 	All Fonts	所有字体
 	Spike	图文场
 	Insert Spike	插入图文场
+# Add Font status (#1789)
+	Added 1 font	已添加 1 个字体
+	Added {n} fonts	已添加 {n} 个字体
+	{added}; {count} couldn't be read: {names}	{added}；{count} 个无法读取：{names}
+	{names} and {n} more	{names} 等另外 {n} 个
+	{added}; {n} skipped (limit {max})	{added}；已跳过 {n} 个（上限 {max}）

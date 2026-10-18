@@ -2258,3 +2258,9 @@
 	All Fonts	所有字型
 	Spike	收集區
 	Insert Spike	插入收集區
+# Add Font status (#1789)
+	Added 1 font	已新增 1 個字型
+	Added {n} fonts	已新增 {n} 個字型
+	{added}; {count} couldn't be read: {names}	{added}；{count} 個無法讀取：{names}
+	{names} and {n} more	{names} 等另外 {n} 個
+	{added}; {n} skipped (limit {max})	{added}；已略過 {n} 個（上限 {max}）

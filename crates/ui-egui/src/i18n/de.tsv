@@ -2256,3 +2256,9 @@
 	All Fonts	Alle Schriftarten
 	Spike	Sammlung
 	Insert Spike	Sammlung einfügen
+# Add Font status (#1789)
+	Added 1 font	1 Schriftart hinzugefügt
+	Added {n} fonts	{n} Schriftarten hinzugefügt
+	{added}; {count} couldn't be read: {names}	{added}; {count} nicht lesbar: {names}
+	{names} and {n} more	{names} und {n} weitere
+	{added}; {n} skipped (limit {max})	{added}; {n} übersprungen (Limit {max})
