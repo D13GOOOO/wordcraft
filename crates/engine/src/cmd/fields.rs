@@ -299,6 +299,30 @@ mod tests {
         out
     }
 
+    /// #1765: ASK and SET fields draw nothing on the page; their stored results are kept (and
+    /// saved), and code view still shows them.
+    #[test]
+    fn ask_and_set_fields_draw_nothing() {
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("insert.field", &json!({"instr": "ASK Nominativo \"Inserire nome\" \\d \"N\"", "result": "«NOME» «COGNOME»"})).unwrap();
+        s.run("insert.field", &json!({"instr": "SET Codice \"COD\"", "result": "COD"})).unwrap();
+        s.run("text.insert", &json!({"text": "Title"})).unwrap();
+        let shown = page_text(&mut s);
+        assert!(!shown.contains("NOME") && !shown.contains("COD"), "{shown}");
+        let para = s.doc.para(wordcraft_doc::StoryRef::Body, &wordcraft_doc::Path::top(0)).unwrap();
+        let results: Vec<&str> = para
+            .objects
+            .iter()
+            .filter_map(|o| match o {
+                InlineObject::Field { result, .. } => Some(result.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results, ["«NOME» «COGNOME»", "COD"]);
+        s.run("view.fieldCodes", &json!({})).unwrap();
+        assert!(page_text(&mut s).contains("{ SET Codice \"COD\" }"));
+    }
+
     /// Alt+F9 shows every field's code in braces; Shift+F9 flips just the selected one; F9 shows
     /// its result again.
     #[test]
