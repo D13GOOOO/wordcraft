@@ -255,6 +255,10 @@ fn member(s: &mut Session, v: &Value) -> CmdResult {
             c.obj.set_size(nw.unwrap_or(w0).clamp(1.0, MAX_SIDE), nh.unwrap_or(h0).clamp(1.0, MAX_SIDE));
         }
     })?;
+    // The indices after a removed member shift down, so a picked member would name another one.
+    if delete {
+        s.member = None;
+    }
     result(&o)
 }
 
@@ -284,17 +288,26 @@ fn select_member(s: &mut Session, v: &Value) -> CmdResult {
     Ok(out)
 }
 
-/// Delete, Backspace, Cut and Copy with a member picked act on the member alone; the canvas
-/// stays selected. `None`: another command, or no member picked.
+/// Delete, Backspace (and their word forms), Cut and Copy with a member picked act on the member
+/// alone; the canvas stays selected. Typing and pasting, which would replace the whole canvas,
+/// are disabled. `None`: another command, or no member picked.
 pub(crate) fn member_command(s: &mut Session, id: &str, _: &Value) -> Option<CmdResult> {
-    if !matches!(id, "text.delete" | "text.backspace" | "edit.cut" | "edit.copy") {
+    let replaces = (id.starts_with("text.") && id != "text.overtype")
+        || matches!(
+            id,
+            "edit.paste" | "edit.pasteText" | "edit.pasteMerge" | "edit.pasteSpecial" | "edit.pasteClipboardItem" | "edit.pasteAllClipboard"
+        );
+    if !replaces && !matches!(id, "edit.cut" | "edit.copy") {
         return None;
     }
     let (pos, index, _) = selected_member(s)?;
     Some(match id {
         "edit.copy" => copy_member(s, &pos, index),
         "edit.cut" => copy_member(s, &pos, index).and_then(|r| remove_member(s, &pos, index).map(|_| r)),
-        _ => remove_member(s, &pos, index).and_then(|_| sel_result(s)),
+        "text.delete" | "text.backspace" | "text.deleteWordBack" | "text.deleteWordForward" => {
+            remove_member(s, &pos, index).and_then(|_| sel_result(s))
+        }
+        _ => Err(CmdError::Disabled("a shape inside a drawing canvas is selected".into())),
     })
 }
 
@@ -566,5 +579,39 @@ mod tests {
         s.run("edit.paste", &json!({})).unwrap();
         let para = s.doc.body.first().and_then(|b| b.as_para()).unwrap();
         assert!(matches!(para.objects.last(), Some(InlineObject::Shape { kind: wordcraft_doc::para::ShapeKind::Ellipse, .. })), "{:?}", para.objects);
+    }
+
+    #[test]
+    fn typing_or_removing_a_member_never_hits_another_shape_or_the_canvas() {
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("insert.canvas", &json!({"width": 400, "height": 300})).unwrap();
+        s.run("insert.shape", &json!({"kind": "rectangle", "width": 100, "height": 40})).unwrap();
+        s.run("insert.shape", &json!({"kind": "ellipse", "width": 50, "height": 50})).unwrap();
+        s.run("select.member", &json!({"index": 1})).unwrap();
+
+        // Typing or pasting would replace the whole canvas: refused, and the member stays picked.
+        for (id, v) in [
+            ("text.insert", json!({"text": "x"})),
+            ("text.newParagraph", json!({})),
+            ("edit.paste", json!({"text": "x"})),
+            ("edit.pasteText", json!({"text": "x"})),
+        ] {
+            assert!(matches!(s.run(id, &v), Err(CmdError::Disabled(_))), "{id}");
+            assert_eq!(members(&canvas(&s)).len(), 2, "{id}");
+        }
+        assert_eq!(selected_member(&s).map(|(_, i, _)| i), Some(1));
+        // Ctrl+Backspace removes the member alone, like Backspace.
+        s.run("text.deleteWordBack", &json!({})).unwrap();
+        let sizes: Vec<(f32, f32)> = members(&canvas(&s)).iter().map(|m| (m.2, m.3)).collect();
+        assert_eq!(sizes, [(100.0, 40.0)], "the ellipse went, the rectangle stays");
+        assert!(selected_member(&s).is_none());
+
+        // Removing an earlier member through `canvas.member` drops the pick: its index would now
+        // name the next member.
+        s.run("insert.shape", &json!({"kind": "ellipse", "width": 50, "height": 50})).unwrap();
+        s.run("insert.shape", &json!({"kind": "rectangle", "width": 20, "height": 20})).unwrap();
+        s.run("select.member", &json!({"index": 1})).unwrap();
+        s.run("canvas.member", &json!({"index": 0, "delete": true})).unwrap();
+        assert!(selected_member(&s).is_none(), "the pick doesn't slide onto the member that moved up");
     }
 }
