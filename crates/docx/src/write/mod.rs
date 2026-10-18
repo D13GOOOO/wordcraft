@@ -1,5 +1,6 @@
 //! [`Document`] → DOCX.
 
+mod bidi;
 mod embed;
 mod glossary;
 mod settings_merge;
@@ -1004,6 +1005,9 @@ fn settings_xml(doc: &Document, footnotes: bool, endnotes: bool, template_rel: O
     }
     if s.track_changes {
         w.empty("w:trackRevisions", &[]);
+    }
+    if !s.track_moves {
+        w.empty("w:doNotTrackMoves", &[]);
     }
     if let Some(p) = &s.protection {
         let mut a: Vec<(&str, &str)> = Vec::new();
