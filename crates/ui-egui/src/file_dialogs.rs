@@ -526,10 +526,10 @@ mod tests {
         let r = a.run("ui.saveChanges", json!({"answer": "save"})).unwrap();
         assert_eq!(r["pending"], "saveAs");
         a.poll_file_dialog();
-        assert!(!a.quit_requested, "nothing closes before the save");
+        assert!(a.has_document(), "nothing closes before the save");
         answer(&shown, Some(&path.to_string_lossy()));
         a.poll_file_dialog();
-        assert!(a.quit_requested, "closed once saved");
+        assert!(!a.has_document(), "closed once saved");
         assert!(saved_text(&path).contains(UNSAVED));
         let _ = std::fs::remove_dir_all(&dir);
     }
