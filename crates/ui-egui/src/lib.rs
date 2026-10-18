@@ -998,6 +998,16 @@ impl WordApp {
         if document != self.session.document_id() {
             return Err("the document the prompt asked about has been replaced".into());
         }
+        // Don't Save is the user's say-so to discard the changes, which Close otherwise refuses.
+        let mut params = params;
+        if choice == SaveChoice::DontSave && then == "file.close" {
+            match params.as_object_mut() {
+                Some(p) => {
+                    p.insert("force".into(), json!(true));
+                }
+                None => params = json!({"force": true}),
+            }
+        }
         let go = match choice {
             SaveChoice::Cancel => false,
             SaveChoice::DontSave => true,
@@ -1186,8 +1196,12 @@ impl WordApp {
     /// File › Close (Mod+W, Mod+F4) closes the document and keeps the window, as Word does
     /// (#1712): it shows no page, as after Esc on the Start screen (#1129), and File › New or Open
     /// goes on from there. `{"quit": true}`, from the window's close button, quits instead. With no
-    /// document open there is nothing to close.
+    /// document open there is nothing to close. Unsaved changes are never discarded unasked: a
+    /// dirty document closes only with `{"force": true}` (Don't Save in the prompt passes it).
     fn close_document(&mut self, params: &Value) -> Result<Value, String> {
+        if let Some(e) = control::close_refused(self, "file.close", params) {
+            return Err(e.into());
+        }
         if params.get("quit").and_then(Value::as_bool) == Some(true) {
             self.quit_requested = true;
             return Ok(json!({"quit": true}));
@@ -4233,6 +4247,20 @@ mod tests {
         clean.run("file.close", json!({})).unwrap();
         assert_eq!(prompt(&clean), None);
         assert!(!clean.quit_requested && !clean.has_document());
+    }
+
+    /// A direct programmatic `file.close` (no prompt, no control channel) never discards unsaved
+    /// changes either: it is refused unless `force` says so, as over the control channel.
+    #[test]
+    fn a_direct_close_keeps_unsaved_changes_unless_forced() {
+        let mut a = typed();
+        for params in [json!({}), json!({"quit": true}), json!({"force": "yes"})] {
+            let e = a.execute("file.close", params.clone()).unwrap_err();
+            assert!(e.contains("unsaved") && e.contains("force"), "{params}: {e}");
+            assert!(a.has_document() && !a.quit_requested && body_text(&a).contains(UNSAVED), "{params}");
+        }
+        a.execute("file.close", json!({"force": true})).unwrap();
+        assert!(!a.has_document() && !a.quit_requested);
     }
 
     /// The window's close button quit at once; now it asks (the host cancels the close on false).
