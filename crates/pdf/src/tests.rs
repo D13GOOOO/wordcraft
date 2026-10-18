@@ -1013,6 +1013,7 @@ fn bookmark_destination_is_the_page_of_its_start() {
         opts: &PdfOptions::default(),
         out_index: pages.iter().enumerate().map(|(o, p)| (*p, o)).collect(),
         fonts: HashMap::new(),
+        font_error: None,
         outlined: &outlined,
         cmaps: HashMap::new(),
         images: HashMap::new(),
@@ -1026,6 +1027,127 @@ fn bookmark_destination_is_the_page_of_its_start() {
     assert_eq!(page, 1, "the bookmark is on the second page");
     assert!((x - 72.0).abs() < 1.0 && y < 150.0, "{x} {y}");
     assert_eq!(ex.bookmark("first").map(|b| b.0), Some(0));
+
+    // Case-insensitive lookup matches
+    let (page_ci, x_ci, y_ci) = ex.bookmark("TARGET").unwrap();
+    assert_eq!(page_ci, 1);
+    assert_eq!((x_ci, y_ci), (x, y));
+
+    // Whitespace in ISO date string is parsed successfully
+    assert!(parse_iso("  2024-05-06T07:08:09Z \n").is_some());
+}
+
+#[test]
+fn ref_fields_export_cached_links() {
+    use hayro_syntax::object::{Array, Dict};
+
+    for (instr, outer, code, expected) in [
+        (r"REF target \w \h \* MERGEFORMAT", None, false, Some(1)),
+        (r#"ref "target"\H"#, None, false, Some(1)),
+        (r"REF target", None, false, None),
+        (r"REF target \hello", None, false, None),
+        (r#"REF target \d "\h""#, None, false, None),
+        (r"REF absent \h", None, false, None),
+        (r"REF target \h", None, true, None),
+        (r"REF target \h", Some("#outer"), false, Some(2)),
+    ] {
+        let mut d = Document::new();
+        let mut p = Paragraph::new();
+        p.insert_object(
+            0,
+            InlineObject::Field { instr: instr.into(), result: "Cached label".into(), locked: true, dirty: false, code, form: String::new() },
+            &CharProps { link: outer.map(str::to_owned), ..Default::default() },
+        )
+        .unwrap();
+        d.body = vec![para_block(p)];
+        for name in ["target", "outer"] {
+            let mut p = Paragraph::with_text("Current target", CharProps::default());
+            p.props.page_break_before = Some(true);
+            p.insert_object(0, InlineObject::BookmarkStart { name: name.into() }, &CharProps::default()).unwrap();
+            d.body.push(para_block(p));
+        }
+        let before = d.body.clone();
+        let bytes = export(&d, &PdfOptions::default()).unwrap();
+        assert_eq!(d.body, before, "export must not refresh cached fields");
+        if !code {
+            assert_eq!(squash(&extract_text(&bytes)[0]), "Cached label");
+        }
+        let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+        let targets: Vec<_> = pdf.pages()[0]
+            .raw()
+            .get::<Array>(b"Annots")
+            .into_iter()
+            .flat_map(|a| a.iter::<Dict>().collect::<Vec<_>>())
+            .map(|a| a.get::<Array>(b"Dest").unwrap().iter::<Dict>().next().unwrap().obj_id())
+            .collect();
+        let expected: Vec<_> = expected.map(|i| pdf.pages()[i].raw().obj_id()).into_iter().collect();
+        assert_eq!(targets, expected, "{instr}, enclosing={outer:?}, code={code}");
+    }
+}
+
+#[test]
+fn outline_after_leading_breaks() {
+    use hayro_syntax::object::{Array, Dict};
+
+    for (lead, marker) in [
+        ("\u{c}", None),
+        ("\u{c}\u{c}", None),
+        ("\u{c}", Some(InlineObject::BookmarkStart { name: "leading".into() })),
+        ("\u{c}\u{c}", Some(InlineObject::CommentStart { id: 0 })),
+    ] {
+        let mut d = Document::from_text("Earlier page");
+        let mut heading = Paragraph::with_text(&format!("{lead}Navigation target"), CharProps::default()).styled("Heading1");
+        heading.insert_object(lead.len(), InlineObject::BookmarkStart { name: "target".into() }, &CharProps::default()).unwrap();
+        if let Some(marker) = marker {
+            heading.insert_object(0, marker, &CharProps::default()).unwrap();
+        }
+        d.body.push(para_block(heading));
+        let bytes = export(&d, &PdfOptions::default()).unwrap();
+        let text = extract_text(&bytes);
+        let target = text.iter().position(|t| squash(t).contains("Navigation target")).unwrap();
+        assert!(target > 0, "the heading follows a page break");
+        for pages in [None, Some(vec![target]), Some(vec![target, 0]), Some(vec![0])] {
+            let expected = pages.as_ref().map_or(Some(target), |p| p.iter().position(|i| *i == target));
+            let bytes = export(&d, &PdfOptions { pages, ..Default::default() }).unwrap();
+            let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+            let catalog = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+            let outlines = catalog.get::<Dict<'_>>(b"Outlines");
+            let Some(expected) = expected else {
+                assert!(outlines.is_none(), "a page containing only the break has no heading outline");
+                continue;
+            };
+            let first = outlines.unwrap().get::<Dict<'_>>(b"First").unwrap();
+            let dest = first.get::<Array<'_>>(b"Dest").unwrap();
+            assert_eq!(dest.iter::<Dict<'_>>().next().unwrap(), *pdf.pages()[expected].raw(), "outline must reach the visible heading");
+            assert!(first.get::<Dict<'_>>(b"Next").is_none(), "one outline entry per heading");
+        }
+    }
+}
+
+#[test]
+fn outline_keeps_visible_objects() {
+    use hayro_syntax::object::{Array, Dict};
+
+    let mut base = Document::from_text("Earlier text");
+    let media = base.add_media(png(), "png");
+    for object in [
+        InlineObject::Field { instr: "QUOTE Visible".into(), result: "Visible".into(), locked: true, dirty: false, code: false, form: String::new() },
+        InlineObject::Image { media, w: 16.0, h: 8.0, alt: String::new(), float: Default::default(), crop: [0.0; 4], ole: None },
+    ] {
+        let mut d = base.clone();
+        let mut heading = Paragraph::with_text("\u{c}After break", CharProps::default()).styled("Heading1");
+        heading.insert_object(0, object, &CharProps::default()).unwrap();
+        heading.insert_object(0, InlineObject::BookmarkStart { name: "leading".into() }, &CharProps::default()).unwrap();
+        d.body.push(para_block(heading));
+        let bytes = export(&d, &PdfOptions::default()).unwrap();
+        assert!(squash(&extract_text(&bytes)[1]).contains("After break"));
+        let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+        let catalog = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+        let outlines = catalog.get::<Dict<'_>>(b"Outlines").unwrap();
+        let first = outlines.get::<Dict<'_>>(b"First").unwrap();
+        let dest = first.get::<Array<'_>>(b"Dest").unwrap();
+        assert_eq!(dest.iter::<Dict<'_>>().next().unwrap(), *pdf.pages()[0].raw(), "visible objects before the break anchor the heading");
+    }
 }
 
 /// Print Markup (#589): the comments and their replies print beside each page, which is scaled
@@ -1410,4 +1532,206 @@ fn right_to_left_clusters_are_written_whole_left_to_right() {
     assert_eq!(parts, [2..4, 0..2, 4..8, 4..8, 8..12, 12..14]);
     // Glyph by glyph by x this would be [5, 4, 3, 2, 0, 1]: the lam-alef's glyphs swapped.
     assert_eq!(visual_order(text, &glyphs, &ranges, &parts), [5, 4, 2, 3, 0, 1]);
+}
+
+/// A PNG signature, an IHDR declaring `w`×`h` 8-bit RGBA and a short IDAT (all CRCs valid, so
+/// the header parses), with no real pixel data.
+fn ihdr_only_png(w: u32, h: u32) -> Vec<u8> {
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        let mut crc = 0xFFFF_FFFFu32;
+        for b in &body {
+            crc ^= *b as u32;
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&(!crc).to_be_bytes());
+    }
+    let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    let mut ihdr = w.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&h.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    chunk(&mut out, b"IDAT", &[0x78, 0x9c, 0, 0]);
+    out
+}
+
+#[test]
+fn extreme_page_index_returns_an_error() {
+    let d = Document::from_text("Hostile page selection");
+    let lay = layout(&d, &mut LayoutCache::new(), &LayoutOptions::default());
+    let opts = PdfOptions { pages: Some(vec![usize::MAX]), ..Default::default() };
+    assert_eq!(export(&d, &opts), Err(PdfError::BadPage(usize::MAX)));
+    assert_eq!(export_layout(&d, &lay, &opts), Err(PdfError::BadPage(usize::MAX)));
+}
+
+#[test]
+fn metadata_language_overrides_and_fallbacks_are_preserved() {
+    let mut d = Document::from_text("Metadata export");
+    d.core.created = "2024-05-06T07:08:09Z".into();
+    d.core.title = "Original title".into();
+    d.core.creator = "Original author".into();
+    d.core.description = "Description fallback".into();
+    d.core.keywords = "first; second, third;;".into();
+    let opts = PdfOptions {
+        title: Some("Override title".into()),
+        author: Some("Override author".into()),
+        tagged: false,
+        compress: false,
+        ..Default::default()
+    };
+    for language in [Some("es-CR"), Some("ja"), Some(""), Some("日本語"), None] {
+        d.styles.default_chr.lang = language.map(str::to_owned);
+        let bytes = export(&d, &opts).unwrap();
+        let raw = String::from_utf8_lossy(&bytes);
+        let pdf = hayro_syntax::Pdf::new(bytes.clone()).unwrap();
+        let catalog = pdf.xref().get::<hayro_syntax::object::Dict<'_>>(pdf.xref().root_id()).unwrap();
+        let actual_language = catalog.get::<hayro_syntax::object::String<'_>>(b"Lang");
+        for value in ["Override title", "Override author", "Description fallback", "first, second, third", "D:20240506070809"] {
+            assert!(raw.contains(value), "missing {value}");
+        }
+        if let Some(language) = language.filter(|s| !s.is_empty() && s.is_ascii()) {
+            assert_eq!(actual_language.unwrap().as_bytes(), language.as_bytes());
+            assert!(raw.contains(&format!("<dc:language><rdf:Bag><rdf:li>{language}</rdf:li>")));
+        } else {
+            assert!(actual_language.is_none());
+            assert!(!raw.contains("<dc:language>"));
+        }
+    }
+}
+
+#[test]
+fn bundled_unicode_glyphs_are_visible_and_extractable() {
+    const TEXT: &str = "café naïve — coöperate Ελληνικά Привет Tiếng Việt";
+    let fonts = wordcraft_fonts::FontDb::with_font_dirs(Vec::new());
+    let bundled = fonts.face("Source Sans 3", "Regular");
+    assert_eq!(bundled.family, "Source Sans 3");
+    assert_eq!(bundled.style, "Regular");
+    for ch in TEXT.chars() {
+        assert!(bundled.covers(ch), "the explicitly bundled face must cover {ch:?}");
+    }
+    let mut d = Document::new();
+    d.core.created = "2024-05-06T07:08:09Z".into();
+    d.body = vec![para_block(Paragraph::with_text(TEXT, CharProps { font: Some("Source Sans 3".into()), size: Some(14.0), ..Default::default() }))];
+    let lay = layout(&d, &mut LayoutCache::new(), &LayoutOptions::default());
+    let mut drawn = String::new();
+    for page in &lay.pages {
+        for draw in page_display(&d, page, &DisplayOptions::default()) {
+            if let Draw::Glyphs { face, glyphs, text, .. } = draw {
+                assert_eq!(face.data(), bundled.data(), "page glyphs must use the bundled face without system fallback");
+                assert!(glyphs.iter().all(|(id, _, _)| *id != 0), "page glyphs must not use .notdef");
+                drawn.push_str(&text);
+            }
+        }
+    }
+    assert_eq!(squash(&drawn), TEXT);
+    let bytes = export_layout(&d, &lay, &PdfOptions::default()).unwrap();
+    assert!(String::from_utf8_lossy(&bytes).contains("/ToUnicode"));
+    assert_eq!(squash(&extract_text(&bytes).concat()), TEXT);
+}
+
+/// #2534: text with legacy font effects is drawn from its outlines and keeps its text, once.
+#[test]
+fn legacy_font_effects_keep_their_text() {
+    let mut d = Document::new();
+    d.body = [
+        CharProps { outline: Some(true), ..Default::default() },
+        CharProps { shadow: Some(true), ..Default::default() },
+        CharProps { emboss: Some(true), ..Default::default() },
+        CharProps { engrave: Some(true), ..Default::default() },
+    ]
+    .into_iter()
+    .map(|c| para_block(Paragraph::with_text("Effect", c)))
+    .collect();
+    let text = extract_text(&export(&d, &PdfOptions::default()).unwrap()).concat();
+    assert_eq!(text.matches("Effect").count(), 4, "{text}");
+}
+
+#[test]
+fn shape_dash_arrays_export() {
+    use wordcraft_doc::{
+        connector::ShapeExtra,
+        line_dash::LineDash,
+        para::{Anchor, Float, ShapeKind, Wrap},
+    };
+    for kind in [ShapeKind::Rectangle, ShapeKind::Ellipse, ShapeKind::StraightConnector] {
+        for dash in [LineDash::Dash, LineDash::Custom(vec![(400_000, 300_000)]), LineDash::Solid] {
+            let shape = InlineObject::Shape {
+                kind,
+                w: 70.0,
+                h: 28.0,
+                fill: None,
+                stroke: Some(wordcraft_doc::props::Rgb(192, 0, 0)),
+                stroke_width: 1.0,
+                float: Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Page, v_rel: Anchor::Page, x: 100.0, y: 100.0, ..Default::default() },
+                story: None,
+                freeform: None,
+                effects: Default::default(),
+                extra: ShapeExtra { dash: dash.clone(), ..Default::default() },
+            };
+            let mut p = Paragraph::new();
+            p.insert_object(0, shape, &Default::default()).unwrap();
+            let mut d = Document::new();
+            d.body = vec![para_block(p)];
+            let bytes = export(&d, &PdfOptions { compress: false, tagged: false, ..Default::default() }).unwrap();
+            let raw = String::from_utf8_lossy(&bytes);
+            assert_eq!(raw.contains("[4 3]0 d"), !dash.is_solid(), "dash array for {kind:?}");
+        }
+    }
+}
+
+#[test]
+fn zero_width_connector_dashes() {
+    use wordcraft_doc::{
+        connector::ShapeExtra,
+        line_dash::LineDash,
+        para::{Anchor, Float, ShapeKind, Wrap},
+    };
+    for kind in [ShapeKind::StraightConnector, ShapeKind::ElbowConnector, ShapeKind::CurvedConnector, ShapeKind::Freeform] {
+        let shape = InlineObject::Shape {
+            kind,
+            w: 70.0,
+            h: 28.0,
+            fill: None,
+            stroke: Some(wordcraft_doc::props::Rgb(192, 0, 0)),
+            stroke_width: 0.0,
+            float: Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Page, v_rel: Anchor::Page, x: 100.0, y: 100.0, ..Default::default() },
+            story: None,
+            freeform: (kind == ShapeKind::Freeform).then(|| {
+                std::sync::Arc::new(wordcraft_doc::freeform::Freeform {
+                    w: 70.0,
+                    h: 28.0,
+                    paths: vec![wordcraft_doc::freeform::FreePath { pts: vec![[0.0, 0.0], [70.0, 0.0], [70.0, 28.0]], closed: true }],
+                    ..Default::default()
+                })
+            }),
+            effects: Default::default(),
+            extra: ShapeExtra { dash: LineDash::Dash, ..Default::default() },
+        };
+        let mut p = Paragraph::new();
+        p.insert_object(0, shape, &Default::default()).unwrap();
+        let mut d = Document::new();
+        d.body = vec![para_block(p)];
+        let bytes = export(&d, &PdfOptions { compress: false, tagged: false, ..Default::default() }).unwrap();
+        let raw = String::from_utf8_lossy(&bytes);
+        assert!(raw.contains("0.75 w"), "effective width for {kind:?}");
+        assert!(raw.contains("[3 2.25]0 d"), "stroke-relative dash array for {kind:?}");
+    }
+}
+
+#[test]
+fn image_budget_is_checked_from_the_header() {
+    let data = Arc::new(png());
+    // The decoded image and its RGBA conversion are charged: two buffers at peak.
+    assert!(load_image_within(&data, 1024).is_some());
+    assert!(load_image_within(&data, 1023).is_none());
+    // A header (valid CRC) claiming 30000x30000 with no pixel data reads fine, then the budget refuses it.
+    let hdr = ihdr_only_png(30_000, 30_000);
+    let dims = image::ImageReader::new(std::io::Cursor::new(hdr.as_slice())).with_guessed_format().unwrap().into_dimensions().unwrap();
+    assert_eq!(dims, (30_000, 30_000));
+    assert!(load_image(&Arc::new(hdr)).is_none());
 }
