@@ -1838,6 +1838,7 @@
 	Hyphenation zone:	Zone de césure :
 	Italian	Italien
 	Croatian	Croate
+	Indonesian	Indonésien
 	Japanese	Japonais
 	Korean	Coréen
 	Limit consecutive hyphens to:	Limiter les césures consécutives à :
@@ -2241,3 +2242,15 @@
 # Reading Mode column widths (#1040)
 	Narrow	Étroite
 	Medium	Moyenne
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Fusionner les cellules avant le fractionnement
+	Table size	Taille du tableau
+	AutoFit behavior	Comportement de l'ajustement automatique
+	Initial column width:	Largeur de colonne initiale :
+	AutoFit to contents	Ajustement automatique au contenu
+	AutoFit to window	Ajustement automatique à la fenêtre
+	Separate text at	Séparer le texte au niveau des
+	Commas	Virgules
+	Other:	Autre :
+	The number must be between 1 and {max}.	Le nombre doit être compris entre 1 et {max}.
+	The measurement must be between {min} and {max}.	La mesure doit être comprise entre {min} et {max}.

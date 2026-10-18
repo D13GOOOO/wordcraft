@@ -2026,6 +2026,7 @@ preview	Title	Ukázka
 	Hyphenation zone:	Pásmo dělení slov:
 	Italian	Italština
 	Croatian	Chorvatština
+	Indonesian	Indonéština
 	Japanese	Japonština
 	Korean	Korejština
 	Limit consecutive hyphens to:	Omezit počet po sobě jdoucích rozdělení:
@@ -2625,3 +2626,15 @@ preview	Title	Ukázka
 # Reading Mode column widths (#1040)
 	Narrow	Úzká
 	Medium	Střední
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Před rozdělením buňky sloučit
+	Table size	Velikost tabulky
+	AutoFit behavior	Automatické přizpůsobení
+	Initial column width:	Počáteční šířka sloupce:
+	AutoFit to contents	Automaticky přizpůsobit obsahu
+	AutoFit to window	Automaticky přizpůsobit oknu
+	Separate text at	Oddělit text pomocí
+	Commas	Čárky
+	Other:	Jiné:
+	The number must be between 1 and {max}.	Číslo musí být mezi 1 a {max}.
+	The measurement must be between {min} and {max}.	Míra musí být mezi {min} a {max}.

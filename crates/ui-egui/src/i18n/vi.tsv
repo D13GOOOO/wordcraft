@@ -2493,6 +2493,7 @@
 # Strings added on main after this catalog was drafted (merge of main)
 	Column width	Độ rộng cột
 	Croatian	Tiếng Croatia
+	Indonesian	Tiếng Indonesia
 	Edit Document	Sửa tài liệu
 	Envelope #10	Phong bì số 10
 	Envelope DL	Phong bì DL
@@ -2673,3 +2674,15 @@ template	Letter	Thư
 # Reading Mode column widths (#1040)
 	Narrow	Hẹp
 	Medium	Trung bình
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Gộp ô trước khi tách
+	Table size	Kích thước bảng
+	AutoFit behavior	Tự khớp
+	Initial column width:	Độ rộng cột ban đầu:
+	AutoFit to contents	Tự khớp nội dung
+	AutoFit to window	Tự khớp cửa sổ
+	Separate text at	Tách văn bản tại
+	Commas	Dấu phẩy
+	Other:	Khác:
+	The number must be between 1 and {max}.	Số phải nằm trong khoảng từ 1 đến {max}.
+	The measurement must be between {min} and {max}.	Số đo phải nằm trong khoảng từ {min} đến {max}.
