@@ -5191,6 +5191,53 @@ fn documents_open_by_content_when_the_extension_is_wrong() {
     assert!(crate::io::open_bytes("broken.doc", b"\x00\x01not a document").is_err());
 }
 
+/// #2853: a Word XML Document (Word 2003 XML or Flat OPC) or a web page saved under a `.doc`
+/// name opens by what it holds, as in Word; it went to the Word 97-2003 reader, which refused it,
+/// and the window showed a blank page.
+#[test]
+fn word_xml_and_web_pages_saved_as_doc_open_by_content() {
+    let text = |doc: &wordcraft_doc::Document| doc.plain_text(StoryRef::Body);
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    run(&mut s, "text.insert", json!({"text": "Truyện ngắn, chương một"}));
+    run(&mut s, "format.bold", json!({}));
+    let word2003 = crate::io::ExportOptions { word2003: true, ..Default::default() };
+    let xml2003 = crate::io::save_bytes_opts("a.xml", &s.doc, &word2003).unwrap();
+    let flat = crate::io::save_bytes("a.xml", &s.doc).unwrap();
+    assert!(xml2003.windows(14).any(|w| w == b"w:wordDocument") && flat.windows(11).any(|w| w == b"pkg:package"));
+    for (what, bytes) in [("Word 2003 XML", &xml2003), ("Flat OPC", &flat)] {
+        for name in ["soulsoul.txt.doc", "Story.DOC", "story.dot", "story.docx", "story.rtf"] {
+            let doc = crate::io::open_bytes(name, bytes).unwrap_or_else(|e| panic!("{what} as {name}: {e}"));
+            assert!(text(&doc).contains("Truyện ngắn, chương một"), "{what} as {name}: {:?}", text(&doc));
+        }
+    }
+    // With a byte-order mark and blank lines before the declaration.
+    let bom = [&[0xEF, 0xBB, 0xBF][..], b"\r\n  ", &xml2003].concat();
+    assert!(text(&crate::io::open_bytes("bom.doc", &bom).unwrap()).contains("chương một"));
+
+    // Web pages: Word's Save as Web Page, and a report generator's HTML under a `.doc` name.
+    let pages: [&str; 3] = [
+        "<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:w=\"urn:schemas-microsoft-com:office:word\">\r\n<head><meta charset=utf-8></head>\r\n<body lang=VI><p class=MsoNormal><b>Báo cáo</b> tháng 9</p></body></html>",
+        "\u{FEFF}<!DOCTYPE html>\n<!-- generated -->\n<html><body><h1>Báo cáo</h1><p>tháng 9</p></body></html>",
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE HTML PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"x\"><HTML><BODY><P>Báo cáo tháng 9</P></BODY></HTML>",
+    ];
+    for (i, page) in pages.iter().enumerate() {
+        for name in ["report.doc", "report.docx", "report.rtf"] {
+            let doc = crate::io::open_bytes(name, page.as_bytes()).unwrap_or_else(|e| panic!("page {i} as {name}: {e}"));
+            let t = text(&doc);
+            assert!(t.contains("Báo cáo") && t.contains("tháng 9") && !t.contains('<'), "page {i} as {name}: {t:?}");
+        }
+    }
+    // A Single File Web Page (MHTML), as wiki and report exports write it for Word.
+    let mht = "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"b1\"; type=\"text/html\"\r\n\r\n--b1\r\nContent-Type: text/html; charset=\"utf-8\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<html><body><p>B=C3=A1o c=C3=A1o th=C3=A1ng 9</p></body></html>\r\n--b1--\r\n";
+    for name in ["export.doc", "export.mht", "export.MHTML"] {
+        let doc = crate::io::open_bytes(name, mht.as_bytes()).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(text(&doc).trim(), "Báo cáo tháng 9", "{name}");
+    }
+    // A web page in an unknown extension is still plain text, other XML still no Word document.
+    assert!(text(&crate::io::open_bytes("page.log", pages[1].as_bytes()).unwrap()).contains("<html>"));
+    assert!(crate::io::open_bytes("note.doc", b"<?xml version=\"1.0\"?><note>hi</note>").is_err());
+}
+
 /// #569: a playlist (.m3u / .m3u8) — or any file with an extension WordCraft doesn't know —
 /// opens as plain text with its encoding detected, like Word's text import; a binary file is a
 /// clean error, never garbage or a panic.

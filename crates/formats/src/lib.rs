@@ -1,6 +1,7 @@
 //! WordCraft import/export for the "other" text formats: plain text, Markdown (CommonMark subset
 //! plus GFM tables and strikethrough), HTML, RTF, OpenDocument Text and LaTeX — and, read-only,
-//! spreadsheet cells for mail-merge recipient lists ([`sheet`]: .xlsx/.xlsm/.xls/.ods).
+//! MHTML web archives ([`mhtml`]) and spreadsheet cells for mail-merge recipient lists
+//! ([`sheet`]: .xlsx/.xlsm/.xls/.ods).
 //!
 //! Every format maps to a small flow model ([`model::Flow`]: paragraphs with a kind, list
 //! membership, alignment and formatted spans; tables of cells), which [`model::to_doc`] and
@@ -14,6 +15,7 @@ pub mod html;
 pub mod latex;
 pub mod markdown;
 pub mod mathml;
+pub mod mhtml;
 pub mod model;
 pub mod odt;
 pub mod rtf;
@@ -23,7 +25,7 @@ pub mod txt;
 use wordcraft_doc::Document;
 
 /// Extensions this crate handles.
-pub const EXTENSIONS: &[&str] = &["txt", "text", "md", "markdown", "html", "htm", "xhtml", "rtf", "odt", "tex", "latex", "ltx"];
+pub const EXTENSIONS: &[&str] = &["txt", "text", "md", "markdown", "html", "htm", "xhtml", "mht", "mhtml", "rtf", "odt", "tex", "latex", "ltx"];
 
 /// Import `bytes` in the format named by `ext` (no dot, any case). `None` = not our format.
 pub fn import(ext: &str, bytes: &[u8]) -> Option<Result<Document, String>> {
@@ -32,6 +34,7 @@ pub fn import(ext: &str, bytes: &[u8]) -> Option<Result<Document, String>> {
         "txt" | "text" => Ok(txt::import(bytes)),
         "md" | "markdown" => Ok(markdown::import(&txt::decode(bytes))),
         "html" | "htm" | "xhtml" => Ok(html::import(&html::decode(bytes))),
+        "mht" | "mhtml" => mhtml::import_on(bytes, &wordcraft_doc::SectionProps::default()),
         "rtf" => rtf::import(bytes),
         "odt" => odt::import(bytes),
         "tex" | "latex" | "ltx" => Ok(latex::import(bytes)),
@@ -52,6 +55,7 @@ pub fn import_on(ext: &str, bytes: &[u8], page: &wordcraft_doc::SectionProps) ->
         "txt" | "text" => txt::import_on(bytes, page),
         "md" | "markdown" => markdown::import_on(&txt::decode(bytes), page),
         "html" | "htm" | "xhtml" => html::import_on(&html::decode(bytes), &|_| None, page),
+        "mht" | "mhtml" => return Some(mhtml::import_on(bytes, page)),
         _ => return import(&ext, bytes),
     };
     doc.ensure_nonempty();
