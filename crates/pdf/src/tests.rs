@@ -1027,6 +1027,14 @@ fn bookmark_destination_is_the_page_of_its_start() {
     assert_eq!(page, 1, "the bookmark is on the second page");
     assert!((x - 72.0).abs() < 1.0 && y < 150.0, "{x} {y}");
     assert_eq!(ex.bookmark("first").map(|b| b.0), Some(0));
+
+    // Case-insensitive lookup matches
+    let (page_ci, x_ci, y_ci) = ex.bookmark("TARGET").unwrap();
+    assert_eq!(page_ci, 1);
+    assert_eq!((x_ci, y_ci), (x, y));
+
+    // Whitespace in ISO date string is parsed successfully
+    assert!(parse_iso("  2024-05-06T07:08:09Z \n").is_some());
 }
 
 #[test]
@@ -1074,6 +1082,71 @@ fn ref_fields_export_cached_links() {
             .collect();
         let expected: Vec<_> = expected.map(|i| pdf.pages()[i].raw().obj_id()).into_iter().collect();
         assert_eq!(targets, expected, "{instr}, enclosing={outer:?}, code={code}");
+    }
+}
+
+#[test]
+fn outline_after_leading_breaks() {
+    use hayro_syntax::object::{Array, Dict};
+
+    for (lead, marker) in [
+        ("\u{c}", None),
+        ("\u{c}\u{c}", None),
+        ("\u{c}", Some(InlineObject::BookmarkStart { name: "leading".into() })),
+        ("\u{c}\u{c}", Some(InlineObject::CommentStart { id: 0 })),
+    ] {
+        let mut d = Document::from_text("Earlier page");
+        let mut heading = Paragraph::with_text(&format!("{lead}Navigation target"), CharProps::default()).styled("Heading1");
+        heading.insert_object(lead.len(), InlineObject::BookmarkStart { name: "target".into() }, &CharProps::default()).unwrap();
+        if let Some(marker) = marker {
+            heading.insert_object(0, marker, &CharProps::default()).unwrap();
+        }
+        d.body.push(para_block(heading));
+        let bytes = export(&d, &PdfOptions::default()).unwrap();
+        let text = extract_text(&bytes);
+        let target = text.iter().position(|t| squash(t).contains("Navigation target")).unwrap();
+        assert!(target > 0, "the heading follows a page break");
+        for pages in [None, Some(vec![target]), Some(vec![target, 0]), Some(vec![0])] {
+            let expected = pages.as_ref().map_or(Some(target), |p| p.iter().position(|i| *i == target));
+            let bytes = export(&d, &PdfOptions { pages, ..Default::default() }).unwrap();
+            let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+            let catalog = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+            let outlines = catalog.get::<Dict<'_>>(b"Outlines");
+            let Some(expected) = expected else {
+                assert!(outlines.is_none(), "a page containing only the break has no heading outline");
+                continue;
+            };
+            let first = outlines.unwrap().get::<Dict<'_>>(b"First").unwrap();
+            let dest = first.get::<Array<'_>>(b"Dest").unwrap();
+            assert_eq!(dest.iter::<Dict<'_>>().next().unwrap(), *pdf.pages()[expected].raw(), "outline must reach the visible heading");
+            assert!(first.get::<Dict<'_>>(b"Next").is_none(), "one outline entry per heading");
+        }
+    }
+}
+
+#[test]
+fn outline_keeps_visible_objects() {
+    use hayro_syntax::object::{Array, Dict};
+
+    let mut base = Document::from_text("Earlier text");
+    let media = base.add_media(png(), "png");
+    for object in [
+        InlineObject::Field { instr: "QUOTE Visible".into(), result: "Visible".into(), locked: true, dirty: false, code: false, form: String::new() },
+        InlineObject::Image { media, w: 16.0, h: 8.0, alt: String::new(), float: Default::default(), crop: [0.0; 4], ole: None },
+    ] {
+        let mut d = base.clone();
+        let mut heading = Paragraph::with_text("\u{c}After break", CharProps::default()).styled("Heading1");
+        heading.insert_object(0, object, &CharProps::default()).unwrap();
+        heading.insert_object(0, InlineObject::BookmarkStart { name: "leading".into() }, &CharProps::default()).unwrap();
+        d.body.push(para_block(heading));
+        let bytes = export(&d, &PdfOptions::default()).unwrap();
+        assert!(squash(&extract_text(&bytes)[1]).contains("After break"));
+        let pdf = hayro_syntax::Pdf::new(bytes).unwrap();
+        let catalog = pdf.xref().get::<Dict<'_>>(pdf.xref().root_id()).unwrap();
+        let outlines = catalog.get::<Dict<'_>>(b"Outlines").unwrap();
+        let first = outlines.get::<Dict<'_>>(b"First").unwrap();
+        let dest = first.get::<Array<'_>>(b"Dest").unwrap();
+        assert_eq!(dest.iter::<Dict<'_>>().next().unwrap(), *pdf.pages()[0].raw(), "visible objects before the break anchor the heading");
     }
 }
 
@@ -1461,6 +1534,32 @@ fn right_to_left_clusters_are_written_whole_left_to_right() {
     assert_eq!(visual_order(text, &glyphs, &ranges, &parts), [5, 4, 2, 3, 0, 1]);
 }
 
+/// A PNG signature, an IHDR declaring `w`×`h` 8-bit RGBA and a short IDAT (all CRCs valid, so
+/// the header parses), with no real pixel data.
+fn ihdr_only_png(w: u32, h: u32) -> Vec<u8> {
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        let mut crc = 0xFFFF_FFFFu32;
+        for b in &body {
+            crc ^= *b as u32;
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&(!crc).to_be_bytes());
+    }
+    let mut out = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    let mut ihdr = w.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&h.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    chunk(&mut out, b"IDAT", &[0x78, 0x9c, 0, 0]);
+    out
+}
+
 #[test]
 fn extreme_page_index_returns_an_error() {
     let d = Document::from_text("Hostile page selection");
@@ -1622,4 +1721,17 @@ fn zero_width_connector_dashes() {
         assert!(raw.contains("0.75 w"), "effective width for {kind:?}");
         assert!(raw.contains("[3 2.25]0 d"), "stroke-relative dash array for {kind:?}");
     }
+}
+
+#[test]
+fn image_budget_is_checked_from_the_header() {
+    let data = Arc::new(png());
+    // The decoded image and its RGBA conversion are charged: two buffers at peak.
+    assert!(load_image_within(&data, 1024).is_some());
+    assert!(load_image_within(&data, 1023).is_none());
+    // A header (valid CRC) claiming 30000x30000 with no pixel data reads fine, then the budget refuses it.
+    let hdr = ihdr_only_png(30_000, 30_000);
+    let dims = image::ImageReader::new(std::io::Cursor::new(hdr.as_slice())).with_guessed_format().unwrap().into_dimensions().unwrap();
+    assert_eq!(dims, (30_000, 30_000));
+    assert!(load_image(&Arc::new(hdr)).is_none());
 }
