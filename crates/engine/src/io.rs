@@ -310,7 +310,9 @@ fn looks_like_web_page(bytes: &[u8]) -> bool {
         t = rest.trim_start();
     }
     // The tag name ends there: `<htmlish>` is some other XML, not a web page.
-    let tag = |name: &str| t.strip_prefix(name).is_some_and(|rest| rest.is_empty() || rest.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/'));
+    let tag = |name: &str| {
+        t.strip_prefix(name).is_some_and(|rest| rest.is_empty() || rest.starts_with(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/'))
+    };
     tag("<!doctype html") || tag("<html")
 }
 
