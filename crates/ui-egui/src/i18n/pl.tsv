@@ -2661,3 +2661,9 @@ preview	Title	Tytuł
 	All Fonts	Wszystkie czcionki
 	Spike	Zbieracz
 	Insert Spike	Wstaw ze zbieracza
+# Add Font status (#1789)
+	Added 1 font	Dodano 1 czcionkę
+	Added {n} fonts	Dodano czcionek: {n}
+	{added}; {count} couldn't be read: {names}	{added}; nie udało się odczytać ({count}): {names}
+	{names} and {n} more	{names} i {n} więcej
+	{added}; {n} skipped (limit {max})	{added}; pominięto: {n} (limit {max})
