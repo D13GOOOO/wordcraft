@@ -889,6 +889,8 @@
 	Space before: {pt} pt	Razmak pre: {pt} pt
 	Spacing	Razmak
 	Spacing (pt):	Razmak (pt):
+	Kerning for fonts:	Kerning fontova:
+	Points and above	pt i više
 	Speech	Govor
 	Spelling & Grammar	Pravopis i gramatika
 	Spelling &\nGrammar	Pravopis\ni gramatika
@@ -1559,6 +1561,8 @@
 	Customize Ribbon	Prilagodi traku
 	Add to Quick Access Toolbar	Dodaj na traku sa alatkama za brzi pristup
 	Remove from Quick Access Toolbar	Ukloni sa trake sa alatkama za brzi pristup
+	Hide Quick Access Toolbar	Sakrij traku sa alatkama za brzi pristup
+	Show Quick Access Toolbar	Prikaži traku sa alatkama za brzi pristup
 	Customize the Ribbon…	Prilagodi traku…
 	Customize Quick Access Toolbar…	Prilagodi traku sa alatkama za brzi pristup…
 	More Commands…	Još komandi…
@@ -2146,6 +2150,10 @@
 	Contains	Sadrži
 	Does not contain	Ne sadrži
 	{count} of {total} recipients will be merged.	Primalaca za spajanje: {count} od {total}.
+	Find in list:	Pronađi na listi:
+	Any field	Bilo koje polje
+	Matches: {count}	Podudaranja: {count}
+	Show only records that will be merged	Prikaži samo zapise koji će biti objedinjeni
 	Take the last match on the page	Uzmi poslednje podudaranje na stranici
 	Show its list number	Prikaži njegov broj u listi
 	Show its number relative to this field	Prikaži njegov broj u odnosu na ovo polje
@@ -2267,3 +2275,26 @@
 	All Fonts	Svi fontovi
 	Spike	Sakupljač
 	Insert Spike	Umetni iz sakupljača
+# Add Font status (#1789)
+	Added 1 font	Dodat je 1 font
+	Added {n} fonts	Dodato fontova: {n}
+	{added}; {count} couldn't be read: {names}	{added}; nije moguće pročitati ({count}): {names}
+	{names} and {n} more	{names} i još {n}
+	{added}; {n} skipped (limit {max})	{added}; preskočeno: {n} (ograničenje {max})
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	U tekstu
+	In margin	Na margini
+	Drop Cap Options…	Opcije ukrasnog slova…
+	Lines to drop:	Broj redova:
+	Distance from text:	Rastojanje od teksta:
+	Distance from text	Rastojanje od teksta
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Zaključaj odnos širine i visine
+	Relative to original picture size	U odnosu na originalnu veličinu slike
+	Original size	Originalna veličina
+	{width} × {height} pixels	{width} × {height} piksela
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Unesite veličinu u bilo kojoj jedinici, na primer 5 cm ili 300 px. Druga strana se prilagođava, pa slika zadržava svoje proporcije.
+
+	Import…	Uvezi…

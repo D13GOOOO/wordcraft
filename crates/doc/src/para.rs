@@ -216,6 +216,10 @@ pub struct Float {
     /// laid out, as Word for Windows does (Word for Mac draws hidden VML shapes).
     #[serde(skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// Anchored in a table cell but placed on the page, not in the cell (`wp:anchor/@layoutInCell`
+    /// off, any VML shape in a header or footer): a picture watermark in a header that starts with a table.
+    #[serde(skip_serializing_if = "is_false")]
+    pub outside_cell: bool,
 }
 
 /// Longest alternative text kept (characters): hostile files and commands are capped.
@@ -743,6 +747,14 @@ impl InlineObject {
             })
             .collect()
     }
+    /// A legacy form field's definition (`FORMCHECKBOX`, `FORMTEXT`, `FORMDROPDOWN`), read from
+    /// the `w:ffData` it keeps; `None` for anything else.
+    pub fn legacy_form(&self) -> Option<crate::legacy_form::LegacyForm> {
+        match self {
+            InlineObject::Field { form, .. } if !form.is_empty() => crate::legacy_form::LegacyForm::parse(form),
+            _ => None,
+        }
+    }
     /// Zero-width markers don't take part in layout.
     pub fn is_marker(&self) -> bool {
         matches!(
@@ -936,7 +948,7 @@ impl Paragraph {
                 k += 1;
                 continue;
             }
-            let font = runs.peek().filter(|(r, _)| r.contains(&i)).and_then(|(_, p)| p.font.as_deref());
+            let font = runs.peek().filter(|(r, _)| r.contains(&i)).and_then(|(_, p)| p.shown_font());
             out.push(font.and_then(|f| crate::symbol_fonts::symbol_char(f, c)).unwrap_or(c));
         }
         out

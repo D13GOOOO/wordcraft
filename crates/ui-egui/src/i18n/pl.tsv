@@ -696,6 +696,8 @@
 	Space before/after:	Odstęp przed/po:
 	Spacing	Odstępy
 	Spacing (pt):	Odstępy (pt):
+	Kerning for fonts:	Kerning czcionek:
+	Points and above	pkt i więcej
 	Speech	Mowa
 	Spelling & Grammar	Pisownia i gramatyka
 	Spelling &\nGrammar	Pisownia\ni gramatyka
@@ -1412,6 +1414,8 @@
 	Put the default commands back on the Quick Access Toolbar?	Przywrócić domyślne polecenia na pasku narzędzi Szybki dostęp?
 	Remove every custom tab and group and show all tabs again?	Usunąć wszystkie niestandardowe karty i grupy oraz ponownie pokazać wszystkie karty?
 	Remove from Quick Access Toolbar	Usuń z paska narzędzi Szybki dostęp
+	Hide Quick Access Toolbar	Ukryj pasek narzędzi Szybki dostęp
+	Show Quick Access Toolbar	Pokaż pasek narzędzi Szybki dostęp
 	Rename…	Zmień nazwę…
 	Reset…	Resetuj…
 	Ribbon	Wstążka
@@ -2143,6 +2147,10 @@
 	Contains	Zawiera
 	Does not contain	Nie zawiera
 	{count} of {total} recipients will be merged.	Adresaci do scalenia: {count} z {total}.
+	Find in list:	Znajdź na liście:
+	Any field	Dowolne pole
+	Matches: {count}	Dopasowania: {count}
+	Show only records that will be merged	Pokaż tylko rekordy, które zostaną scalone
 	Book Title	Tytuł książki
 	Category	Kategoria
 	Contributors	Współtwórcy
@@ -2661,3 +2669,37 @@ preview	Title	Tytuł
 	All Fonts	Wszystkie czcionki
 	Spike	Zbieracz
 	Insert Spike	Wstaw ze zbieracza
+# Add Font status (#1789)
+	Added 1 font	Dodano 1 czcionkę
+	Added {n} fonts	Dodano czcionek: {n}
+	{added}; {count} couldn't be read: {names}	{added}; nie udało się odczytać ({count}): {names}
+	{names} and {n} more	{names} i {n} więcej
+	{added}; {n} skipped (limit {max})	{added}; pominięto: {n} (limit {max})
+	nothing is selected	nic nie jest zaznaczone
+	select a picture or shape first	najpierw zaznacz obraz lub kształt
+	select recipients first	najpierw wybierz adresatów
+	select two or more pictures or shapes first (Shift+click)	zaznacz co najmniej dwa obrazy lub kształty (Shift+kliknięcie)
+	text boxes can't go inside a text box	pola tekstowego nie można umieścić w polu tekstowym
+	the cursor isn't in a table	kursor nie jest w tabeli
+	{name} options	{name}: opcje
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	W tekście
+	In margin	Na marginesie
+	Drop Cap Options…	Opcje inicjału…
+	Lines to drop:	Wysokość w wierszach:
+	Distance from text:	Odległość od tekstu:
+	Distance from text	Odległość od tekstu
+
+# Drop Cap disabled reasons (#2601)
+	the paragraph is empty	akapit jest pusty
+	the paragraph starts with a space	akapit zaczyna się od spacji
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Zablokuj proporcje
+	Relative to original picture size	Względem oryginalnego rozmiaru obrazu
+	Original size	Rozmiar oryginalny
+	{width} × {height} pixels	{width} × {height} pikseli
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Wpisz rozmiar w dowolnej jednostce, np. 5 cm lub 300 px. Druga strona dopasuje się, więc obraz zachowa proporcje.
+
+	Import…	Importuj…

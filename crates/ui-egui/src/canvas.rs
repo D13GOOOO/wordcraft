@@ -81,13 +81,16 @@ pub struct CanvasState {
     pub open_url: Option<String>,
     /// Screen rects of pages last frame (for the control channel: page ↔ screen coordinates).
     pub page_rects: Vec<Rect>,
+    /// While the vertical scrollbar is dragged: the page at the top of the window (0-based),
+    /// which a tip beside the pointer names (#2551).
+    pub scrollbar_page: Option<usize>,
     /// Effective scale (screen points per document point).
     pub scale: f32,
     pub canvas_rect: Option<Rect>,
     pub focused: bool,
-    /// The page's widget id last frame, so a click elsewhere can hand the keyboard straight back to
-    /// it (`WordApp::refocus_after_chrome_click`).
-    pub(crate) widget_id: Option<egui::Id>,
+    /// The page's widget id and the pass that last drew it, so a click elsewhere can hand the
+    /// keyboard straight back to it (`WordApp::refocus_after_chrome_click`).
+    pub(crate) widget_id: Option<(egui::Id, u64)>,
     pub render_ms: f64,
     pub ime_preedit: String,
     /// Document faces added to the interface fonts so the input method's composition (#565) and a
@@ -186,6 +189,18 @@ impl CanvasState {
         self.unit_drag = None;
     }
 
+    /// The object a drag has taken off its page: which page, and which object. `None` unless an
+    /// object is being **moved** (resizing and turning show the object itself where it is).
+    ///
+    /// A dragged object's page is not laid out again while it is dragged (that would relayout the
+    /// whole document every frame), so the page's raster still shows it where it was — the user
+    /// sees it twice: once in place, once under the pointer. Rendering the page without that one
+    /// object fixes it (see [`wordcraft_layout::display::DisplayOptions::hide_object`]); erasing
+    /// the page would make the other objects blink.
+    fn dragged_off_page(&self) -> Option<(usize, Pos)> {
+        crate::objects::dragged_off_page(self.obj_drag.as_ref())
+    }
+
     /// How many pages have a cached rendering.
     #[cfg(test)]
     pub(crate) fn texture_count(&self) -> usize {
@@ -220,6 +235,7 @@ impl Default for CanvasState {
             last_shading: "FFF2CC".into(),
             open_url: None,
             page_rects: Vec::new(),
+            scrollbar_page: None,
             scale: PX_PER_PT,
             canvas_rect: None,
             focused: false,
@@ -703,9 +719,10 @@ pub fn sync_fit_zoom(app: &mut WordApp, scale: f32) {
 }
 
 /// Fingerprint of everything outside the layout that changes how pages render: the view's
-/// marks and markup, dark mode, the page colour and watermark, header/body dimming, the media.
+/// marks and markup, dark mode, the page colour and watermark, header/body dimming, the media,
+/// and (while a drag lasts) the object left out of the page.
 /// Taken once per frame.
-fn view_key(app: &WordApp, dim_body: bool) -> u64 {
+fn view_key(app: &WordApp, dim_body: bool, hidden: Option<&Pos>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let v = &app.session.view;
     (v.marks, app.session.prefs.marks, v.show_markup, v.dark_mode, wordcraft_render::DARK_PAPER, v.hide_ink, v.draw.replay).hash(&mut h);
@@ -714,6 +731,9 @@ fn view_key(app: &WordApp, dim_body: bool) -> u64 {
     format!("{:?}{:?}{:?}", app.session.doc.settings.page_color, app.session.doc.settings.page_picture, app.session.doc.settings.watermark)
         .hash(&mut h);
     app.session.doc.media.len().hash(&mut h);
+    // A page drawn without a dragged object must not pass for the page with it: the drag starts
+    // and ends change the key once each, so the page is rendered again then and only then.
+    hidden.hash(&mut h);
     h.finish()
 }
 
@@ -732,7 +752,7 @@ fn page_content_key(page: &Page) -> u64 {
                 Placed::Fill { rect, color } => format!("{rect:?}{color:?}").hash(&mut h),
                 Placed::Rule { x0, y0, x1, y1, border } => format!("{x0}{y0}{x1}{y1}{border:?}").hash(&mut h),
                 Placed::Image { rect, media, spin, .. } => format!("{rect:?}{media}{spin:?}").hash(&mut h),
-                Placed::Shape { rect, kind, fill, stroke, stroke_width, effects, freeform, spin, extra } => {
+                Placed::Shape { rect, kind, fill, stroke, stroke_width, effects, freeform, spin, extra, .. } => {
                     format!("{rect:?}{kind:?}{fill:?}{stroke:?}{stroke_width}{effects:?}{spin:?}{extra:?}").hash(&mut h);
                     freeform.as_ref().map(|f| std::sync::Arc::as_ptr(f) as usize).hash(&mut h);
                 }
@@ -1171,7 +1191,10 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         let t0 = crate::now_ms();
         let mut rects = Vec::with_capacity(geo.rects.len());
         let content_origin = ui.min_rect().min;
-        let view = view_key(app, dim_body);
+        // The object a move has taken off its page: the page is drawn again without it (or it
+        // would be on the page where it was and under the pointer at once).
+        let hidden = app.canvas.dragged_off_page();
+        let view = view_key(app, dim_body, hidden.as_ref().map(|(_, p)| p));
         for (i, pr) in geo.rects.iter().enumerate() {
             let sr = pr.translate(content_origin.to_vec2());
             let Some(page) = layout.pages.get(i) else { continue };
@@ -1190,10 +1213,15 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
             let key =
                 if visible || cached { page_key(app, &layout, i, view, scale_px) ^ if tiled { (tile_height_px as u64) << 32 } else { 0 } } else { 0 };
             let mut fresh = cached && app.canvas.textures.get(&i).is_some_and(|(k, _)| *k == key);
+            // The page a drag took an object off: render it this frame whatever the budget, or the
+            // raster with the object still on it shows for a frame.
+            let forced = hidden.as_ref().is_some_and(|(page, _)| *page == i);
             // Render before placing the page: a page re-rendered in this frame (a zoom step, an
             // edit) then sits on the pixel grid in this frame too, rather than a frame later.
-            if visible && !tiled && !fresh && (rendered < 2 || !app.canvas.textures.contains_key(&i) && rendered < 4) {
-                let opts = page_render_options(app, dim_body);
+            if visible && !tiled && !fresh && (forced || rendered < 2 || !app.canvas.textures.contains_key(&i) && rendered < 4) {
+                let mut opts = page_render_options(app, dim_body);
+                // Only on the page it is on: the `Pos` can't match an object of another page.
+                opts.display.hide_object = hidden.as_ref().filter(|(page, _)| *page == i).map(|(_, p)| p.clone());
                 let img = wordcraft_render::render_page(&app.session.doc, page, scale_px, &opts);
                 let ci = page_image(&img);
                 match app.canvas.textures.get_mut(&i) {
@@ -1247,6 +1275,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                     visible_tile_keys.insert(id);
                     let fresh = app.canvas.tiles.get(&id).is_some_and(|(k, _)| *k == key);
                     if !fresh && rendered < 4 {
+                        let mut opts = page_render_options(app, dim_body);
+                        // Only on the page it is on: the `Pos` can't match an object of another page.
+                        opts.display.hide_object = hidden.as_ref().filter(|(page, _)| *page == i).map(|(_, p)| p.clone());
                         // The tiny subtraction avoids a 1px overshoot from round-tripping f32
                         // pixels through page points and render_area's ceil() conversion.
                         let img = wordcraft_render::render_area(
@@ -1257,7 +1288,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                             page.w,
                             (height_px as f32 - 0.01).max(0.01) / scale_px,
                             scale_px,
-                            &page_render_options(app, dim_body),
+                            &opts,
                         );
                         let ci = page_image(&img);
                         match app.canvas.tiles.get_mut(&id) {
@@ -1539,6 +1570,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
             }
         }
         crate::objects::paint(app, &painter, &t, &layout, &rects, geo.scale);
+        crate::dialogs_smart_art::frame_button(app, ui.ctx(), &layout, &rects, geo.scale, ui.clip_rect());
         crate::ink::paint(app, &painter, &rects, &layout, geo.scale);
         crate::table_pen::paint(app, &painter, &t, &layout, &rects, geo.scale);
         crate::table_resize::paint(app, &painter, &t, &layout, &rects, geo.scale);
@@ -1546,6 +1578,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         (resp, rects)
     });
     app.canvas.scroll_offset = out.state.offset;
+    scrollbar_page_tip(app, ui, out.id, &geo.rects, &geo.bands, layout.pages.len());
     crate::ink::replay_bar(app, ui, out.inner_rect);
     app.canvas.scroll_max = (out.content_size - out.inner_rect.size()).max(egui::Vec2::ZERO);
     if app.session.view.read_mode {
@@ -1565,7 +1598,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         && resp.contains_pointer()
         && !ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| over_balloon(app, p))
     {
-        deselect_balloon(app, ui.ctx());
+        deselect_balloon(app);
     }
     // Space and Enter also set `Response::clicked` on a focused click-sensing widget
     // (egui's fake primary click). `request_focus` always interrupts IME; on X11 that
@@ -1583,7 +1616,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     if focus_click || app.canvas.want_focus {
         app.canvas.want_focus = false;
     }
-    app.canvas.widget_id = Some(resp.id);
+    app.canvas.widget_id = Some((resp.id, ui.ctx().cumulative_pass_nr()));
     if resp.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(resp.id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
@@ -1748,7 +1781,7 @@ fn balloons(app: &mut WordApp, ui: &mut Ui, painter: &egui::Painter, rects: &[Re
     let mw = markup_width(app);
     let float = floating_comments(app);
     if app.canvas.balloon.is_some_and(|id| (mw <= 0.0 && !float) || !app.session.doc.comments.contains_key(&id)) {
-        deselect_balloon(app, ui.ctx());
+        deselect_balloon(app);
     }
     if mw <= 0.0 && !float {
         return;
@@ -1941,7 +1974,7 @@ fn balloons(app: &mut WordApp, ui: &mut Ui, painter: &egui::Painter, rects: &[Re
         }
     }
     if let Some((id, p)) = clicked {
-        select_balloon(app, ui.ctx(), id);
+        select_balloon(app, id);
         app.session.sel = wordcraft_engine::Selection::caret(p);
     }
 }
@@ -2127,7 +2160,7 @@ fn active_balloon(app: &mut WordApp, ui: &mut Ui, painter: &egui::Painter, id: u
         let _ = app.run("review.resolveComment", json!({"id": id}));
     }
     if delete {
-        deselect_balloon(app, ui.ctx());
+        deselect_balloon(app);
         let _ = app.run("review.deleteComment", json!({"id": id}));
     }
     card
@@ -2135,11 +2168,11 @@ fn active_balloon(app: &mut WordApp, ui: &mut Ui, painter: &egui::Painter, id: u
 
 /// Select a comment's balloon (its text gets the keyboard), writing back any edit in the one
 /// selected before.
-pub fn select_balloon(app: &mut WordApp, ctx: &egui::Context, id: u32) {
+pub fn select_balloon(app: &mut WordApp, id: u32) {
     if app.canvas.balloon == Some(id) {
         return;
     }
-    deselect_balloon(app, ctx);
+    deselect_balloon(app);
     app.canvas.balloon = Some(id);
     app.canvas.balloon_focus = true;
     app.canvas.balloon_h = 0.0;
@@ -2152,16 +2185,17 @@ fn over_balloon(app: &WordApp, p: Pos2) -> bool {
 
 /// Leave the selected balloon, writing back what was typed in it (its fields may not be drawn
 /// again to notice they lost focus).
-pub fn deselect_balloon(app: &mut WordApp, ctx: &egui::Context) {
+pub fn deselect_balloon(app: &mut WordApp) {
     let Some(id) = app.canvas.balloon.take() else { return };
     app.canvas.balloon_reply = false;
     app.canvas.balloon_focus = false;
     let thread: Vec<u32> =
         std::iter::once(id).chain(app.session.doc.comments.iter().filter(|(_, c)| c.parent == Some(id)).map(|(k, _)| *k)).collect();
     for c in thread {
-        crate::panes::commit_comment(app, ctx, c);
+        // A refusal is on the status line; the draft stays for when the balloon is selected again.
+        let _ = crate::panes::commit_comment(app, c);
     }
-    crate::panes::commit_reply(app, ctx, id);
+    let _ = crate::panes::commit_reply(app, id);
 }
 
 fn dashed(p: &egui::Painter, a: Pos2, b: Pos2, s: Stroke) {
@@ -2193,6 +2227,38 @@ pub fn nearest_page(rects: &[Rect], p: Pos2) -> Option<usize> {
         }
     }
     best.map(|(i, _)| i)
+}
+
+/// While the vertical scrollbar of the canvas scroll area `scroll` is dragged, a tip beside the
+/// pointer says which page is at the top of the window, as the status bar says it ("Page 15 of
+/// 42"): dragging through a long document, you see where you'll land (#2551). `rects` are the
+/// pages in content coordinates, `bands` the part of each on screen ([`Geometry::bands`]).
+fn scrollbar_page_tip(app: &mut WordApp, ui: &Ui, scroll: egui::Id, rects: &[Rect], bands: &[(f32, f32)], pages: usize) {
+    // egui's scroll bars sense under the scroll area's id with the axis (1: vertical).
+    let dragged = ui.ctx().is_being_dragged(scroll.with(1usize));
+    app.canvas.scrollbar_page =
+        (dragged && !rects.is_empty() && pages > 0).then(|| top_page(rects, bands, app.canvas.scroll_offset.y).min(pages - 1));
+    let (Some(page), Some(at)) = (app.canvas.scrollbar_page, ui.ctx().pointer_latest_pos()) else { return };
+    let text = crate::i18n::fmt(tl!("Page {page} of {pages}"), &[("page", &(page + 1).to_string()), ("pages", &pages.to_string())]);
+    egui::Area::new(egui::Id::new("scrollbar_page_tip"))
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .pivot(egui::Align2::RIGHT_CENTER)
+        .fixed_pos(at - vec2(16.0, 0.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.label(text);
+            });
+        });
+}
+
+/// The page shown at height `y` (content coordinates), or the first one below it: the page at
+/// the top of a window scrolled to `y`. The last page past the end. A page ends where its band
+/// (`bands`, the part on screen) does: with Hide White Space the rects overlap in the hidden
+/// margins, and the next page's text already shows there.
+fn top_page(rects: &[Rect], bands: &[(f32, f32)], y: f32) -> usize {
+    let bottom = |i: usize, r: &Rect| r.min.y + bands.get(i).map_or(r.height(), |b| b.1);
+    rects.iter().enumerate().position(|(i, r)| bottom(i, r) > y).unwrap_or(rects.len().saturating_sub(1))
 }
 
 /// Whether wheel input counts as being over the canvas. Another widget's drag (a scrollbar, say)
@@ -2524,7 +2590,9 @@ fn mouse(app: &mut WordApp, ui: &Ui, resp: &egui::Response, rects: &[Rect], layo
     }
 }
 
-/// Horizontal and vertical rulers for the caret's page and paragraph.
+/// Horizontal and vertical rulers for the caret's page and paragraph. Each spans that page's
+/// rect on screen at the page's own scale and is clipped to its strip, whatever the layout
+/// (one column, One Page, Multiple Pages), and follows the caret to another page (#1878).
 fn rulers(app: &mut WordApp, ui: &mut Ui, h: Rect, v: Rect, rects: &[Rect], layout: &DocLayout, scale: f32) {
     let t = Tokens::get(ui.ctx());
     let p = ui.painter();
@@ -2555,36 +2623,38 @@ fn rulers(app: &mut WordApp, ui: &mut Ui, h: Rect, v: Rect, rects: &[Rect], layo
     // A distance along the reading direction (points from the page's start edge) and back.
     let sx = |d: f32| ruler_x(d, x0, scale, page.w, rtl);
     let s_at = |x: f32| ruler_d(x, x0, scale, page.w, rtl);
-    for (d, mark) in ruler_marks(origin, page.w, (unit, div, step), scale) {
-        let x = sx(d);
-        match mark {
-            RulerMark::Label(n) => {
-                hp.text(pos2(x, bar.center().y), egui::Align2::CENTER_CENTER, n.abs().to_string(), regular(9.5), t.ruler_tick);
-            }
-            RulerMark::Tick(len) => {
-                hp.line_segment([pos2(x, bar.center().y - len / 2.0), pos2(x, bar.center().y + len / 2.0)], Stroke::new(1.0, t.ruler_tick));
-            }
-        }
+    // The caret paragraph's column (in a table, the cell's text) and where it starts, from the
+    // page's start edge (the right edge when right-to-left).
+    let (col_x, w) = crate::table_ruler::text_area(app, layout, pi).unwrap_or((page.body.x, page.body.w));
+    let start = if rtl { page.w - (col_x + w) } else { col_x };
+    // Indents and tabs are measured from the paragraph's start edge: the right margin of a
+    // right-to-left paragraph, where the start-indent markers sit.
+    let px = |s: f32| sx(start + s);
+    let dist_at = |x: f32| s_at(x) - start;
+    // The markers the numbers keep clear of (#1878): the indents, the tab stops, a table's columns.
+    let mut keep_clear: Vec<Rect> = Vec::new();
+    if let Some(rp) = &rp {
+        let [first, left, right] = [rp.indent_left + rp.indent_first, rp.indent_left, w - rp.indent_right].map(px);
+        keep_clear.extend(indent_marker_rects(first, left, right, bar));
+        keep_clear.extend(crate::ruler_tabs::marker_rects(app, bar, &px, &rp.tabs));
+    }
+    keep_clear.extend(crate::table_ruler::column_markers(app, ui.ctx(), layout, pi, bar, x0, scale));
+    for (d, mark) in ruler_marks(origin, page.body.w, page.w, (unit, div, step), scale) {
+        ruler_mark(&hp, pos2(sx(d), bar.center().y), mark, true, &keep_clear, &t);
     }
     // Margins: the edges of the white text area drag the section's margins. Registered before
     // the indent markers, so a marker sitting on an edge keeps the pointer where they overlap.
     let (le, re) = (x0 + page.body.x * scale, x0 + page.body.right() * scale);
+    // An even page of a mirrored layout is the odd page reflected: its left edge is the stored right margin.
+    let mirrored = app.session.doc.settings.mirror_margins && page.number.is_multiple_of(2);
     for (edge, zone) in [
         (MarginEdge::Left, Rect::from_min_max(pos2(le - 10.0, bar.min.y), pos2(le + 3.0, bar.max.y))),
         (MarginEdge::Right, Rect::from_min_max(pos2(re - 3.0, bar.min.y), pos2(re + 10.0, bar.max.y))),
     ] {
-        margin_handle(app, ui, edge, zone, |p| (p.x - x0) / scale, &sect);
+        margin_handle(app, ui, edge, zone, |p| (p.x - x0) / scale, &sect, mirrored);
     }
-    // Indent markers for the caret's paragraph (relative to its column, or in a table to the
-    // cell's text).
-    let (col_x, w) = crate::table_ruler::text_area(app, layout, pi).unwrap_or((page.body.x, page.body.w));
-    // Where the paragraph starts, from the page's start edge (the right edge when right-to-left).
-    let start = if rtl { page.w - (col_x + w) } else { col_x };
+    // Indent markers for the caret's paragraph.
     if let Some(rp) = rp {
-        // Indents and tabs are measured from the paragraph's start edge: the right margin of a
-        // right-to-left paragraph, where the start-indent markers sit.
-        let px = |s: f32| sx(start + s);
-        let dist_at = |x: f32| s_at(x) - start;
         let first = px(rp.indent_left + rp.indent_first);
         let left = px(rp.indent_left);
         let right = px(w - rp.indent_right);
@@ -2659,88 +2729,140 @@ fn rulers(app: &mut WordApp, ui: &mut Ui, h: Rect, v: Rect, rects: &[Rect], layo
     // Vertical.
     let vp = ui.painter_at(v);
     let y0 = pr.min.y;
-    let vbar = Rect::from_min_max(pos2(v.min.x + 4.0, y0), pos2(v.max.x - 3.0, y0 + page.h.min(20_000.0) * scale));
+    let vbar = Rect::from_min_max(pos2(v.min.x + 4.0, y0), pos2(v.max.x - 3.0, pr.max.y));
     vp.rect_filled(vbar, 0.0, t.ruler_margin);
     let (te, be) = (y0 + page.body.y * scale, y0 + page.body.bottom() * scale);
     vp.rect_filled(Rect::from_min_max(pos2(vbar.min.x, te), pos2(vbar.max.x, be)), 0.0, t.ruler);
     for (edge, ey) in [(MarginEdge::Top, te), (MarginEdge::Bottom, be)] {
         let zone = Rect::from_min_max(pos2(vbar.min.x, ey - 4.0), pos2(vbar.max.x, ey + 4.0));
-        margin_handle(app, ui, edge, zone, |p| (p.y - y0) / scale, &sect);
+        margin_handle(app, ui, edge, zone, |p| (p.y - y0) / scale, &sect, false);
     }
-    let origin = page.body.y;
-    let mut k = -((origin / unit).ceil() as i32) * div;
-    loop {
-        let ypt = origin + k as f32 * unit / div as f32;
-        if ypt > page.h.min(20_000.0) {
-            break;
-        }
-        if ypt >= 0.0 && k % div == 0 && k != 0 {
-            vp.text(
-                pos2(vbar.center().x, y0 + ypt * scale),
-                egui::Align2::CENTER_CENTER,
-                (k / div * step).abs().to_string(),
-                regular(9.5),
-                t.ruler_tick,
-            );
-        } else if ypt >= 0.0 && k % (div / 2) == 0 {
-            let sy = y0 + ypt * scale;
-            vp.line_segment([pos2(vbar.center().x - 2.5, sy), pos2(vbar.center().x + 2.5, sy)], Stroke::new(1.0, t.ruler_tick));
-        }
-        k += 1;
-        if k > 2000 {
-            break;
-        }
+    // The same graduations down the page; the numbers keep clear of a table's row markers.
+    let keep_clear = crate::table_ruler::row_markers(app, ui.ctx(), layout, pi, vbar, y0, scale);
+    for (d, mark) in ruler_marks(page.body.y, page.body.h, page.h.min(20_000.0), (unit, div, step), scale) {
+        ruler_mark(&vp, pos2(vbar.center().x, y0 + d * scale), mark, false, &keep_clear, &t);
     }
     // In a table, its rows' bottom borders.
     crate::table_ruler::rows(app, ui, layout, pi, vbar, y0, scale);
 }
 
-/// One mark drawn along a horizontal ruler.
+/// The indent markers' outlines on the horizontal ruler `bar`, each centred on its screen x:
+/// first line (a flag at the top), left and right (at the bottom).
+fn indent_marker_rects(first: f32, left: f32, right: f32, bar: Rect) -> [Rect; 3] {
+    [
+        Rect::from_min_max(pos2(first - 4.5, bar.min.y), pos2(first + 4.5, bar.min.y + 5.0)),
+        Rect::from_min_max(pos2(left - 4.5, bar.max.y - 8.0), pos2(left + 4.5, bar.max.y + 1.0)),
+        Rect::from_min_max(pos2(right - 4.5, bar.max.y - 6.0), pos2(right + 4.5, bar.max.y - 1.0)),
+    ]
+}
+
+/// One mark drawn along a ruler.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum RulerMark {
-    /// A whole-inch number, `n` inches from the start margin.
+    /// A number, `n` units from the start margin.
     Label(i32),
     /// A tick line, `len` screen points long.
     Tick(f32),
 }
 
-/// The marks of a horizontal ruler with their distance from the page's start edge (points along
-/// the reading direction): ticks every 1/8 inch past `origin` (the start margin, so the margin is
-/// numbered backwards to the page edge) out to `width`, their labels counting whole inches from
-/// the start margin. Sub-half-inch ticks drop out when they'd sit closer than ~4 screen points.
-fn ruler_marks(origin: f32, width: f32, (unit, div, step): (f32, i32, i32), scale: f32) -> Vec<(f32, RulerMark)> {
+/// A whole unit's tick where it has no number.
+const UNIT_TICK: f32 = 7.0;
+/// The least room between two numbers on a ruler (screen points).
+const RULER_LABEL_PX: f32 = 30.0;
+/// The least room between two ticks on a ruler (screen points).
+const RULER_TICK_PX: f32 = 4.0;
+/// The sparsest a ruler gets: past this it is left blank.
+const RULER_SPARSEST: i32 = 1 << 20;
+/// Most marks on one ruler (page sizes come from files).
+const RULER_MAX_MARKS: usize = 2000;
+
+/// How a ruler thins out as the page shrinks on screen (#1878).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RulerDensity {
+    /// A number every this many units: 1, 2, 4, 8…
+    label_every: i32,
+    /// A tick every this many of the unit's subdivisions: 1, 2, 4…
+    tick_every: i32,
+}
+
+/// The density of a ruler whose unit takes `px_per_unit` screen points and has `div`
+/// subdivisions: the fewest units between numbers (doubling from 1) that keep them at least
+/// `RULER_LABEL_PX` apart, and the fewest subdivisions between ticks that keep those at least
+/// `RULER_TICK_PX` apart. The numbers' text keeps its size.
+fn ruler_density(px_per_unit: f32, div: i32) -> RulerDensity {
+    let px = if px_per_unit.is_finite() { px_per_unit.max(0.0) } else { 0.0 };
+    let every = |px: f32, room: f32| {
+        let mut n = 1;
+        while px * (n as f32) < room && n < RULER_SPARSEST {
+            n *= 2;
+        }
+        n
+    };
+    RulerDensity { label_every: every(px, RULER_LABEL_PX), tick_every: every(px / div.max(1) as f32, RULER_TICK_PX) }
+}
+
+/// The marks of a ruler with their distance from the page's start edge (points along the
+/// reading direction): ticks from the page edge out to `width` on the grid of the start margin
+/// `origin`, numbered in whole units from that margin across the `text` area only (the margins
+/// get ticks, #1878). Whole units, halves, quarters and the rest get shorter ticks in turn, and
+/// zoomed out the numbers and ticks thin out (`ruler_density`).
+fn ruler_marks(origin: f32, text: f32, width: f32, (unit, div, step): (f32, i32, i32), scale: f32) -> Vec<(f32, RulerMark)> {
     let div = div.max(2);
     let mut marks = Vec::new();
-    let mut k = -((origin / unit).ceil() as i32) * div;
-    loop {
+    if !(unit.is_finite() && unit > 0.0 && origin.is_finite() && text.is_finite() && width.is_finite() && scale.is_finite()) {
+        return marks;
+    }
+    let density = ruler_density(scale * unit, div);
+    let per_label = div.saturating_mul(density.label_every);
+    // The first subdivision at or before the page edge, on the ticks' grid.
+    let edge = ((origin / unit).ceil().clamp(-1e6, 1e6) as i32).saturating_mul(div).saturating_neg();
+    let mut k = edge.div_euclid(density.tick_every) * density.tick_every;
+    for _ in 0..RULER_MAX_MARKS {
         let d = origin + k as f32 * unit / div as f32;
-        if d > width {
+        if d > width + 1e-3 {
             break;
         }
-        if d >= 0.0 {
-            let mark = if k % div == 0 {
-                (k != 0).then_some(RulerMark::Label(k / div * step))
-            } else if scale * unit / div as f32 > 4.0 || k % 2 == 0 {
-                Some(RulerMark::Tick(if k % (div / 2) == 0 {
-                    5.0
-                } else if div >= 8 && k % (div / 4) == 0 {
-                    3.0
-                } else {
-                    1.5
-                }))
+        if d >= -1e-3 && k != 0 {
+            let in_text = k > 0 && d <= origin + text + 1e-3;
+            let mark = if k % per_label == 0 && in_text {
+                RulerMark::Label(k / div * step)
+            } else if k % div == 0 {
+                RulerMark::Tick(UNIT_TICK)
+            } else if k % (div / 2) == 0 {
+                RulerMark::Tick(5.0)
+            } else if div >= 8 && k % (div / 4) == 0 {
+                RulerMark::Tick(3.0)
             } else {
-                None
+                RulerMark::Tick(1.5)
             };
-            if let Some(mark) = mark {
-                marks.push((d, mark));
-            }
+            marks.push((d, mark));
         }
-        k += 1;
-        if k > 400 {
-            break;
-        }
+        k = k.saturating_add(density.tick_every);
     }
     marks
+}
+
+/// Draw one graduation at `at` on a ruler, across it when `horizontal`: a tick, or a number,
+/// unless its text would sit on a marker in `keep_clear`, where a whole unit's tick stands in.
+fn ruler_mark(p: &egui::Painter, at: Pos2, mark: RulerMark, horizontal: bool, keep_clear: &[Rect], t: &Tokens) {
+    let len = match mark {
+        RulerMark::Label(n) => {
+            let galley = p.layout_no_wrap(n.to_string(), regular(9.5), t.ruler_tick);
+            let r = Rect::from_center_size(at, galley.size());
+            if !keep_clear.iter().any(|o| o.intersects(r)) {
+                p.galley(r.min, galley, t.ruler_tick);
+                return;
+            }
+            UNIT_TICK
+        }
+        RulerMark::Tick(len) => len,
+    };
+    let (a, b) = if horizontal {
+        (pos2(at.x, at.y - len / 2.0), pos2(at.x, at.y + len / 2.0))
+    } else {
+        (pos2(at.x - len / 2.0, at.y), pos2(at.x + len / 2.0, at.y))
+    };
+    p.line_segment([a, b], Stroke::new(1.0, t.ruler_tick));
 }
 
 /// Screen x of a point `d` points from the page's start edge, on a page whose left edge sits at
@@ -2814,9 +2936,31 @@ pub(crate) fn dragged_margin(edge: MarginEdge, at: f32, s: &wordcraft_doc::secti
     ((raw / 4.5).round() * 4.5).clamp(0.0, room.max(0.0))
 }
 
+/// The stored margin a drag of the visible `edge` to `at` points edits, and its new value. On an
+/// even page of a mirrored layout (`mirrored`) the text area is the odd page's reflected, so the
+/// visible left edge is the stored right margin and the other way round: the pointer is reflected
+/// across the page and the edge swapped (#2914). Top and bottom are the same on every page.
+pub(crate) fn margin_drag(edge: MarginEdge, at: f32, s: &wordcraft_doc::section::SectionProps, mirrored: bool) -> (MarginEdge, f32) {
+    let (edge, at) = match edge {
+        MarginEdge::Left if mirrored => (MarginEdge::Right, s.page_w - at),
+        MarginEdge::Right if mirrored => (MarginEdge::Left, s.page_w - at),
+        e => (e, at),
+    };
+    (edge, dragged_margin(edge, at, s))
+}
+
 /// A draggable margin edge on a ruler: `to_pt` turns the pointer into points from the page's
-/// left (or top) edge. A whole drag is one undo step, through `layout.margins`.
-fn margin_handle(app: &mut WordApp, ui: &Ui, edge: MarginEdge, zone: Rect, to_pt: impl Fn(Pos2) -> f32, sect: &wordcraft_doc::section::SectionProps) {
+/// left (or top) edge, and `mirrored` is an even page of a mirrored layout ([`margin_drag`]). A
+/// whole drag is one undo step, through `layout.margins`.
+fn margin_handle(
+    app: &mut WordApp,
+    ui: &Ui,
+    edge: MarginEdge,
+    zone: Rect,
+    to_pt: impl Fn(Pos2) -> f32,
+    sect: &wordcraft_doc::section::SectionProps,
+    mirrored: bool,
+) {
     let cursor =
         if matches!(edge, MarginEdge::Left | MarginEdge::Right) { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical };
     let r = ui.interact(zone, ui.id().with(("ruler_margin", edge)), Sense::drag()).on_hover_cursor(cursor);
@@ -2824,11 +2968,11 @@ fn margin_handle(app: &mut WordApp, ui: &Ui, edge: MarginEdge, zone: Rect, to_pt
     if r.dragged()
         && let Some(pp) = r.interact_pointer_pos()
     {
-        let v = dragged_margin(edge, to_pt(pp), sect);
+        let (stored, v) = margin_drag(edge, to_pt(pp), sect, mirrored);
         if !r.drag_started() {
             app.session.join_next_undo();
         }
-        let _ = app.run("layout.margins", json!({ edge.param(): v }));
+        let _ = app.run("layout.margins", json!({ stored.param(): v }));
     }
 }
 
@@ -2866,12 +3010,12 @@ pub fn editing_header_footer(app: &WordApp, layout: &DocLayout) -> bool {
     matches!(part_kind(app, story), Some(PartKind::Header | PartKind::Footer))
 }
 
-/// The body is dimmed while editing anything but the body (or a text box in it).
+/// Notes share the body editing context; other non-body stories dim the body.
 fn dims_body(app: &WordApp, layout: &DocLayout) -> bool {
     match app.session.sel.focus.story {
         StoryRef::Body => false,
         StoryRef::Part(_) if in_text_box(app) => editing_header_footer(app, layout),
-        StoryRef::Part(_) => true,
+        StoryRef::Part(_) => !matches!(part_kind(app, app.session.sel.focus.story), Some(PartKind::Footnote | PartKind::Endnote)),
     }
 }
 
@@ -3028,6 +3172,10 @@ fn context_menu(app: &mut WordApp, ui: &mut Ui) {
         item(ui, app, "Change Picture…", "ui.changePicture", json!({}));
         item(ui, app, "Reset Picture", "picture.reset", json!({}));
         item(ui, app, "Size and Crop…", "ui.tab", json!({"tab": "Picture Format"}));
+    }
+    if picture || object {
+        // A numbered caption under (or over) the picture, shape, text box or chart (#1230).
+        item(ui, app, "Insert Caption…", "references.caption", json!({}));
     }
     if object {
         ui.menu_button(tl!("Wrap Text"), |ui| crate::ribbon::wrap_text_items(ui, app));
@@ -3224,6 +3372,44 @@ mod tests {
         assert!(s.apply(vec2(1100.0, 700.0), 5.0, true, false), "a zoom with a still window applies now");
         s.leave();
         assert!(s.entering());
+    }
+
+    /// #2545: notes belong to the body editing context, not the faded header/footer context.
+    #[test]
+    fn editing_notes_keeps_the_body_and_active_note_opaque() {
+        use wordcraft_layout::display::{Draw, page_display};
+        for command in ["references.footnote", "references.endnote"] {
+            let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Body marker.")), Default::default());
+            app.run(command, json!({"text": "Note marker."})).unwrap();
+            let note = app.session.sel.focus.story;
+            assert!(matches!(part_kind(&app, note), Some(PartKind::Footnote | PartKind::Endnote)));
+            app.run("insert.header", json!({"text": "Header marker."})).unwrap();
+            let header = app.session.sel.focus.story;
+            for story in [note, StoryRef::Body, header] {
+                app.session.sel = wordcraft_engine::Selection::caret(app.session.doc.end_of(story));
+                let layout = app.session.layout();
+                for dark in [false, true] {
+                    app.session.view.dark_mode = dark;
+                    let opts = page_render_options(&app, dims_body(&app, &layout));
+                    let draws = page_display(&app.session.doc, &layout.pages[0], &opts.display);
+                    for marker in ["Body", "Note", "Header"] {
+                        let alphas: Vec<f32> = draws
+                            .iter()
+                            .filter_map(|d| match d {
+                                Draw::Glyphs { text, alpha, .. } if text.contains(marker) => Some(*alpha),
+                                _ => None,
+                            })
+                            .collect();
+                        assert!(!alphas.is_empty(), "{command}: {marker} is drawn");
+                        let active = if marker == "Header" { story == header } else { story != header };
+                        assert!(
+                            alphas.iter().all(|a| if active { *a == 1.0 } else { *a > 0.0 && *a < 1.0 }),
+                            "{command}, {story:?}, dark={dark}, {marker}: {alphas:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// What `page_image` replaced: the raster un-premultiplied, for egui to premultiply again.
@@ -3423,7 +3609,7 @@ mod tests {
         let at = |a: &mut WordApp, off: usize| {
             let layout = a.session.layout();
             let c = layout.caret_on(&Pos::body(0, off), 0).unwrap();
-            let view = view_key(a, false);
+            let view = view_key(a, false, None);
             caret_color_at(a, &layout, c.page, c.x, c.top + c.height / 2.0, view, false)
         };
         assert_eq!(at(&mut a, 2), Color32::BLACK, "white paper");
@@ -3493,6 +3679,50 @@ mod tests {
         assert!(after.page_w - after.margin_left - after.margin_right - after.gutter >= MIN_TEXT - 0.01);
         assert!(app.session.undo());
         assert_eq!(wordcraft_engine::cmd::page::sect(&app.session).margin_left, sect.margin_left);
+    }
+
+    /// #2914: on an even page of a mirrored layout the page is the odd page reflected, so dragging
+    /// its visible left edge edits the stored right margin and the visible right edge the left one.
+    #[test]
+    fn ruler_margin_drags_on_even_mirrored_pages_move_the_visible_edge() {
+        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("one")), Default::default());
+        app.session.doc.settings.mirror_margins = true;
+        app.run("layout.margins", json!({"left": 72.0, "right": 36.0})).unwrap();
+        app.run("caret.docEnd", json!({})).unwrap();
+        app.run("insert.pageBreak", json!({})).unwrap();
+        let sect = wordcraft_engine::cmd::page::sect(&app.session);
+        let body = |app: &mut WordApp, page: usize| {
+            let l = app.session.layout();
+            let b = l.pages.get(page).expect("the page exists").body;
+            (b.x, b.right(), l.pages[page].number)
+        };
+        let (x, right, number) = body(&mut app, 1);
+        assert_eq!(number, 2, "the second page is even");
+        assert!((x - 36.0).abs() < 0.01 && (right - (sect.page_w - 72.0)).abs() < 0.01, "mirrored: outside margin on the left ({x}, {right})");
+        // Odd pages and unmirrored layouts keep the plain mapping.
+        assert_eq!(margin_drag(MarginEdge::Left, 90.0, &sect, false), (MarginEdge::Left, 90.0));
+        assert_eq!(margin_drag(MarginEdge::Right, sect.page_w - 90.0, &sect, false), (MarginEdge::Right, 90.0));
+
+        // The visible left edge of the even page, dragged to 90 pt, becomes the right margin.
+        let (edge, v) = margin_drag(MarginEdge::Left, 90.0, &sect, true);
+        assert_eq!(edge, MarginEdge::Right);
+        app.run("layout.margins", json!({edge.param(): v})).unwrap();
+        let after = wordcraft_engine::cmd::page::sect(&app.session);
+        assert_eq!((after.margin_left, after.margin_right), (72.0, 90.0), "the left margin was not touched");
+        let (x, right, _) = body(&mut app, 1);
+        assert!((x - 90.0).abs() < 0.01 && (right - (sect.page_w - 72.0)).abs() < 0.01, "the visible left edge moved to the pointer ({x}, {right})");
+        let (x, right, _) = body(&mut app, 0);
+        assert!((x - 72.0).abs() < 0.01 && (right - (sect.page_w - 90.0)).abs() < 0.01, "the odd page follows ({x}, {right})");
+
+        // The visible right edge, dragged to 500 pt, becomes the left margin (snapped to 1/16 inch).
+        let sect = after;
+        let (edge, v) = margin_drag(MarginEdge::Right, 500.0, &sect, true);
+        assert_eq!(edge, MarginEdge::Left);
+        app.run("layout.margins", json!({edge.param(): v})).unwrap();
+        let (_, right, _) = body(&mut app, 1);
+        assert!((right - 500.0).abs() <= 2.25, "the visible right edge is at the pointer ({right})");
+        // Top and bottom are not mirrored.
+        assert_eq!(margin_drag(MarginEdge::Top, 50.0, &sect, true), (MarginEdge::Top, dragged_margin(MarginEdge::Top, 50.0, &sect)));
     }
 
     /// Show revisions in balloons: a document whose only revision is a deletion gets the markup
@@ -3594,6 +3824,88 @@ mod tests {
         multi_drag(&mut h, at, at, 2);
         let (s, e) = h.state().session.sel.ordered();
         assert_eq!((s, e), (Pos::body(0, 0), Pos::body(0, 6)));
+    }
+
+    /// #2551: dragging the vertical scrollbar shows the page at the top of the window beside the
+    /// pointer ("Page 7 of 10"), and the tip goes when the button is let go.
+    #[test]
+    fn dragging_the_scrollbar_names_the_page_at_the_top() {
+        use egui::accesskit::Role;
+        use egui::{Event, PointerButton};
+        use egui_kittest::kittest::Queryable;
+        for hide_white_space in [false, true] {
+            let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+            for _ in 0..9 {
+                a.run("text.insert", json!({"text": "Page text"})).unwrap();
+                a.run("layout.break", json!({"kind": "page"})).unwrap();
+            }
+            a.run("view.commentsPane", json!({"value": false})).unwrap();
+            a.run("view.hideWhiteSpace", json!({"value": hide_white_space})).unwrap();
+            let (rev, sel) = (a.session.rev(), a.session.sel.clone());
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+                |ui, app: &mut WordApp| {
+                    let ctx = ui.ctx().clone();
+                    app.logic(&ctx);
+                    app.ui(ui);
+                },
+                a,
+            );
+            for _ in 0..6 {
+                h.step();
+            }
+            assert_eq!(h.state_mut().session.layout().pages.len(), 10);
+            let bar = h
+                .query_all_by_role(Role::ScrollBar)
+                .map(|n| n.rect())
+                .filter(|r| r.height() > r.width())
+                .max_by(|a, b| a.height().total_cmp(&b.height()))
+                .expect("the canvas's vertical scrollbar");
+            let button =
+                |at: Pos2, pressed: bool| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+            let from = pos2(bar.center().x, bar.top() + 8.0);
+            h.event(Event::PointerMoved(from));
+            h.step();
+            assert_eq!(h.state().canvas.scrollbar_page, None, "no tip before a drag");
+            h.event(button(from, true));
+            h.step();
+            let to = pos2(from.x, bar.top() + bar.height() * 0.65);
+            for k in 1..=6 {
+                h.event(Event::PointerMoved(from + (to - from) * (k as f32 / 6.0)));
+                h.step();
+            }
+            let page = h.state().canvas.scrollbar_page.expect("a tip while the scrollbar is dragged");
+            assert!((4..10).contains(&page), "a page well down the document: {page}");
+            assert!(h.query_by_label(&format!("Page {} of 10", page + 1)).is_some(), "the tip names page {}", page + 1);
+            h.event(button(to, false));
+            h.step();
+            h.step();
+            assert_eq!(h.state().canvas.scrollbar_page, None, "the tip goes with the button");
+            assert!(h.query_by_label(&format!("Page {} of 10", page + 1)).is_none(), "and its text");
+            assert_eq!((h.state().session.rev(), &h.state().session.sel), (rev, &sel), "scrolling changes neither the document nor the selection");
+        }
+    }
+
+    /// `top_page`: the page at a window's top, the one below in a gap, the last one past the end.
+    #[test]
+    fn the_page_at_the_top_of_the_window() {
+        let rects: Vec<Rect> = (0..3).map(|i| Rect::from_min_size(pos2(0.0, i as f32 * 110.0), vec2(80.0, 100.0))).collect();
+        let whole: Vec<(f32, f32)> = rects.iter().map(|r| (0.0, r.height())).collect();
+        assert_eq!(top_page(&rects, &whole, 0.0), 0);
+        assert_eq!(top_page(&rects, &whole, 99.0), 0);
+        assert_eq!(top_page(&rects, &whole, 105.0), 1, "in the gap: the page below");
+        assert_eq!(top_page(&rects, &whole, 250.0), 2);
+        assert_eq!(top_page(&rects, &whole, 1e6), 2, "past the end: the last page");
+        assert_eq!(top_page(&[], &[], 0.0), 0);
+
+        // Hide White Space: the rects overlap in the hidden margins. Just past the seam the next
+        // page's text shows, so that page is at the top, though the previous rect reaches further.
+        let sizes = [(612.0, 792.0); 3];
+        let (full, _) = place_pages(&sizes, 0.0, 1.0, 1, vec2(800.0, 600.0));
+        let (moved, bands, _) = collapse_white_space(&full, &[(72.0, 720.0); 3], 1.0, 600.0);
+        let seam = moved[0].min.y + bands[0].1;
+        assert!(moved[0].max.y > seam + SEAM + 2.0, "the rects overlap past the seam");
+        assert_eq!(top_page(&moved, &bands, seam - 2.0), 0);
+        assert_eq!(top_page(&moved, &bands, seam + SEAM + 2.0), 1, "across the seam: the next page");
     }
 
     /// #1014: Ctrl+drag on a shape leaves it and drops a copy; a plain drag moves it.
@@ -3928,10 +4240,7 @@ mod tests {
             h.step();
         }
         assert_eq!(h.state().session.undo_depth(), depth, "nothing is written while typing");
-        h.event(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() });
-        for _ in 0..3 {
-            h.step();
-        }
+        leave_field(&mut h);
         let part = h.state().session.doc.comments[&id].part;
         let text = h.state().session.doc.plain_text(StoryRef::Part(part));
         assert!(text.contains("Edited twice") && text.contains("Original"), "{text:?}");
@@ -4052,6 +4361,237 @@ mod tests {
         }
         assert_eq!(h.state().session.doc.plain_text(first), "Cover");
         assert_eq!(h.state_mut().session.layout().pages[0].header_story.map(StoryRef::Part), Some(first));
+    }
+
+    /// #513: right-clicking a picture selects it and offers Wrap Text, as in Word; choosing
+    /// Square there wraps text around it.
+    /// #1348: an app with one comment ("Original") on some text, its balloon on screen.
+    fn comment_harness() -> (egui_kittest::Harness<'static, WordApp>, u32) {
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        a.run("text.insert", json!({"text": "Some text here"})).unwrap();
+        a.run("select.text", json!({"text": "text"})).unwrap();
+        let id = a.run("review.newComment", json!({"text": "Original"})).unwrap()["id"].as_u64().unwrap() as u32;
+        a.run("view.commentsPane", json!({"value": false})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        for _ in 0..6 {
+            h.step();
+        }
+        (h, id)
+    }
+
+    /// Click comment `id`'s balloon (from no selected balloon), so its text has the keyboard.
+    fn click_balloon(h: &mut egui_kittest::Harness<'static, WordApp>, id: u32) {
+        h.state_mut().canvas.balloon = None;
+        for _ in 0..2 {
+            h.step();
+        }
+        let card = h.state().canvas.balloon_rects.iter().find(|(i, _)| *i == id).map(|(_, r)| *r).expect("the comment has a balloon");
+        let at = card.left_top() + vec2(30.0, 8.0);
+        h.event(egui::Event::PointerMoved(at));
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.step();
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        for _ in 0..3 {
+            h.step();
+        }
+        assert_eq!(h.state().canvas.balloon, Some(id), "the click selected the balloon");
+    }
+
+    fn type_in(h: &mut egui_kittest::Harness<'static, WordApp>, text: &str) {
+        h.event(egui::Event::Text(text.into()));
+        h.step();
+    }
+
+    /// Leave the comment field by clicking on the page (which also leaves the balloon).
+    fn leave_field(h: &mut egui_kittest::Harness<'static, WordApp>) {
+        let at = h.state().canvas.page_rects[0].center();
+        h.event(egui::Event::PointerMoved(at));
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+            h.step();
+        }
+        for _ in 0..3 {
+            h.step();
+        }
+    }
+
+    fn press_escape(h: &mut egui_kittest::Harness<'static, WordApp>) {
+        h.event(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() });
+        for _ in 0..3 {
+            h.step();
+        }
+    }
+
+    fn comment_text(app: &WordApp, id: u32) -> String {
+        let part = app.session.doc.comments[&id].part;
+        app.session.doc.plain_text(StoryRef::Part(part))
+    }
+
+    /// #1348: an edit the document refuses (here read-only protection) keeps what was typed and
+    /// says why; once the edit is allowed, leaving the field again writes it.
+    #[test]
+    fn a_refused_comment_edit_keeps_the_draft() {
+        let (mut h, id) = comment_harness();
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Edited");
+        h.state_mut().session.doc.settings.protection = Some("readOnly".into());
+        leave_field(&mut h);
+        assert_eq!(comment_text(h.state(), id), "Original", "the protected document refused the edit");
+        let status = h.state().status_msg.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
+        assert!(status.contains("protected"), "the refusal is shown: {status:?}");
+        h.state_mut().session.doc.settings.protection = None;
+        click_balloon(&mut h, id);
+        leave_field(&mut h);
+        let text = comment_text(h.state(), id);
+        assert!(text.contains("Edited"), "the typed text survived the refusal: {text:?}");
+    }
+
+    /// #1348: a draft typed in one document never lands in another document's comment that happens
+    /// to have the same id.
+    #[test]
+    fn a_comment_draft_stays_with_its_document() {
+        let (mut h, id) = comment_harness();
+        click_balloon(&mut h, id);
+        type_in(&mut h, " stale");
+        // An agent replaces the document while the balloon is still being typed in.
+        h.state_mut().session.set_document(wordcraft_doc::Document::new());
+        let a = h.state_mut();
+        a.run("text.insert", json!({"text": "Other words here"})).unwrap();
+        a.run("select.text", json!({"text": "words"})).unwrap();
+        let fresh = a.run("review.newComment", json!({"text": "Fresh"})).unwrap()["id"].as_u64().unwrap() as u32;
+        assert_eq!(fresh, id, "the new document reuses the comment id");
+        a.run("view.commentsPane", json!({"value": false})).unwrap();
+        for _ in 0..3 {
+            h.step();
+        }
+        click_balloon(&mut h, fresh);
+        leave_field(&mut h);
+        assert_eq!(comment_text(h.state(), fresh), "Fresh", "the old document's draft didn't leak in");
+    }
+
+    /// #1348: saving while a comment is still being typed in saves what was typed.
+    #[test]
+    fn saving_writes_a_pending_comment_draft_first() {
+        let (mut h, id) = comment_harness();
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Typed ");
+        let path = std::env::temp_dir().join(format!("wordcraft-1348-save-{}.docx", std::process::id()));
+        h.state_mut().run("file.save", json!({"path": path.to_string_lossy()})).unwrap();
+        let text = comment_text(h.state(), id);
+        assert!(text.contains("Typed"), "the draft was written before saving: {text:?}");
+        assert!(!h.state().session.dirty, "and saved");
+        let saved = wordcraft_engine::io::open_path(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let part = saved.comments.values().next().expect("the comment was saved").part;
+        assert!(saved.plain_text(StoryRef::Part(part)).contains("Typed"), "the file has the typed text");
+    }
+
+    /// #1348: closing a document whose only change is a comment still being typed asks to save.
+    #[test]
+    fn closing_with_a_pending_comment_draft_asks_to_save() {
+        let (mut h, id) = comment_harness();
+        h.state_mut().session.dirty = false;
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Typed ");
+        assert!(!h.state_mut().close_requested(), "the typed comment is an unsaved change");
+        assert!(matches!(h.state().dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })));
+    }
+
+    /// #1348: an agent can't replace the document while comment text is still being typed
+    /// unless it passes `force`, as with unsaved changes.
+    #[test]
+    fn an_agent_cannot_replace_the_document_over_a_pending_comment_draft() {
+        let (mut h, id) = comment_harness();
+        h.state_mut().session.dirty = false;
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Typed ");
+        let open = json!({"path": "/nonexistent/other.docx"});
+        assert!(crate::control::close_refused(h.state(), "file.open", &open).is_some());
+        assert!(crate::control::close_refused(h.state(), "file.new", &json!({})).is_some());
+        assert!(crate::control::close_refused(h.state(), "file.close", &json!({})).is_some());
+        assert!(crate::control::close_refused(h.state(), "file.close", &json!({"force": true})).is_none());
+        assert!(crate::control::close_refused(h.state(), "text.insert", &json!({"text": "x"})).is_none());
+    }
+
+    /// #1348: a comment edit typed, then refused (the document became read-only).
+    fn refused_draft() -> (egui_kittest::Harness<'static, WordApp>, u32) {
+        let (mut h, id) = comment_harness();
+        h.state_mut().session.dirty = false;
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Refused ");
+        h.state_mut().session.doc.settings.protection = Some("readOnly".into());
+        (h, id)
+    }
+
+    /// #1348: a draft the document refuses doesn't keep the window open: closing asks to save,
+    /// and Don't Save drops the draft and closes.
+    #[test]
+    fn a_refused_comment_draft_can_be_dropped_on_close() {
+        let (mut h, _) = refused_draft();
+        assert!(!h.state_mut().close_requested(), "the refused draft is an unsaved change");
+        assert!(matches!(h.state().dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })), "the save prompt asks about it");
+        h.state_mut().run("ui.saveChanges", json!({"answer": "dontSave"})).unwrap();
+        assert!(h.state_mut().close_requested(), "Don't Save closes");
+    }
+
+    /// #1348: New with a refused draft asks to save; Don't Save makes the new document.
+    #[test]
+    fn a_refused_comment_draft_can_be_dropped_on_new() {
+        let (mut h, _) = refused_draft();
+        let document = h.state().session.document_id();
+        h.state_mut().run("file.new", json!({})).unwrap();
+        assert!(matches!(h.state().dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })), "the save prompt asks about it");
+        h.state_mut().run("ui.saveChanges", json!({"answer": "dontSave"})).unwrap();
+        assert_ne!(h.state().session.document_id(), document, "Don't Save made the new document");
+    }
+
+    /// #1348: Save with a refused draft saves the rest of the document, keeps the draft and says why.
+    #[test]
+    fn saving_with_a_refused_comment_draft_saves_the_document() {
+        let (mut h, id) = refused_draft();
+        h.state_mut().session.dirty = true;
+        let path = std::env::temp_dir().join(format!("wordcraft-1348-refused-{}.docx", std::process::id()));
+        let r = h.state_mut().run("file.save", json!({"path": path.to_string_lossy()}));
+        let saved = wordcraft_engine::io::open_path(&path);
+        let _ = std::fs::remove_file(&path);
+        assert!(r.is_ok(), "{r:?}");
+        assert!(saved.is_ok(), "the document was saved");
+        assert!(!h.state().session.dirty);
+        assert!(crate::panes::comment_draft(h.state(), id).is_some_and(|d| d.contains("Refused")), "the draft stays");
+        let status = h.state().status_msg.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
+        assert!(status.contains("protected"), "the refusal is shown: {status:?}");
+    }
+
+    /// #1348: in a read-only document the comment fields can't be typed in.
+    #[test]
+    fn comment_fields_are_read_only_where_comments_cant_change() {
+        let (mut h, id) = comment_harness();
+        h.state_mut().session.doc.settings.protection = Some("readOnly".into());
+        h.step();
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Typed ");
+        assert_eq!(crate::panes::comment_draft(h.state(), id), None, "nothing was typed");
+        assert_eq!(comment_text(h.state(), id), "Original");
+    }
+
+    /// #1348: Escape in a comment field throws the draft away and shows the comment's text again.
+    #[test]
+    fn escape_reverts_a_comment_draft() {
+        let (mut h, id) = comment_harness();
+        click_balloon(&mut h, id);
+        type_in(&mut h, "Discarded ");
+        press_escape(&mut h);
+        assert_eq!(crate::panes::comment_draft(h.state(), id), None, "the draft is gone");
+        assert_eq!(comment_text(h.state(), id), "Original", "nothing was written");
+        leave_field(&mut h);
+        assert_eq!(comment_text(h.state(), id), "Original", "and nothing is written later");
     }
 
     /// #513: right-clicking a picture selects it and offers Wrap Text, as in Word; choosing
@@ -4177,6 +4717,59 @@ mod tests {
             h.step();
         }
         assert!(!h.state().session.doc.body.iter().any(|b| is_entry(b)), "the table is gone");
+    }
+
+    /// #2182: after Update Field has refreshed a table of contents once, the context menu on it
+    /// still offers Update Field, so a later heading change can be brought in again.
+    #[test]
+    fn context_menu_on_a_toc_still_offers_update_field_after_an_update() {
+        use egui_kittest::kittest::Queryable;
+        use wordcraft_doc::{Block, Paragraph, Path, props::CharProps};
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_engine::sample::report()), Default::default());
+        a.run("caret.docStart", json!({})).unwrap();
+        a.run("references.toc", json!({})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        for round in 0..2 {
+            let name = format!("Fresh heading {round}");
+            let end = h.state().session.doc.body.len();
+            let heading = Paragraph::with_text(&name, CharProps::default()).styled("Heading1");
+            h.state_mut().session.doc.insert_block(StoryRef::Body, &Path::top(end), Block::Para(heading)).unwrap();
+            h.state_mut().session.relayout();
+            for _ in 0..6 {
+                h.step();
+            }
+            let entry = h
+                .state()
+                .session
+                .doc
+                .body
+                .iter()
+                .position(|b| b.as_para().is_some_and(|p| p.props.style.as_deref() == Some("TOC1")))
+                .expect("a TOC entry");
+            let c = h.state_mut().session.layout().caret(&Pos::body(entry, 2)).expect("the entry is laid out");
+            let at = page_to_screen(h.state_mut(), c.page, c.x + 1.0, c.top + c.height / 2.0).expect("on screen");
+            h.event(egui::Event::PointerMoved(at));
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() });
+                h.step();
+            }
+            h.step();
+            assert!(h.query_all_by_label_contains("Paste").next().is_some(), "round {round}: the context menu is open");
+            assert!(h.query_by_label_contains("Update Field").is_some(), "round {round}: Update Field is offered");
+            h.get_by_label_contains("Update Field").click();
+            for _ in 0..3 {
+                h.step();
+            }
+            let text = h.state().session.doc.plain_text(StoryRef::Body);
+            assert_eq!(text.matches(&name).count(), 2, "round {round}: the new heading is listed: {text}");
+        }
     }
 
     /// #996: on macOS a Control-click is the right-click (the trackpad's and the one-button
@@ -4562,6 +5155,46 @@ mod tests {
         assert!(h.state().session.doc.body.iter().all(|b| b.as_table().is_none()));
     }
 
+    /// #1230: right-clicking a picture offers Insert Caption…, as in Word. For a picture in a
+    /// table cell the dialog proposes a Figure caption (not Table), and the caption goes under
+    /// the picture in that cell.
+    #[test]
+    fn right_click_on_a_picture_offers_insert_caption() {
+        let mut h = table_window();
+        h.state_mut().run("caret.end", json!({})).unwrap();
+        let mut png = Vec::new();
+        let img = image::RgbaImage::from_pixel(40, 20, image::Rgba([30, 90, 200, 255]));
+        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        h.state_mut().run("insert.picture", json!({"data": wordcraft_engine::cmd::insert::base64_encode(&png), "width": 60})).unwrap();
+        let pos = wordcraft_engine::cmd::objects::selected(&h.state().session).unwrap().0;
+        h.state_mut().session.sel = wordcraft_engine::Selection::caret(Pos::body(1, 0));
+        steps(&mut h, 4);
+        let rect = h.state_mut().session.layout().object(&pos, 0).expect("the picture is laid out").rect;
+        let at = crate::frame::to_screen(h.state().canvas.page_rects[0], h.state().canvas.scale, rect).center();
+        right_click(&mut h, at);
+        assert!(wordcraft_engine::cmd::objects::object_selection(&h.state().session).is_some(), "the right-click selected the picture");
+        assert_menu(&h, &["Insert Caption…", "Wrap Text"], true);
+        pick(&mut h, &["Insert Caption…"]);
+        let form = match &h.state().dialog {
+            Some(crate::dialogs::Dialog::Refs(d)) => match &**d {
+                crate::dialogs_refs::RefsDialog::Caption(f) => f.clone(),
+                d => panic!("not the caption dialog: {d:?}"),
+            },
+            d => panic!("no caption dialog: {d:?}"),
+        };
+        assert_eq!(form.label, "Figure", "a picture in a table gets a figure caption");
+        h.state_mut().dialog = None;
+        h.state_mut().run("references.caption", form.params()).unwrap();
+        let (table, r, c) = pos.path.cell().unwrap();
+        let cell: Vec<String> = h.state().session.doc.table(StoryRef::Body, &table).unwrap().rows[r].cells[c]
+            .blocks
+            .iter()
+            .filter_map(|b| b.as_para())
+            .map(|p| p.plain_text())
+            .collect();
+        assert_eq!(cell.last().map(String::as_str), Some("Figure 1"), "{cell:?}");
+    }
+
     /// With just the caret in a cell, right-click › Delete › Delete Table removes the table, in
     /// one undo step (#1198: the menu offered only Delete Cells there).
     #[test]
@@ -4795,21 +5428,21 @@ mod tests {
             }
         }
 
-        // The marks: inches labelled from the start margin (the page edge counts backwards into
-        // the margin, the margin itself has no mark), half inches the long ticks, ending on the
-        // far page edge.
-        let marks = ruler_marks(72.0, page_w, (unit, 8, 1), scale);
+        // The marks: inches labelled from the start margin (the page edge an inch before it gets
+        // a whole-inch tick, not a number, #1878; the margin itself has no mark), half inches the
+        // long ticks, ending on the far page edge.
+        let marks = ruler_marks(72.0, body_right - body_x, page_w, (unit, 8, 1), scale);
         let at = |d: f32| marks.iter().find(|(td, _)| (*td - d).abs() < 1e-4).map(|(_, m)| *m);
         assert_eq!(marks.first().map(|(d, _)| *d), Some(0.0));
         assert_eq!(marks.last().map(|(d, _)| *d), Some(page_w));
-        assert_eq!(at(0.0), Some(RulerMark::Label(-1)));
+        assert_eq!(at(0.0), Some(RulerMark::Tick(UNIT_TICK)));
         assert_eq!(at(72.0), None);
         assert_eq!(at(72.0 + unit), Some(RulerMark::Label(1)));
         assert_eq!(at(72.0 + 2.0 * unit), Some(RulerMark::Label(2)));
         assert_eq!(at(72.0 + unit / 2.0), Some(RulerMark::Tick(5.0)));
         assert_eq!(at(72.0 + unit / 8.0), Some(RulerMark::Tick(1.5)));
         // Zoomed out, sub-half-inch ticks drop out rather than smudge together.
-        let coarse = ruler_marks(72.0, page_w, (unit, 8, 1), 0.3);
+        let coarse = ruler_marks(72.0, body_right - body_x, page_w, (unit, 8, 1), 0.3);
         assert!(!coarse.iter().any(|(_, m)| matches!(m, RulerMark::Tick(1.5))));
         assert!(coarse.iter().any(|(_, m)| matches!(m, RulerMark::Tick(3.0))));
         // Laid on screen, the same ticks run the other way when mirrored.
@@ -4868,6 +5501,298 @@ mod tests {
         assert!(after1 > centre && after1 > after2, "right to left: the numbers rise away from the right margin");
         assert!((after1 - (2.0 * centre - before1)).abs() < 1.0, "1 mirrors about the page centre: {before1} → {after1}");
         assert!((after2 - (2.0 * centre - before2)).abs() < 1.0, "2 mirrors about the page centre: {before2} → {after2}");
+    }
+
+    /// #1878: a ruler's numbers and ticks thin out as the page shrinks on screen, so they never
+    /// pile up: the fewest units between numbers (1, 2, 4, 8…) that keep them 30 px apart, and
+    /// the fewest subdivisions between ticks that keep those 4 px apart.
+    #[test]
+    fn ruler_density_thins_out_as_the_page_shrinks() {
+        let d = |px, div| {
+            let d = ruler_density(px, div);
+            (d.label_every, d.tick_every)
+        };
+        // Inches (8 subdivisions) at 100%, 50%, 25% and 10%: 96, 48, 24 and 9.6 px per inch.
+        assert_eq!(d(96.0, 8), (1, 1));
+        assert_eq!(d(48.0, 8), (1, 1));
+        assert_eq!(d(24.0, 8), (2, 2));
+        assert_eq!(d(9.6, 8), (4, 4));
+        // Centimetres (4 subdivisions) at the same zooms: 37.8, 18.9, 9.45 and 3.78 px per cm.
+        assert_eq!(d(37.8, 4), (1, 1));
+        assert_eq!(d(18.9, 4), (2, 1));
+        assert_eq!(d(9.45, 4), (4, 2));
+        assert_eq!(d(3.78, 4), (8, 8));
+        // Hostile sizes leave the ruler blank rather than loop or panic.
+        assert_eq!(d(0.0, 8), (RULER_SPARSEST, RULER_SPARSEST));
+        for px in [-1.0, f32::NAN, f32::INFINITY] {
+            let (l, t) = d(px, 0);
+            assert!(l >= 1 && t >= 1, "{px}");
+        }
+        // Every numbered position is on the ticks' grid, whatever the zoom.
+        for div in [4, 8] {
+            for z in 1..=200 {
+                let px = z as f32 * 0.5;
+                let d = ruler_density(px, div);
+                assert_eq!(div * d.label_every % d.tick_every, 0, "{px} px per unit, {div} subdivisions");
+            }
+        }
+    }
+
+    /// #1878: a ruler numbers the text area only (the margins get ticks), its numbers are never
+    /// closer than 30 px however far out the page is zoomed, and whole units without a number
+    /// keep a long tick.
+    #[test]
+    fn ruler_marks_number_the_text_area_and_thin_out_zoomed_out() {
+        let (unit, page_w, text_w) = (72.0, 612.0, 468.0);
+        let at = |marks: &[(f32, RulerMark)], d: f32| marks.iter().find(|(td, _)| (*td - d).abs() < 1e-3).map(|(_, m)| *m);
+        let labels = |marks: &[(f32, RulerMark)]| {
+            marks
+                .iter()
+                .filter_map(|(d, m)| match m {
+                    RulerMark::Label(n) => Some((*d, *n)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // 90 px per inch: a number at every inch of the text area, 1 to 6; the margins get the
+        // whole-inch tick instead (the page edge an inch before the margin, 7 past it).
+        let marks = ruler_marks(72.0, text_w, page_w, (unit, 8, 1), 1.25);
+        assert_eq!(labels(&marks), (1..=6).map(|n| (72.0 + n as f32 * unit, n)).collect::<Vec<_>>());
+        assert_eq!(at(&marks, 0.0), Some(RulerMark::Tick(UNIT_TICK)));
+        assert_eq!(at(&marks, 72.0 + 7.0 * unit), Some(RulerMark::Tick(UNIT_TICK)));
+        // 10.8 px per inch: a number every 4 inches, ticks at whole and half inches only.
+        let tiny = ruler_marks(72.0, text_w, page_w, (unit, 8, 1), 0.15);
+        assert_eq!(labels(&tiny), vec![(72.0 + 4.0 * unit, 4)]);
+        assert!(tiny.iter().all(|(d, _)| ((d - 72.0) / (unit / 2.0)).fract().abs() < 1e-3), "{tiny:?}");
+        assert!(tiny.len() >= 8, "{tiny:?}");
+        // At every zoom and in every unit the numbers are at least 30 px apart, positive, and
+        // only across the text area.
+        for z in 1..=100 {
+            let scale = z as f32 * 0.05;
+            for (unit, div, step) in [(72.0, 8, 1), (wordcraft_geom::PT_PER_CM, 4, 1), (wordcraft_geom::PT_PER_CM, 4, 10), (72.0, 8, 72)] {
+                let marks = ruler_marks(72.0, text_w, page_w, (unit, div, step), scale);
+                let found = labels(&marks);
+                let xs: Vec<f32> = found.iter().map(|(d, _)| d * scale).collect();
+                assert!(xs.windows(2).all(|w| w[1] - w[0] >= RULER_LABEL_PX - 1e-3), "scale {scale}, unit {unit}: {xs:?}");
+                assert!(found.iter().all(|(d, n)| *d > 72.0 && *d <= 72.0 + text_w + 1e-3 && *n > 0), "scale {scale}, unit {unit}: {found:?}");
+            }
+        }
+        // Hostile sizes: nothing, or a bounded list, and no panic.
+        assert!(ruler_marks(f32::NAN, text_w, page_w, (unit, 8, 1), 1.0).is_empty());
+        assert!(ruler_marks(72.0, text_w, f32::INFINITY, (unit, 8, 1), 1.0).is_empty());
+        assert!(ruler_marks(72.0, text_w, page_w, (0.0, 8, 1), 1.0).is_empty());
+        assert!(ruler_marks(1e9, text_w, 1e9, (unit, 8, 1), 1.0).len() <= RULER_MAX_MARKS);
+        assert!(ruler_marks(72.0, text_w, 1e9, (unit, 8, 1), 1.0).len() <= RULER_MAX_MARKS);
+    }
+
+    /// The rulers as one frame of `a` drew them: each bar (the grey strip over the page) and the
+    /// numbers along it, as (text, centre x) across and (text, centre y) down.
+    #[derive(Default)]
+    struct DrawnRulers {
+        h_bar: Option<Rect>,
+        v_bar: Option<Rect>,
+        h_labels: Vec<(String, f32)>,
+        v_labels: Vec<(String, f32)>,
+    }
+
+    fn drawn_rulers(ctx: &egui::Context, a: &mut WordApp, t: &mut f64) -> DrawnRulers {
+        *t += 1.0 / 60.0;
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0));
+        let input = egui::RawInput { time: Some(*t), screen_rect: Some(screen), ..Default::default() };
+        let out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        let grey = Tokens::get(ctx).ruler_margin;
+        let mut d = DrawnRulers::default();
+        if let Some(area) = a.canvas.canvas_rect {
+            let h = Rect::from_min_max(pos2(area.min.x, area.min.y - RULER), pos2(area.max.x, area.min.y));
+            let v = Rect::from_min_max(pos2(area.min.x - RULER, area.min.y), pos2(area.min.x, area.max.y));
+            for c in &out.shapes {
+                match &c.shape {
+                    // The bars: the widest grey rect across the top strip, the tallest down the
+                    // left one (a table's markers are grey too, but small).
+                    egui::Shape::Rect(rs) if rs.fill == grey => {
+                        let r = rs.rect;
+                        if r.min.y >= h.min.y && r.max.y <= h.max.y && d.h_bar.is_none_or(|b| b.width() < r.width()) {
+                            d.h_bar = Some(r);
+                        }
+                        if r.min.x >= v.min.x && r.max.x <= v.max.x && d.v_bar.is_none_or(|b| b.height() < r.height()) {
+                            d.v_bar = Some(r);
+                        }
+                    }
+                    egui::Shape::Text(text) => {
+                        let centre = text.pos + text.galley.size() / 2.0;
+                        if text.pos.y >= h.min.y && text.pos.y < h.max.y && text.pos.x >= h.min.x {
+                            d.h_labels.push((text.galley.text().to_owned(), centre.x));
+                        } else if text.pos.x >= v.min.x && text.pos.x < v.max.x && text.pos.y >= v.min.y && text.pos.y < v.max.y {
+                            d.v_labels.push((text.galley.text().to_owned(), centre.y));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out.drop_without_applying_deltas();
+        d
+    }
+
+    /// #1878: in Multiple Pages both rulers belong to the caret's page: the horizontal one spans
+    /// that page's rect on screen and the vertical one its height, and they follow the caret to
+    /// another page of the row and to the next row.
+    #[test]
+    fn the_rulers_span_the_caret_page_in_multiple_pages() {
+        let ctx = egui::Context::default();
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        a.run("text.insert", json!({"text": "One"})).unwrap();
+        for text in ["Two", "Three", "Four"] {
+            a.run("insert.pageBreak", json!({})).unwrap();
+            a.run("text.insert", json!({"text": text})).unwrap();
+        }
+        a.run("edit.goto", json!({"page": 1})).unwrap();
+        a.run("view.multiplePages", json!({})).unwrap();
+        let mut t = 0.0;
+        let frames = |a: &mut WordApp, t: &mut f64| {
+            for _ in 0..4 {
+                drawn_rulers(&ctx, a, t);
+            }
+            drawn_rulers(&ctx, a, t)
+        };
+        let d = frames(&mut a, &mut t);
+        let rects = a.canvas.page_rects.clone();
+        assert!(rects.len() == 4 && a.canvas.cols >= 2, "pages side by side: {} per row of {}", a.canvas.cols, rects.len());
+        let same_x = |bar: Option<Rect>, pr: Rect| bar.is_some_and(|b| (b.min.x - pr.min.x).abs() < 0.5 && (b.max.x - pr.max.x).abs() < 0.5);
+        let same_y = |bar: Option<Rect>, pr: Rect| bar.is_some_and(|b| (b.min.y - pr.min.y).abs() < 0.5 && (b.max.y - pr.max.y).abs() < 0.5);
+        assert!(same_x(d.h_bar, rects[0]), "the horizontal ruler spans page 1: {:?} vs {:?}", d.h_bar, rects[0]);
+        assert!(same_y(d.v_bar, rects[0]), "the vertical ruler spans page 1: {:?} vs {:?}", d.v_bar, rects[0]);
+        assert!(!same_x(d.h_bar, rects[1]), "pages 1 and 2 sit side by side");
+        // The caret moves to the second page of the row: the horizontal ruler follows it there.
+        a.run("edit.goto", json!({"page": 2})).unwrap();
+        let d = frames(&mut a, &mut t);
+        let rects = a.canvas.page_rects.clone();
+        assert!(same_x(d.h_bar, rects[1]), "the horizontal ruler follows the caret to page 2: {:?} vs {:?}", d.h_bar, rects[1]);
+        assert!(same_y(d.v_bar, rects[1]));
+        // And down to the next row: the vertical ruler moves to that page's height.
+        let below = (0..rects.len()).find(|i| rects[*i].min.y > rects[0].min.y + 1.0).expect("a second row of pages");
+        a.run("edit.goto", json!({"page": below + 1})).unwrap();
+        let d = frames(&mut a, &mut t);
+        let rects = a.canvas.page_rects.clone();
+        assert!(same_y(d.v_bar, rects[below]), "the vertical ruler spans page {}: {:?} vs {:?}", below + 1, d.v_bar, rects[below]);
+        assert!(same_x(d.h_bar, rects[below]));
+        assert!(!same_y(d.v_bar, rects[0]), "page 1 is in the row above");
+    }
+
+    /// #1878: the rulers number the text area only, a number gives way to an indent marker on
+    /// it, and zoomed far out the numbers thin out instead of piling up.
+    #[test]
+    fn ruler_numbers_skip_the_margins_and_the_markers_and_thin_out() {
+        let ctx = egui::Context::default();
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        a.run("text.insert", json!({"text": "Hello"})).unwrap();
+        a.run("view.zoom", json!({"value": 100})).unwrap();
+        let mut t = 0.0;
+        let frames = |a: &mut WordApp, t: &mut f64| {
+            for _ in 0..4 {
+                drawn_rulers(&ctx, a, t);
+            }
+            drawn_rulers(&ctx, a, t)
+        };
+        let names = |labels: &[(String, f32)]| labels.iter().map(|(s, _)| s.clone()).collect::<Vec<String>>();
+        // Inches at 100% on a Letter page with inch margins: 1 to 6 across the text, 1 to 9 down
+        // it; the page edges an inch outside the margins get no "1", "7" or "10".
+        let d = frames(&mut a, &mut t);
+        assert_eq!(names(&d.h_labels), ["1", "2", "3", "4", "5", "6"]);
+        let down = names(&d.v_labels);
+        assert!(down.len() >= 6 && down[..6] == ["1", "2", "3", "4", "5", "6"], "down the page to the bottom of the view: {down:?}");
+        let pr = a.canvas.page_rects[0];
+        let scale = pr.width() / 612.0;
+        assert!((d.v_labels[0].1 - (pr.min.y + 144.0 * scale)).abs() < 1.0, "the first number is an inch below the top margin");
+        // A left indent of an inch puts the indent markers on the "1", which gives way.
+        a.run("para.indents", json!({"left": 72.0})).unwrap();
+        let d = frames(&mut a, &mut t);
+        assert_eq!(names(&d.h_labels), ["2", "3", "4", "5", "6"]);
+        a.run("para.indents", json!({"left": 0.0})).unwrap();
+        let d = frames(&mut a, &mut t);
+        assert_eq!(names(&d.h_labels), ["1", "2", "3", "4", "5", "6"]);
+        // At 10% an inch is 9.6 px: a number every 4 inches, the text keeps its size.
+        a.run("view.zoom", json!({"value": 10})).unwrap();
+        let d = frames(&mut a, &mut t);
+        assert_eq!(names(&d.h_labels), ["4"]);
+        assert_eq!(names(&d.v_labels), ["4", "8"]);
+        let (y4, y8) = (d.v_labels[0].1, d.v_labels[1].1);
+        assert!(y8 - y4 >= RULER_LABEL_PX, "the numbers stay apart: {y4} and {y8}");
+    }
+
+    /// #1878: a number also gives way to a tab stop's glyph (set, or being dragged to it) and to
+    /// a table's column and row markers sitting on it.
+    #[test]
+    fn ruler_numbers_give_way_to_tab_stops_and_table_markers() {
+        use crate::ruler_tabs::TabDrag;
+        use wordcraft_doc::props::{TabAlign, TabLeader};
+        let ctx = egui::Context::default();
+        let mut t = 0.0;
+        let frames = |a: &mut WordApp, t: &mut f64| {
+            for _ in 0..4 {
+                drawn_rulers(&ctx, a, t);
+            }
+            drawn_rulers(&ctx, a, t)
+        };
+        let names = |labels: &[(String, f32)]| labels.iter().map(|(s, _)| s.clone()).collect::<Vec<String>>();
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        a.run("text.insert", json!({"text": "Hello"})).unwrap();
+        a.run("view.zoom", json!({"value": 100})).unwrap();
+        assert_eq!(names(&frames(&mut a, &mut t).h_labels), ["1", "2", "3", "4", "5", "6"]);
+        // A tab stop an inch in sits on the "1".
+        a.run("para.tabs", json!({"tabs": [{"pos": 72.0}]})).unwrap();
+        assert_eq!(names(&frames(&mut a, &mut t).h_labels), ["2", "3", "4", "5", "6"]);
+        // Dragged to two inches it counts where it lands: the "1" is back and the "2" gives way.
+        let para = a.session.sel.focus.clone();
+        let drag =
+            |at: f32, off: bool| Some(TabDrag { from: Some(72.0), para: para.clone(), align: TabAlign::Left, leader: TabLeader::None, at, off });
+        a.canvas.tab_drag = drag(144.0, false);
+        assert_eq!(names(&drawn_rulers(&ctx, &mut a, &mut t).h_labels), ["1", "3", "4", "5", "6"]);
+        // Off the ruler it counts nowhere.
+        a.canvas.tab_drag = drag(144.0, true);
+        assert_eq!(names(&drawn_rulers(&ctx, &mut a, &mut t).h_labels), ["1", "2", "3", "4", "5", "6"]);
+        a.run("para.tabs", json!({"clearAll": true})).unwrap();
+        assert_eq!(names(&frames(&mut a, &mut t).h_labels), ["1", "2", "3", "4", "5", "6"]);
+        // A three-column table with the caret in the first cell. Narrowing that column puts the
+        // table's right border six inches from the margin: its marker takes the "6", while the
+        // caret cell's own edge (and so its indent marker) ends well short of any whole inch.
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Default::default());
+        a.run("insert.table", json!({"rows": 1, "cols": 3})).unwrap();
+        a.run("text.insert", json!({"text": "A"})).unwrap();
+        a.run("view.zoom", json!({"value": 100})).unwrap();
+        let cell = |a: &mut WordApp, c: usize| {
+            a.session.layout().pages[0]
+                .items
+                .iter()
+                .find_map(|it| match it {
+                    wordcraft_layout::Placed::Cell { rect, row: 0, cell, .. } if *cell == c => Some(*rect),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let body = a.session.layout().pages[0].body;
+        let (first, last) = (cell(&mut a, 0), cell(&mut a, 2));
+        let width = body.x + 432.0 - first.x - (last.right() - first.right());
+        a.run("table.columnWidth", json!({"width": width})).unwrap();
+        let d = frames(&mut a, &mut t);
+        let (first, last) = (cell(&mut a, 0), cell(&mut a, 2));
+        assert!((last.right() - (body.x + 432.0)).abs() < 0.5, "the table ends six inches in: {last:?}");
+        let off_inch = (first.right() - body.x).rem_euclid(72.0);
+        assert!((12.0..=60.0).contains(&off_inch), "the caret cell's edge is off the whole inches: {first:?}");
+        assert_eq!(names(&d.h_labels), ["1", "2", "3", "4", "5"]);
+        let down = names(&d.v_labels);
+        assert!(down.len() >= 3 && down[..3] == ["1", "2", "3"], "{down:?}");
+        // The row's bottom an inch below the top margin takes the "1" down the page.
+        let height = body.y + 72.0 - first.y;
+        a.run("table.rowHeight", json!({"height": height, "rule": "exact"})).unwrap();
+        let d = frames(&mut a, &mut t);
+        assert!((cell(&mut a, 0).bottom() - (body.y + 72.0)).abs() < 0.5);
+        let down = names(&d.v_labels);
+        assert!(down.len() >= 3 && down[..3] == ["2", "3", "4"], "{down:?}");
+        assert_eq!(names(&d.h_labels), ["1", "2", "3", "4", "5"]);
     }
 
     /// Ruler tab gestures are safe: a click on an indent marker places nothing, only the
@@ -5140,5 +6065,19 @@ mod tests {
 
     fn page_at_index(rects: &[Rect], p: Pos2) -> Option<usize> {
         nearest_page(rects, p)
+    }
+
+    /// A page drawn without a dragged object must not pass for the page with it: the drag's start
+    /// and end change the page's texture key once each, so the page is rendered again then and
+    /// only then. Without this, the old raster — the object still on it where it was — stays while
+    /// the preview follows the pointer, and the object shows twice.
+    #[test]
+    fn the_view_key_changes_when_a_drag_takes_an_object_off_the_page() {
+        let doc = wordcraft_doc::Document::from_text("Hello WordCraft");
+        let app = WordApp::new(wordcraft_engine::Session::new(doc), Default::default());
+        let object = Pos::body(0, 5);
+        let hidden = view_key(&app, false, Some(&object));
+        assert_ne!(hidden, view_key(&app, false, None), "the page without the dragged object is rendered again");
+        assert_eq!(hidden, view_key(&app, false, Some(&object)), "the same drag keeps the key: no re-render every frame");
     }
 }

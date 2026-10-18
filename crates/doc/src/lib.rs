@@ -24,6 +24,7 @@ pub mod eq;
 pub mod fields;
 pub mod freeform;
 pub mod graphic;
+pub mod legacy_form;
 pub mod line_dash;
 pub mod link;
 pub mod locale_number;
@@ -1467,6 +1468,49 @@ fn walk(bl: &Blocks, prefix: &mut Vec<u32>, out: &mut Vec<Path>, depth: usize) {
                         walk(&cell.blocks, prefix, out, depth + 1);
                         prefix.pop();
                         prefix.pop();
+                    }
+                }
+            }
+        }
+        prefix.pop();
+    }
+}
+
+/// [`walk`] for the paragraphs from path `a` to `b` inclusive, skipping the blocks outside.
+pub(crate) fn walk_between(bl: &Blocks, prefix: &mut Vec<u32>, out: &mut Vec<Path>, depth: usize, (a, b): (&[u32], &[u32])) {
+    use std::cmp::Ordering::{Greater, Less};
+    if depth > PARA_WALK_DEPTH {
+        return;
+    }
+    // Where the paths starting with `q` lie against `x`: all before, all after, or either.
+    let side = |q: &[u32], x: &[u32]| {
+        let m = q.len().min(x.len());
+        q[..m].cmp(&x[..m])
+    };
+    for (i, blk) in bl.iter().enumerate() {
+        prefix.push(i as u32);
+        if side(prefix, b) == Greater {
+            prefix.pop();
+            break;
+        }
+        if side(prefix, a) != Less {
+            match &**blk {
+                Block::Para(_) => {
+                    if prefix.as_slice() >= a && prefix.as_slice() <= b {
+                        out.push(Path(prefix.clone()));
+                    }
+                }
+                Block::Table(t) => {
+                    for (r, row) in t.rows.iter().enumerate() {
+                        for (c, cell) in row.cells.iter().enumerate() {
+                            prefix.push(r as u32);
+                            prefix.push(c as u32);
+                            if side(prefix, a) != Less && side(prefix, b) != Greater {
+                                walk_between(&cell.blocks, prefix, out, depth + 1, (a, b));
+                            }
+                            prefix.pop();
+                            prefix.pop();
+                        }
                     }
                 }
             }

@@ -51,7 +51,7 @@ shared items below.
 | Spanish | es | ~930; 98% / ~95% | most | Latin ✅ | no | partial | 1–2 |
 | Hindi | hi | 0 | ❌ | Devanagari shaping via HarfRust, untested; no hyphenation | no | none | 4–6 |
 | Arabic | ar | 0 | ❌ | shaping, joining, lam-alef, bidi ✅ (#207); no kashida; **no mirrored UI** | no | none | 6–8 |
-| French | fr | 2,033 entries | most; newer dialogs partly English | Latin ✅ | no | partial | 1–2 |
+| French | fr | 2,615 entries (complete catalog) | all | Latin ✅ | no | partial (no proofing) | 1–2 (proofing) |
 | Portuguese | pt-br (pt-PT none) | ~930; 98% / ~95% (pt-BR) | most | Latin ✅ | no | partial | 2–4 (pt-BR finish + pt-PT) |
 | Indonesian | id | 0 | ❌ | Latin ✅ | no | none | 3–4 |
 | Japanese | ja | ~930; 98% / ~95% | most | CJK ✅, IME ✅; no vertical text, ruby or document grid | no | partial | 3–5 |
@@ -134,6 +134,8 @@ groups and command names use the names Italian Word users know (feature names, a
 allows); all other text is written from the meaning of the English. The interface audit also
 checks the Italian catalog (2026-10-14). Italian proofing is in the proofing table above.
 allows); all other text is written from the meaning of the English. Italian proofing: see the table above.
+
+A native speaker reviewed the catalog on 2026-10-14 (wording fixes, consistent terms).
 ## Sorting and numbers in the text's language
 
 Sorts follow the alphabet of the text's language (`w:lang`, else the document default):
@@ -190,7 +192,7 @@ WordCraft keeps 2,54 cm).
 | Mirrored (right-to-left) interface for Arabic and Hebrew | 15–25 | Ribbon, panes, dialogs, rulers |
 | Vertical text, ruby, document grid (Chinese, Japanese, Korean) | counted in [layout-parity.md](layout-parity.md) | |
 | Proofing dictionaries, grammar and hyphenation for the 11 non-English key languages | 20–40 | Open dictionaries only (licence check per dictionary); issues #25, #40, #100. Per-run languages, the Hunspell-style affix engine and the TeX pattern reader landed with Polish, so a language with an open Hunspell dictionary and hyphenation patterns is mostly data plus grammar rules |
-| Native-speaker review of every catalog | human | Swedish: terminology and the running app reviewed (2026-10-13); the others not yet |
+| Native-speaker review of every catalog | human | Swedish: terminology and the running app reviewed (2026-10-13); Italian reviewed (2026-10-14); the others not yet |
 
 ## Revision history
 
@@ -200,6 +202,7 @@ WordCraft keeps 2,54 cm).
 | 2026-10-16 | minor | Indonesian proofing (#498): id-ID spelling from the installed Hunspell `id_ID` dictionary (not bundled), Czech's dictionary-driven suggestions, repeated-word (hyphenated reduplication offered) and spacing checks with Indonesian messages; Review › Language, the status bar, Set Proofing Language and File › Options › Proofing list Indonesian; estimates unchanged |
 | 2026-10-16 | trivial | Read Aloud picks a voice for the sentence's language (run tag, else script) when the default voice doesn't speak it, reads Windows text as UTF-8 |
 | 2026-10-16 | trivial | Linked the new guide to installing the Hunspell dictionaries on Windows, macOS and Linux (`docs/spelling-dictionaries.md`, `pt_BR` as the example); estimates unchanged |
+| 2026-10-16 | minor | French interface catalog completed (2,615 entries, native-speaker review); proofing still pending |
 | 2026-10-12 | minor | Czech proofing review: short-word splits rank after deletion, NOSUGGEST excludes suggestions while accepting typed forms, affix comments apply only to headers, ratios keep spaces and repeated-word messages use Czech quotes; synthetic engine end-to-end and latency checks |
 | 2026-10-12 | minor | Czech spelling from the installed Hunspell dictionary, runtime-table suggestions and generic checks; Czech interface writes cs-CZ documents; no Czech hyphenation patterns bundled; estimates unchanged |
 | 2026-10-13 | minor | Swedish interface catalog (2,504 entries), locale selection, saved preference, audit coverage and font checks (#1219) |
@@ -208,6 +211,7 @@ WordCraft keeps 2,54 cm).
 | 2026-10-14 | minor | Italian grammar rules that work without a dictionary: `un pò`/`un po` → `un po'`, `qual'è` → `qual è`, `E'` → `È`, `un'` only before feminine words (`un'altro` → `un altro`, `un altra` → `un'altra`, also `nessun`/`ciascun`/`qualcun`/`alcun`); spelling accepts more elisions (`dov'è`, `anch'io`, `senz'altro`, `nessun'altra`) and truncations (`po'`, `mo'`) and leaves `pò`/`qual'è` to grammar so they aren't marked twice; more emphatic doubles allowed |
 | 2026-10-12 | minor | File › Options › Proofing › Dictionaries folder (#1063): a saved folder of Hunspell dictionaries searched first, so an app started from Finder or the Dock finds them without `WORDCRAFT_DICTIONARIES`; the pane lists the dictionary file each language found — Polish, Portuguese, Italian, Croatian, Turkish (`file.options` `dictionariesFolder`) |
 | 2026-10-12 | minor | Czech interface catalog completed: 386 entries added (2,447 total), including built-in style names, numbered families, equation gallery, watermarks, paper sizes and preview tiles; coverage test requires every Russian and Spanish key and retains Chinese coverage |
+| 2026-10-14 | minor | Italian interface reviewed by a native speaker: Word names for tabs and commands, consistent terms (input penna, Disponi testo, Ombreggiatura), imperatives for commands |
 | 2026-10-12 | minor | Italian proofing: it-IT spelling from the installed Hunspell dictionary (system `it_IT`, never bundled — upstream is GPL), accent-first suggestions, conservative grammar with Italian messages, TeX Italian hyphenation patterns (MIT option); Review › Language already offered Italian; an `it` interface writes it-IT documents |
 | 2026-10-13 | minor | Interface audit back in CI (#1128): Envelopes, Labels and Layout › Size labels go through translated patterns with the region's decimal separator (the old fixed-format paper rows, dead since #838, removed); 20 strings added to all 18 catalogs (status-bar messages, Reading Mode toolbar, Go To, Search's Suggested); citation style names and `bad parameters:` errors exempt; the Read Aloud player no longer draws a speech error before the frame has polled it, the audit's rare failure under load |
 | 2026-10-12 | minor | Russian proofing: spelling against an installed `ru_RU` Hunspell dictionary (also KOI8-R and Windows-1251), suggestions, grammar rules with Russian messages and Russian word division |
