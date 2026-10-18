@@ -338,7 +338,33 @@ fn toc_range(s: &Session) -> Option<(usize, usize)> {
 /// offers Update Field for the whole table.
 pub fn caret_in_toc(s: &Session) -> bool {
     let at = &s.sel.focus;
-    at.story == StoryRef::Body && at.path.depth() == 0 && toc_range(s).is_some_and(|(start, end)| (start..=end).contains(&at.path.last()))
+    if at.story != StoryRef::Body || at.path.depth() != 0 {
+        return false;
+    }
+    if toc_range(s).is_some_and(|(start, end)| (start..=end).contains(&at.path.last())) {
+        return true;
+    }
+    // A saved or imported TOC is a range field spanning its entries until Update Table turns it
+    // into the engine's TOC (#2182, a save and reopen; not the flow in the report). Only the
+    // range Update Table would convert counts, so the menu never refreshes a different TOC.
+    s.doc.field_ranges(StoryRef::Body).into_iter().find(|r| convertible_toc_range(s, r)).is_some_and(|r| {
+        // The caret at the field's own marker (offset 0 of the first entry) and at the end of
+        // the last entry belong to the range as well.
+        (r.start.path.last()..=r.end.path.last()).contains(&at.path.last())
+    })
+}
+
+/// The range field `range_toc_to_field` converts: an unlocked, top-level TOC (not a table of
+/// figures) when the body has no engine TOC yet.
+fn convertible_toc_range(s: &Session, r: &wordcraft_doc::FieldRange) -> bool {
+    let field = FieldCode::parse(&r.instr);
+    toc_range(s).is_none()
+        && field.name == "TOC"
+        && !field.has('c')
+        && r.depth == 0
+        && !r.locked
+        && r.start.path.depth() == 0
+        && r.end.path.depth() == 0
 }
 
 /// A TOC imported as a range field (`FieldStart`…`FieldEnd`: one without a TOC heading, or with
@@ -351,16 +377,7 @@ fn range_toc_to_field(s: &mut Session) -> Result<(), CmdError> {
     if toc_range(s).is_some() {
         return Ok(());
     }
-    let is_toc = |instr: &str| {
-        let field = FieldCode::parse(instr);
-        field.name == "TOC" && !field.has('c')
-    };
-    let Some(r) = s
-        .doc
-        .field_ranges(StoryRef::Body)
-        .into_iter()
-        .find(|r| r.depth == 0 && !r.locked && is_toc(&r.instr) && r.start.path.depth() == 0 && r.end.path.depth() == 0)
-    else {
+    let Some(r) = s.doc.field_ranges(StoryRef::Body).into_iter().find(|r| convertible_toc_range(s, r)) else {
         return Ok(());
     };
     let Some(after_end) = r.end.off.checked_add(OBJ.len_utf8()) else { return Ok(()) };
@@ -374,7 +391,13 @@ fn range_toc_to_field(s: &mut Session) -> Result<(), CmdError> {
     if at.path.depth() == 0
         && i > 0
         && s.doc.para_at(&at).is_some_and(|p| p.is_empty())
-        && s.doc.body.get(i - 1).and_then(|b| b.as_para()).is_some_and(|p| p.props.style.as_deref() == Some("TOCHeading"))
+        // The paragraph before may also be the empty one the writer leaves where the engine's TOC
+        // field was (the field is saved opening in the first entry), so the next save and update
+        // doesn't add a blank line each time (#2182). A blank line the user typed right above a
+        // range TOC is reused the same way, so deleting it later deletes the TOC field.
+        && s.doc.body.get(i - 1).and_then(|b| b.as_para()).is_some_and(|p| {
+            p.props.style.as_deref() == Some("TOCHeading") || (p.is_empty() && p.objects.is_empty() && p.section.is_none())
+        })
     {
         s.doc.remove_block(StoryRef::Body, &at.path)?;
         let heading = Path::top(i - 1);
@@ -408,7 +431,33 @@ fn toc_field(p: &Paragraph) -> Option<String> {
     })
 }
 
+/// The first cached number-separator tab formatting at each TOC level.
+fn cached_toc_tabs(s: &Session) -> Vec<(String, Vec<TabStop>)> {
+    let span = toc_range(s).map(|(start, end)| (start.saturating_add(1), end)).or_else(|| {
+        s.doc.field_ranges(StoryRef::Body).into_iter().find_map(|r| {
+            let f = FieldCode::parse(&r.instr);
+            (r.depth == 0 && !r.locked && r.start.path.depth() == 0 && r.end.path.depth() == 0 && f.name == "TOC" && !f.has('c'))
+                .then_some((r.start.path.last(), r.end.path.last()))
+        })
+    });
+    let Some(blocks) = span.and_then(|(start, end)| s.doc.body.get(start..=end)) else { return Vec::new() };
+    let mut tabs: Vec<(String, Vec<TabStop>)> = Vec::new();
+    for p in blocks.iter().filter_map(|b| b.as_para()) {
+        let Some(style) = &p.props.style else { continue };
+        let Some(direct) = &p.props.tabs else { continue };
+        if !direct.iter().any(|t| matches!(t.align, TabAlign::Left | TabAlign::Center | TabAlign::Decimal)) {
+            continue;
+        }
+        if !style.starts_with("TOC") || style == "TOCHeading" || tabs.iter().any(|(id, _)| id == style) {
+            continue;
+        }
+        tabs.push((style.clone(), direct.clone()));
+    }
+    tabs
+}
+
 fn insert_toc(s: &mut Session, v: &Value) -> CmdResult {
+    let tabs = cached_toc_tabs(s);
     range_toc_to_field(s)?;
     let replace = v.as_object().is_some_and(|m| !m.is_empty());
     // Replacing a table puts the new one where the old one was, in place of an empty paragraph.
@@ -416,7 +465,7 @@ fn insert_toc(s: &mut Session, v: &Value) -> CmdResult {
     let at = match toc_range(s) {
         // `{}` updates the table there; settings replace it where it is.
         Some(_) if !replace => {
-            update_toc(s)?;
+            regenerate_toc(s, None, &tabs)?;
             return sel_result(s);
         }
         Some((start, end)) => {
@@ -451,7 +500,7 @@ fn insert_toc(s: &mut Session, v: &Value) -> CmdResult {
     };
     s.doc.insert_block(StoryRef::Body, &Path::top(i), Block::Para(head))?;
     let leader = leader(p::str(v, "tabLeader").unwrap_or("dot"));
-    regenerate_toc(s, Some(leader))?;
+    regenerate_toc(s, Some(leader), &tabs)?;
     s.clamp_selection();
     sel_result(s)
 }
@@ -495,12 +544,13 @@ fn bookmark_heading(s: &mut Session, path: &Path, lead: usize) -> Result<String,
 
 /// Regenerate the TOC entries with page numbers (two layout passes: entries change pagination).
 pub fn update_toc(s: &mut Session) -> Result<(), CmdError> {
-    regenerate_toc(s, None)
+    let tabs = cached_toc_tabs(s);
+    regenerate_toc(s, None, &tabs)
 }
 
 /// Rebuild the entries the TOC field's switches ask for. The tab leader is `leader`, or the one
 /// the entries had (Word keeps it in the entries' tab stops, not in the field).
-fn regenerate_toc(s: &mut Session, leader: Option<TabLeader>) -> Result<(), CmdError> {
+fn regenerate_toc(s: &mut Session, leader: Option<TabLeader>, tabs: &[(String, Vec<TabStop>)]) -> Result<(), CmdError> {
     range_toc_to_field(s)?;
     let Some((start, end)) = toc_range(s) else { return Ok(()) };
     let Some(instr) = s.doc.body.get(start).and_then(|b| b.as_para()).and_then(toc_field) else { return Ok(()) };
@@ -574,6 +624,9 @@ fn regenerate_toc(s: &mut Session, leader: Option<TabLeader>) -> Result<(), CmdE
             let props = CharProps { link: links.get(k).cloned().flatten(), ..Default::default() };
             let mut para = Paragraph::with_text(&text, props).styled(&format!("TOC{}", e.level + 1));
             para.mark = CharProps::default();
+            if e.text.contains('\t') {
+                para.props.tabs = tabs.iter().find(|(style, _)| Some(style) == para.props.style.as_ref()).map(|(_, tabs)| tabs.clone());
+            }
             if show_page && sep.contains('\t') {
                 let right = TabStop { pos: width - 0.5, align: TabAlign::Right, leader };
                 para.props.tabs = Some(entry_tabs(s, &para.props, &e.text, right));
@@ -591,7 +644,8 @@ fn regenerate_toc(s: &mut Session, leader: Option<TabLeader>) -> Result<(), CmdE
 /// number set off by a space, or no number, a short entry's page tab would stop at one of them
 /// (without the leader), and so would the tab on the last line of an entry that wraps.
 fn entry_tabs(s: &Session, props: &wordcraft_doc::ParaProps, text: &str, right: TabStop) -> Vec<TabStop> {
-    let mut tabs = Vec::new();
+    let mut tabs = props.tabs.clone().unwrap_or_default();
+    tabs.retain(|t| t.pos < right.pos - 0.5 && !matches!(t.align, TabAlign::Right | TabAlign::Bar));
     if !text.contains('\t') {
         let style = s.doc.styles.resolve_para(&wordcraft_doc::ParaProps { style: props.style.clone(), ..Default::default() });
         for t in style.tabs {
@@ -1301,5 +1355,26 @@ mod tests {
         assert_eq!(story_fields(&s, StoryRef::Body)[0].1, "Ada");
         // Junk values fall back to the caret's story.
         s.run("references.updateFields", &json!({"all": "yes"})).unwrap();
+    }
+
+    #[test]
+    fn toc_tabs_ignore_nonentries() {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("Before\nContents\nOld\t9\nAfter"));
+        let stop = |pos| TabStop { pos, align: TabAlign::Left, leader: TabLeader::None };
+        for (i, pos) in [(0, 96.0), (1, 84.0), (2, 24.0)] {
+            let p = s.doc.para_mut(StoryRef::Body, &Path::top(i)).unwrap();
+            p.props.style = Some("TOC2".into());
+            p.props.tabs = Some(vec![stop(pos)]);
+        }
+        s.doc
+            .para_mut(StoryRef::Body, &Path::top(1))
+            .unwrap()
+            .insert_object(
+                0,
+                InlineObject::Field { instr: "TOC".into(), result: String::new(), locked: false, dirty: false, code: false, form: String::new() },
+                &CharProps::default(),
+            )
+            .unwrap();
+        assert_eq!(cached_toc_tabs(&s), vec![("TOC2".into(), vec![stop(24.0)])]);
     }
 }

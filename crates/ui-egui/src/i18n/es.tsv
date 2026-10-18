@@ -2623,3 +2623,9 @@ preview	Title	Título
 	All Fonts	Todas las fuentes
 	Spike	Acumulador
 	Insert Spike	Insertar acumulador
+# Add Font status (#1789)
+	Added 1 font	1 fuente añadida
+	Added {n} fonts	{n} fuentes añadidas
+	{added}; {count} couldn't be read: {names}	{added}; no se pudieron leer {count}: {names}
+	{names} and {n} more	{names} y {n} más
+	{added}; {n} skipped (limit {max})	{added}; {n} omitidas (límite {max})
