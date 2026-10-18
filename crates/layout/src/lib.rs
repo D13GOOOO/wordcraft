@@ -3471,7 +3471,7 @@ fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: 
     let (x, y) = (r.x, r.y + offset);
     let mut items = Vec::new();
     push_para(&mut items, StoryRef::Body, &[block as u32], &pl, 0, pl.lines.len(), x, y, fw);
-    let at = ObjFrame { page: Some(page), col: (x, fw), para_y: y, table_chr: None };
+    let at = ObjFrame { page: Some(page), col: (x, fw), para_y: y, table_chr: None, pinned: None };
     let (behind, front) = place_objects(ctx, StoryRef::Body, &[block as u32], p, &pl, (0, pl.lines.len()), (x, y), &at, &HashMap::new(), 0);
     items.extend(front);
     // Footnotes referenced in the frame go to the bottom of this page, as in the flow.
