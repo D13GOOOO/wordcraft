@@ -77,6 +77,12 @@ impl Reader<'_> {
                 if !self.doc.sources.is_empty() && self.xml(&rel.target).ok().flatten().is_some_and(|r| r.local() == "Sources") {
                     continue;
                 }
+                // Native ink shares the custom XML relationship type, but its part belongs to the
+                // drawing that refers to it: kept with it, or dropped with it (no orphan part).
+                let pkg = self.pkg;
+                if self.content_types.get_or_insert_with(|| ContentTypes::read(pkg)).of(&rel.target) == Some("application/inkml+xml") {
+                    continue;
+                }
                 if self.keep_part_tree(&rel.target) {
                     roots.push_str(&format!("{owner}\t{}\t{}\n", rel.kind, rel.target));
                 }

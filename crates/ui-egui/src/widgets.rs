@@ -39,25 +39,108 @@ pub fn key_text(sc: &str) -> String {
     }
 }
 
+/// The lines of a control's hover hint: the title (`Name (Ctrl+B)`), then the group it lives in
+/// and, while the control is off, why. Empty parts are left out; `reason` falls back to a generic
+/// line when the command gave none.
+pub(crate) fn tooltip_lines(label: &str, shortcut: &str, desc: &str, disabled: Option<&str>) -> (String, Vec<String>) {
+    let title = if shortcut.is_empty() || names_a_shortcut(label) { label.to_string() } else { format!("{label} ({shortcut})") };
+    let mut notes = Vec::new();
+    if !desc.is_empty() {
+        notes.push(desc.to_string());
+    }
+    if let Some(reason) = disabled {
+        notes.push(if reason.is_empty() { tl!("Not available right now").to_string() } else { capitalised(tl!(reason)) });
+    }
+    (title, notes)
+}
+
+/// Whether `label` already ends in a parenthesised key ("Paste (⌘V)"), so none is appended again.
+fn names_a_shortcut(label: &str) -> bool {
+    let Some(inner) = label.strip_suffix(')').and_then(|l| l.rsplit_once(" (")).map(|(_, k)| k) else {
+        return false;
+    };
+    ["⌘", "⌃", "⌥", "⇧", "Ctrl+", "Alt+", "Shift+", "Mod+"].iter().any(|m| inner.contains(m))
+}
+
+/// `text` with its first letter in capitals (the engine's reasons are lower case).
+fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// Show the hover hint on `resp`. A control reached with the keyboard shows it too, after the
+/// usual delay (egui itself only hints for the pointer), unless the pointer is busy elsewhere or a
+/// menu is open, whose hint would otherwise be drawn over the menu.
+fn show_hint(resp: &Response, title: &str, notes: &[String]) {
+    let add = |ui: &mut Ui| {
+        ui.set_max_width(260.0);
+        ui.label(egui::RichText::new(title).font(crate::theme::semibold(12.0)));
+        for n in notes {
+            ui.label(egui::RichText::new(n).small().weak());
+        }
+    };
+    let ctx = &resp.ctx;
+    let since_key = id_since_focus(resp);
+    // The pass on which the pointer was last over any hinted control (see the focus hint below).
+    let hover_key = egui::Id::new("hint_pointer_over_a_control");
+    let pass = ctx.cumulative_pass_nr();
+    // A disabled response never reports hover, so test the pointer against its rectangle, as
+    // `Tooltip::for_disabled` does.
+    let over = resp.hovered() || (!resp.enabled() && ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| resp.rect.contains(p)));
+    if over {
+        ctx.data_mut(|d| d.insert_temp(hover_key, pass));
+    }
+    if resp.hovered() || !resp.has_focus() {
+        // A response from a disabled `Ui` only shows hints through `for_disabled`.
+        if resp.enabled() {
+            egui::Tooltip::for_enabled(resp).show(add);
+        } else {
+            egui::Tooltip::for_disabled(resp).show(add);
+        }
+    }
+    if let Some(waited) = since_key {
+        let delay = ctx.global_style().interaction.tooltip_delay;
+        let pointer_idle = !ctx.input(|i| i.pointer.has_pointer()) || ctx.input(|i| i.pointer.time_since_last_movement()) > 2.0;
+        // Another control under the pointer (seen on this or the previous pass) owns the hint.
+        let pointer_over_other = ctx.data(|d| d.get_temp::<u64>(hover_key)).is_some_and(|p| p + 1 >= pass);
+        if waited < delay {
+            ctx.request_repaint_after_secs(delay - waited);
+        } else if !resp.hovered() && pointer_idle && !pointer_over_other && !egui::Popup::is_any_open(ctx) {
+            egui::Tooltip::for_widget(resp).show(add);
+        }
+    }
+}
+
+/// Seconds `resp` has had the keyboard focus (None when it hasn't), tracked in egui memory.
+fn id_since_focus(resp: &Response) -> Option<f32> {
+    let key = resp.id.with("hint_focus_since");
+    let now = resp.ctx.input(|i| i.time);
+    if !resp.has_focus() {
+        resp.ctx.data_mut(|d| d.remove::<f64>(key));
+        return None;
+    }
+    let since = resp.ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(key, || now));
+    Some((now - since) as f32)
+}
+
 /// `label` is already in the interface language.
 fn tooltip(app: &WordApp, resp: Response, label: &str, id: &str) -> Response {
-    let sc = shortcut_text(app, id);
-    let desc = app.session.registry.get(id).map(|s| crate::i18n::location(s.location)).unwrap_or_default();
-    let enabled = app.session.registry.get(id).map(|s| (s.enabled)(&app.session).is_none()).unwrap_or(true);
-    resp.on_hover_ui(|ui| {
-        ui.set_max_width(260.0);
-        if sc.is_empty() {
-            ui.label(egui::RichText::new(label).font(crate::theme::semibold(12.0)));
-        } else {
-            ui.label(egui::RichText::new(format!("{label} ({sc})")).font(crate::theme::semibold(12.0)));
-        }
-        if !desc.is_empty() {
-            ui.label(egui::RichText::new(desc).small().weak());
-        }
-        if !enabled {
-            ui.label(egui::RichText::new(tl!("Not available right now")).small().weak());
-        }
-    })
+    let spec = app.session.registry.get(id);
+    let desc = spec.map(|s| crate::i18n::location(s.location)).unwrap_or_default();
+    // `enabled` also covers what the registry doesn't know (no document open, `ui.*` commands).
+    let reason = if enabled(app, id) {
+        None
+    } else if !app.has_document() && !crate::works_without_document(id) {
+        Some(tl!("Open a document first"))
+    } else {
+        Some(spec.and_then(|s| (s.enabled)(&app.session)).unwrap_or(""))
+    };
+    let (title, notes) = tooltip_lines(label, &shortcut_text(app, id), &desc, reason);
+    show_hint(&resp, &title, &notes);
+    resp
 }
 
 /// Record a keytip badge over a control's rect when keytips are showing commands. `ui` reaches
@@ -189,6 +272,8 @@ fn big_button(ui: &mut Ui, app: &mut WordApp, icon: &str, label: &str, id: &str,
 /// A small button: 16 px icon with an optional label; `checked` draws the toggled state.
 pub fn small(ui: &mut Ui, app: &mut WordApp, icon: &str, label: Option<&str>, tip: &str, id: &str, params: Value, checked: bool) -> Response {
     let (label, tip) = (label.map(|l| tl!(l)), tl!(tip));
+    // A compact group (#662) shows only the icon; the tooltip keeps the name.
+    let label = label.filter(|_| !crate::ribbon_fit::compact(ui.ctx()));
     let t = Tokens::get(ui.ctx());
     let text_w = label.map(|l| ui.ctx().fonts_mut(|f| f.layout_no_wrap(l.to_string(), regular(11.5), t.text).size().x) + 6.0).unwrap_or(0.0);
     let (r, resp) = ui.allocate_exact_size(vec2(24.0 + text_w, 22.0), Sense::click());
@@ -243,6 +328,8 @@ pub fn split(
     if resp.clicked() && on {
         run_from_ribbon(app, id, params);
     }
+    let (arrow_title, _) = tooltip_lines(&crate::i18n::fmt(tl!("{name} options"), &[("name", tip)]), "", "", None);
+    show_hint(&aresp, &arrow_title, &[]);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, on, tip));
     if !on {
         return;
@@ -270,6 +357,7 @@ pub fn menu_button(
     menu: impl FnOnce(&mut Ui, &mut WordApp),
 ) {
     let (label, tip) = (label.map(|l| tl!(l)), tl!(tip));
+    let label = label.filter(|_| big_btn || !crate::ribbon_fit::compact(ui.ctx()));
     let t = Tokens::get(ui.ctx());
     // `id` names the command the menu is about (Header for the Header menu…); while it is
     // disabled the button greys out and doesn't open, like the other ribbon buttons. "" = always on.
@@ -305,7 +393,9 @@ pub fn menu_button(
         icons::paint(ui.painter(), Rect::from_center_size(pos2(r.max.x - 6.0, r.center().y), vec2(DROPDOWN, DROPDOWN)), "dropdown", c, c);
         resp
     };
-    let resp = resp.on_hover_text(tip);
+    let reason = if on { None } else { Some(app.session.registry.get(id).and_then(|s| (s.enabled)(&app.session)).unwrap_or("")) };
+    let (title, notes) = tooltip_lines(tip, &shortcut_text(app, id), "", reason);
+    show_hint(&resp, &title, &notes);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, on, tip));
     if !on {
         return;
@@ -332,24 +422,52 @@ pub fn group(ui: &mut Ui, title: &str, launcher: Option<&str>, app: &mut WordApp
 /// A ribbon group whose title is shown as is (a custom group's name, Customize Ribbon).
 pub fn group_titled(ui: &mut Ui, id_title: &str, title: &str, launcher: Option<&str>, app: &mut WordApp, add: impl FnOnce(&mut Ui, &mut WordApp)) {
     let t = Tokens::get(ui.ctx());
-    let label_w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(title.to_string(), regular(11.0), t.group_label).size().x);
     let start = ui.cursor().min;
-    let inner = ui.vertical(|ui| {
-        ui.set_min_width(label_w + if launcher.is_some() { 22.0 } else { 10.0 });
-        let content = ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTENT_H), egui::Layout::left_to_right(egui::Align::Min), |ui| {
-            ui.spacing_mut().item_spacing = vec2(1.0, 1.0);
-            add(ui, app);
+    // #662: the window may be too narrow for the tab; the plan says how this group fits.
+    let position = crate::ribbon_fit::position(ui.ctx());
+    let level = crate::ribbon_fit::level(ui.ctx(), id_title);
+    if level == crate::ribbon_fit::COLLAPSED {
+        collapsed_group(ui, id_title, position, title, launcher, app, add);
+    } else {
+        // Not folded: a drop-down left open while it was folded doesn't come back by itself.
+        ui.data_mut(|d| d.remove::<bool>(collapsed_open_id(ui, id_title, position)));
+        let label_w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(title.to_string(), regular(11.0), t.group_label).size().x);
+        let inner = ui.vertical(|ui| {
+            ui.set_min_width(label_w + if launcher.is_some() { 22.0 } else { 10.0 });
+            crate::ribbon_fit::set_compact(ui.ctx(), level == crate::ribbon_fit::COMPACT);
+            let content = ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTENT_H), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.spacing_mut().item_spacing = vec2(1.0, 1.0);
+                add(ui, app);
+            });
+            crate::ribbon_fit::end_compact(ui.ctx());
+            #[cfg(test)]
+            if content.response.rect.height() > CONTENT_H + 0.5 {
+                TALL_GROUPS.with(|g| g.borrow_mut().push(format!("{id_title}: {:.1}", content.response.rect.height())));
+            }
+            #[cfg(not(test))]
+            let _ = content;
         });
-        #[cfg(test)]
-        if content.response.rect.height() > CONTENT_H + 0.5 {
-            TALL_GROUPS.with(|g| g.borrow_mut().push(format!("{id_title}: {:.1}", content.response.rect.height())));
-        }
-        #[cfg(not(test))]
-        let _ = content;
-    });
-    let r = inner.response.rect;
-    let r = Rect::from_min_max(start, pos2(r.max.x, start.y + CONTENT_H + LABEL_H));
-    let title_y = r.max.y - LABEL_H / 2.0;
+        let r = inner.response.rect;
+        title_row(
+            ui,
+            Rect::from_min_max(pos2(start.x, start.y + CONTENT_H), pos2(r.max.x, start.y + CONTENT_H + LABEL_H)),
+            id_title,
+            title,
+            launcher,
+            app,
+        );
+    }
+    ui.add_space(5.0);
+    let x = ui.cursor().min.x;
+    ui.painter().line_segment([pos2(x, start.y + 4.0), pos2(x, start.y + CONTENT_H + LABEL_H - 4.0)], Stroke::new(1.0, t.border));
+    ui.add_space(6.0);
+    crate::ribbon_fit::record(ui.ctx(), id_title, level, ui.cursor().min.x - start.x);
+}
+
+/// A group's title row (`r`): the centred title and, with a `launcher`, its dialog launcher.
+fn title_row(ui: &mut Ui, r: Rect, id_title: &str, title: &str, launcher: Option<&str>, app: &mut WordApp) {
+    let t = Tokens::get(ui.ctx());
+    let title_y = r.center().y;
     ui.painter().text(pos2(r.center().x, title_y), Align2::CENTER_CENTER, title, regular(11.0), t.group_label);
     if let Some(cmd) = launcher {
         let lr = Rect::from_center_size(pos2(r.max.x - 6.0, title_y), vec2(11.0, 11.0));
@@ -362,10 +480,94 @@ pub fn group_titled(ui: &mut Ui, id_title: &str, title: &str, launcher: Option<&
             let _ = app.run(cmd, serde_json::json!({}));
         }
     }
-    ui.add_space(5.0);
-    let x = ui.cursor().min.x;
-    ui.painter().line_segment([pos2(x, start.y + 4.0), pos2(x, start.y + CONTENT_H + LABEL_H - 4.0)], Stroke::new(1.0, t.border));
-    ui.add_space(6.0);
+}
+
+/// Where a collapsed group remembers whether its drop-down is open.
+fn collapsed_open_id(ui: &Ui, id_title: &str, position: usize) -> egui::Id {
+    ui.id().with(("collapsed_group", id_title, position))
+}
+
+/// A group folded into one drop-down button (the window is too narrow, #662): the button, as tall
+/// as the group with its title, shows the group's name, and its drop-down holds the whole group as
+/// designed with its title and launcher. The drop-down stays open while it is used (#1285): only a
+/// click outside it, or on the button, closes it; clicks in the menus and lists its controls open
+/// (font and size lists, Change Case, colours) count as inside.
+fn collapsed_group(
+    ui: &mut Ui,
+    id_title: &str,
+    position: usize,
+    title: &str,
+    launcher: Option<&str>,
+    app: &mut WordApp,
+    add: impl FnOnce(&mut Ui, &mut WordApp),
+) {
+    let t = Tokens::get(ui.ctx());
+    let text_w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(title.to_string(), regular(11.5), t.text).size().x);
+    let (r, resp) = ui.allocate_exact_size(vec2((text_w + DROPDOWN + 14.0).max(48.0), CONTENT_H + LABEL_H), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+    let open_id = collapsed_open_id(ui, id_title, position);
+    let was_open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+    bg(ui, r, &resp, was_open, &t);
+    icons::paint(
+        ui.painter(),
+        Rect::from_center_size(pos2(r.center().x, r.min.y + BIG_ICON_Y), vec2(32.0, 32.0)),
+        group_icon(id_title),
+        t.icon,
+        t.accent,
+    );
+    label_line(ui, r.center().x, r.min.y + BIG_LABEL_Y, title, regular(11.5), t.text, true);
+    let resp = resp.on_hover_text(title);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
+    let mut open = was_open;
+    if resp.clicked() {
+        open = !open;
+    } else if open && ui.input(|i| i.pointer.any_click()) {
+        // Popups (the drop-down, its controls' menus and lists) sit above the ribbon; a click on
+        // the window below them is outside.
+        let pos = ui.input(|i| i.pointer.interact_pos());
+        let layer = pos.and_then(|p| ui.ctx().layer_id_at(p));
+        if !layer.is_some_and(|l| matches!(l.order, egui::Order::Foreground | egui::Order::Tooltip)) {
+            open = false;
+        }
+    }
+    // Esc closes an open list inside first, then the drop-down.
+    let child_open = egui::Popup::is_any_open(ui.ctx());
+    let mut shown = open;
+    if open {
+        // This popup isn't counted by `Popup::is_any_open`, so keep the same Esc from also leaving
+        // full screen.
+        app.escape_free = false;
+        egui::Popup::menu(&resp).open_bool(&mut shown).close_behavior(egui::PopupCloseBehavior::IgnoreClicks).show(|ui| {
+            ui.vertical(|ui| {
+                ui.horizontal_top(|ui| {
+                    ui.set_min_height(CONTENT_H);
+                    ui.spacing_mut().item_spacing = vec2(1.0, 1.0);
+                    add(ui, app);
+                });
+                let (row, _) = ui.allocate_exact_size(vec2(ui.min_rect().width(), LABEL_H), Sense::hover());
+                title_row(ui, row, id_title, title, launcher, app);
+            });
+        });
+        if !shown && child_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            shown = true;
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(open_id, shown));
+}
+
+/// The icon a collapsed group's button shows.
+fn group_icon(title: &str) -> &'static str {
+    match title {
+        "Clipboard" => "paste",
+        "Font" => "bold",
+        "Paragraph" => "alignLeft",
+        "Styles" => "styles",
+        "Editing" => "find",
+        "Voice" => "dictate",
+        "Tables" => "table",
+        "Links" => "link",
+        _ => "more",
+    }
 }
 
 /// The icon a command's button shows outside its own ribbon group (custom groups, the Quick
@@ -419,8 +621,13 @@ pub fn command_menu(resp: &Response, app: &mut WordApp, id: &str) {
     });
 }
 
-/// "Customize the Ribbon…" and "Customize Quick Access Toolbar…" (context menus).
+/// "Customize the Ribbon…" and "Customize Quick Access Toolbar…" (context menus), and "Show
+/// Quick Access Toolbar" while the toolbar is hidden (#1945).
 pub fn customize_menu_items(ui: &mut Ui, app: &mut WordApp) {
+    if !app.ui.quick_access_toolbar && ui.button(tl!("Show Quick Access Toolbar")).clicked() {
+        let _ = app.run("ui.quickAccessToolbar", serde_json::json!({"value": true}));
+        ui.close();
+    }
     if ui.button(tl!("Customize the Ribbon…")).clicked() {
         crate::dialogs_ribbon::open(app, crate::dialogs_ribbon::Page::Ribbon);
         ui.close();
@@ -499,7 +706,20 @@ pub fn combo(
     items: &[String],
     preview: Option<&dyn Fn(&mut Ui, &str) -> Response>,
 ) -> Option<String> {
-    combo_impl(ui, id, width, current, items, &[], preview, false)
+    combo_impl(ui, id, width, current, items, &[], preview, false, "")
+}
+
+/// [`combo`] whose field and arrow show the hover hint `tip` (already translated).
+pub fn combo_hint(
+    ui: &mut Ui,
+    id: &str,
+    width: f32,
+    current: &str,
+    items: &[String],
+    preview: Option<&dyn Fn(&mut Ui, &str) -> Response>,
+    tip: &str,
+) -> Option<String> {
+    combo_impl(ui, id, width, current, items, &[], preview, false, tip)
 }
 
 /// What [`font_combo`] returns when its list's last entry, Add Font…, is chosen (#582): the
@@ -523,7 +743,7 @@ pub fn font_combo(
     items: &[String],
     preview: Option<&dyn Fn(&mut Ui, &str) -> Response>,
 ) -> Option<String> {
-    combo_impl(ui, id, width, current, items, &[], preview, true)
+    combo_impl(ui, id, width, current, items, &[], preview, true, "")
 }
 
 /// [`font_combo`] with the `recent` families (most recent first) in a Recently Used Fonts
@@ -540,7 +760,21 @@ pub fn font_combo_with_recent(
     recent: &[String],
     preview: Option<&dyn Fn(&mut Ui, &str) -> Response>,
 ) -> Option<String> {
-    combo_impl(ui, id, width, current, items, recent, preview, true)
+    combo_impl(ui, id, width, current, items, recent, preview, true, "")
+}
+
+/// [`font_combo_with_recent`] with a hover hint `tip` (already translated).
+pub fn font_combo_with_recent_hint(
+    ui: &mut Ui,
+    id: &str,
+    width: f32,
+    current: &str,
+    items: &[String],
+    recent: &[String],
+    preview: Option<&dyn Fn(&mut Ui, &str) -> Response>,
+    tip: &str,
+) -> Option<String> {
+    combo_impl(ui, id, width, current, items, recent, preview, true, tip)
 }
 
 /// Indices of the `items` matching `query`, ignoring case: exact matches, then the names starting
@@ -599,6 +833,7 @@ fn combo_impl(
     recent: &[String],
     preview: Option<&dyn Fn(&mut Ui, &str) -> Response>,
     search: bool,
+    tip: &str,
 ) -> Option<String> {
     let mut out = None;
     let edit_id = ui.id().with(("combo_text", id));
@@ -693,6 +928,13 @@ fn combo_impl(
         let fill = if aresp.hovered() { t.hover } else { t.input };
         let arrow_box = egui::epaint::RectShape::new(under, ar_radius, fill, Stroke::new(ARROW_BORDER, t.input_border), egui::StrokeKind::Inside);
         ui.painter().set(arrow_bg, arrow_box);
+        // Not while typing: the family list drops from the field's bottom edge and the hint would cover it.
+        // A field only focused by Tab, with nothing typed, still gets its (delayed) keyboard hint.
+        let typing = focused && text != current;
+        if !tip.is_empty() && !typing && !s.open {
+            show_hint(&resp, tip, &[]);
+            show_hint(&aresp, tip, &[]);
+        }
         icons::paint(ui.painter(), Rect::from_center_size(ar.center(), vec2(DROPDOWN, DROPDOWN)), "dropdown", t.icon, t.accent);
         // The list drops from the box's left edge, as in Word, not from the arrow (#535).
         // The font list closes on a chosen entry or a click outside it, not on its headings.
@@ -860,7 +1102,11 @@ fn list_rows<'a>(
     if let (Some(h), Some((offset, view_h))) = (highlight, scroll) {
         let top = h as f32 * (row_h + ui.spacing().item_spacing.y);
         let bottom = top + row_h;
-        let offset = if top < offset || view_h <= 0.0 {
+        let offset = if view_h <= 0.0 {
+            // No list was visible for the previous query. Start at the first row, including
+            // its heading, rather than scrolling to the first selectable entry below it.
+            0.0
+        } else if top < offset {
             top
         } else if bottom > offset + view_h {
             bottom - view_h
@@ -1017,6 +1263,30 @@ fn icon_text_button_with(ui: &mut Ui, icon: &str, text: &str, font: egui::FontId
     resp
 }
 
+/// A drop-down menu item with `icon` before `text`, at least `min_w` wide.
+pub fn icon_menu_item(ui: &mut Ui, icon: &str, text: &str, shortcut: &str, min_w: f32) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font.clone(), Color32::PLACEHOLDER);
+    let sc = (!shortcut.is_empty()).then(|| ui.painter().layout_no_wrap(shortcut.to_string(), font, Color32::PLACEHOLDER));
+    let pad = ui.spacing().button_padding;
+    let icon_w = 16.0;
+    let sc_w = sc.as_ref().map_or(0.0, |g| g.size().x + 3.0 * pad.x);
+    let w = (pad.x + icon_w + 6.0 + galley.size().x + sc_w + pad.x).max(min_w).max(ui.available_width());
+    let (r, resp) = ui.allocate_exact_size(vec2(w, galley.size().y.max(icon_w) + 2.0 * pad.y), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), text));
+    let st = drawn_state(ui, &resp, false);
+    ui.painter().rect_filled(r, ui.visuals().widgets.inactive.corner_radius, st.fill);
+    let (line, accent) = if ui.is_enabled() { (t.icon, t.accent) } else { (t.text_disabled, t.text_disabled) };
+    let text_c = if ui.is_enabled() { st.text } else { t.text_disabled };
+    icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + pad.x + icon_w / 2.0, r.center().y), vec2(icon_w, icon_w)), icon, line, accent);
+    ui.painter().galley(pos2(r.min.x + pad.x + icon_w + 6.0, r.center().y - galley.size().y / 2.0), galley, text_c);
+    if let Some(g) = sc {
+        ui.painter().galley(pos2(r.max.x - pad.x - g.size().x, r.center().y - g.size().y / 2.0), g, t.text_disabled);
+    }
+    resp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1030,6 +1300,199 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |_| {}).drop_without_applying_deltas();
         let h = ctx.fonts_mut(|f| f.layout_no_wrap("Page Number Mail Merge gjpqy".into(), crate::theme::regular(11.5), Color32::WHITE).size().y);
         assert!(h <= LABEL_LINE_H, "label line is {h} px tall");
+    }
+
+    /// #1945: a ribbon button's right-click menu offers Show Quick Access Toolbar only while the
+    /// toolbar is hidden, and it brings the toolbar back.
+    #[test]
+    fn ribbon_menu_offers_show_quick_access_toolbar_only_while_hidden() {
+        use egui_kittest::kittest::Queryable;
+        let a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        h.run_steps(4);
+        // The ribbon's Bold is the topmost one (the mini toolbar's, when up, sits lower).
+        let ribbon_bold = |h: &egui_kittest::Harness<'static, WordApp>| {
+            h.get_all_by_label("Bold").map(|n| n.rect().center()).min_by(|a, b| a.y.total_cmp(&b.y)).expect("the ribbon has Bold")
+        };
+        let right_click = |h: &mut egui_kittest::Harness<'static, WordApp>, at: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(at));
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() });
+            }
+            h.run_steps(2);
+        };
+        let at = ribbon_bold(&h);
+        right_click(&mut h, at);
+        assert!(h.query_by_label("Add to Quick Access Toolbar").is_some(), "the button's menu opened");
+        assert!(h.query_by_label("Show Quick Access Toolbar").is_none(), "nothing extra while the toolbar shows");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        h.state_mut().run("ui.quickAccessToolbar", serde_json::json!({"value": false})).unwrap();
+        h.run_steps(2);
+        let at = ribbon_bold(&h);
+        right_click(&mut h, at);
+        h.get_by_label("Show Quick Access Toolbar").click();
+        h.run_steps(2);
+        assert!(h.state().ui.quick_access_toolbar, "Show Quick Access Toolbar brings it back");
+        assert!(h.query_by_label("Show Quick Access Toolbar").is_none(), "and closes the menu");
+    }
+
+    fn hint_ctx() -> egui::Context {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::theme::font_definitions(false, false));
+        ctx.run_ui(egui::RawInput::default(), |_| {}).drop_without_applying_deltas();
+        ctx
+    }
+
+    /// Runs `frames` frames of `build` from time `t0` on 10 fps, with `events` in the first; returns
+    /// whether a tooltip layer is showing after the last.
+    fn hint_showing(ctx: &egui::Context, t0: f64, frames: u32, events: Vec<egui::Event>, build: &mut dyn FnMut(&mut Ui)) -> bool {
+        let mut shown = false;
+        for k in 0..frames {
+            let input = egui::RawInput {
+                time: Some(t0 + f64::from(k) * 0.1),
+                predicted_dt: 0.1,
+                events: if k == 0 { events.clone() } else { vec![] },
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| build(ui)).drop_without_applying_deltas();
+            shown = ctx.memory(|m| m.areas().visible_layer_ids().iter().any(|l| l.order == egui::Order::Tooltip));
+        }
+        shown
+    }
+
+    #[test]
+    fn a_combo_shows_its_hint_on_hover_and_not_before() {
+        let sizes: Vec<String> = ["10", "11", "12"].map(String::from).to_vec();
+        let ctx = hint_ctx();
+        let field = std::cell::Cell::new(Rect::NOTHING);
+        let mut build = |ui: &mut Ui| {
+            combo_hint(ui, "f", 150.0, "12", &sizes, None, "Font Size");
+            field.set(ui.min_rect());
+        };
+        assert!(!hint_showing(&ctx, 1.0, 3, vec![], &mut build));
+        let over = field.get().left_center() + vec2(20.0, 0.0);
+        assert!(hint_showing(&ctx, 2.0, 12, vec![egui::Event::PointerMoved(over)], &mut build), "no hint over the field");
+        // Over the arrow too.
+        let ctx = hint_ctx();
+        let mut build2 = |ui: &mut Ui| {
+            combo_hint(ui, "f", 150.0, "12", &sizes, None, "Font Size");
+        };
+        hint_showing(&ctx, 1.0, 3, vec![], &mut build2);
+        let arrow = field.get().right_center() - vec2(6.0, 0.0);
+        assert!(hint_showing(&ctx, 2.0, 12, vec![egui::Event::PointerMoved(arrow)], &mut build2), "no hint over the arrow");
+    }
+
+    #[test]
+    fn a_disabled_control_still_shows_its_hint_on_hover() {
+        let ctx = hint_ctx();
+        let rect = std::cell::Cell::new(Rect::NOTHING);
+        let mut build = |ui: &mut Ui| {
+            ui.add_enabled_ui(false, |ui| {
+                let resp = ui.allocate_response(vec2(60.0, 22.0), Sense::click());
+                show_hint(&resp, "Bold", &["Select text first".to_string()]);
+                rect.set(resp.rect);
+            });
+        };
+        assert!(!hint_showing(&ctx, 1.0, 3, vec![], &mut build));
+        let over = rect.get().center();
+        assert!(hint_showing(&ctx, 2.0, 12, vec![egui::Event::PointerMoved(over)], &mut build), "no hint over a disabled control");
+    }
+
+    #[test]
+    fn a_focus_hint_gives_way_to_a_disabled_control_under_the_pointer() {
+        let ctx = hint_ctx();
+        let off = std::cell::Cell::new(Rect::NOTHING);
+        let mut build = |ui: &mut Ui| {
+            ui.horizontal(|ui| {
+                let (_, a) = ui.allocate_exact_size(vec2(40.0, 20.0), Sense::click());
+                show_hint(&a, "Bold", &[]);
+                ui.add_enabled_ui(false, |ui| {
+                    let b = ui.allocate_response(vec2(40.0, 20.0), Sense::click());
+                    show_hint(&b, "Italic", &["Select text first".to_string()]);
+                    off.set(b.rect);
+                });
+            });
+        };
+        let tips = |ctx: &egui::Context| ctx.memory(|m| m.areas().visible_layer_ids().iter().filter(|l| l.order == egui::Order::Tooltip).count());
+        hint_showing(&ctx, 1.0, 2, vec![], &mut build);
+        let tab = egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        let over = egui::Event::PointerMoved(off.get().center());
+        // Focus the first control, rest the pointer on the disabled one: past the idle time only its reason shows.
+        hint_showing(&ctx, 2.0, 2, vec![tab, over], &mut build);
+        assert!(hint_showing(&ctx, 2.2, 40, vec![], &mut build), "the disabled control shows no hint");
+        assert_eq!(tips(&ctx), 1, "the focused control's hint is drawn beside the disabled control's");
+    }
+
+    #[test]
+    fn a_combo_field_reached_with_tab_shows_its_hint_after_a_delay() {
+        let sizes: Vec<String> = ["10", "11", "12"].map(String::from).to_vec();
+        let ctx = hint_ctx();
+        let focused = std::cell::Cell::new(false);
+        let mut build = |ui: &mut Ui| {
+            combo_hint(ui, "f", 150.0, "12", &sizes, None, "Font Size");
+            focused.set(ui.memory(|m| m.focused()).is_some());
+        };
+        hint_showing(&ctx, 1.0, 2, vec![], &mut build);
+        let tab = egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        assert!(!hint_showing(&ctx, 2.0, 2, vec![tab], &mut build));
+        assert!(focused.get(), "Tab did not focus the field");
+        assert!(hint_showing(&ctx, 2.2, 10, vec![], &mut build), "focused field shows no hint");
+    }
+
+    #[test]
+    fn keyboard_focus_shows_the_hint_after_a_delay_but_not_over_a_menu() {
+        let ctx = hint_ctx();
+        let btn_id = std::cell::Cell::new(None);
+        let menu = std::cell::Cell::new(false);
+        let mut build = |ui: &mut Ui| {
+            let (_, resp) = ui.allocate_exact_size(vec2(40.0, 20.0), Sense::click());
+            btn_id.set(Some(resp.id));
+            if menu.get() {
+                egui::Popup::menu(&resp).open_memory(egui::SetOpenCommand::Bool(true)).show(|ui| ui.label("menu"));
+            }
+            show_hint(&resp, "Bold", &[]);
+        };
+        hint_showing(&ctx, 1.0, 2, vec![], &mut build);
+        let Some(id) = btn_id.get() else { return };
+        // Tab moves the keyboard focus onto the button, as it does for a user.
+        let tab = egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        // Just focused: no hint yet; after the tooltip delay: shown.
+        assert!(!hint_showing(&ctx, 2.0, 2, vec![tab], &mut build));
+        assert!(ctx.memory(|m| m.has_focus(id)), "Tab did not focus the button");
+        assert!(hint_showing(&ctx, 2.2, 10, vec![], &mut build), "focused control shows no hint");
+        // A menu open anywhere hides it.
+        menu.set(true);
+        assert!(!hint_showing(&ctx, 4.0, 3, vec![], &mut build), "hint drawn over an open menu");
+    }
+
+    #[test]
+    fn tooltip_lines_do_not_repeat_a_shortcut_already_in_the_label() {
+        assert_eq!(tooltip_lines("Paste (⌘V)", "⌘V", "", None).0, "Paste (⌘V)");
+        assert_eq!(tooltip_lines("Paste (Ctrl+V)", "Ctrl+V", "", None).0, "Paste (Ctrl+V)");
+        assert_eq!(tooltip_lines("Font (dialog)", "Ctrl+D", "", None).0, "Font (dialog) (Ctrl+D)");
+    }
+
+    #[test]
+    fn tooltip_lines_name_shortcut_group_and_reason() {
+        let (t, n) = tooltip_lines("Bold", "Ctrl+B", "Home > Font", None);
+        assert_eq!(t, "Bold (Ctrl+B)");
+        assert_eq!(n, vec!["Home > Font".to_string()]);
+        let (t, n) = tooltip_lines("Header", "", "", Some("Open a document first"));
+        assert_eq!(t, "Header");
+        assert_eq!(n, vec!["Open a document first".to_string()]);
+        let (_, n) = tooltip_lines("Header", "", "", Some("nothing is selected"));
+        assert_eq!(n, vec!["Nothing is selected".to_string()]);
+        // No reason given: the generic line.
+        let (_, n) = tooltip_lines("Header", "", "", Some(""));
+        assert_eq!(n, vec!["Not available right now".to_string()]);
     }
 
     #[test]
@@ -1225,6 +1688,34 @@ mod tests {
             let drawn = out.shapes.iter().any(|c| has_text(&c.shape, row));
             out.drop_without_applying_deltas();
             assert!(drawn, "keystroke {n}: {row} is drawn");
+        }
+    }
+
+    /// Clearing a query with no matches must reveal the recent section, even before the list
+    /// has ever had a visible viewport. A matching query is the control for a measured viewport.
+    #[test]
+    fn clearing_a_font_query_keeps_the_recent_heading_visible() {
+        use egui::accesskit::Role;
+        use egui_kittest::kittest::{By, Queryable};
+        for query in ["a", "x"] {
+            // A short list clamps the bad offset to zero and would hide this regression.
+            let fonts: Vec<String> = (0..24).map(|n| format!("Family {n:02}")).collect();
+            let recent: Vec<String> = ["Georgia", "Courier New"].map(String::from).to_vec();
+            let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 600.0)).build_ui(move |ui| {
+                font_combo_with_recent(ui, "recent_ci_reduced", 150.0, "", &fonts, &recent, None);
+            });
+            h.run_steps(2);
+            h.get(By::new().role(Role::TextInput)).focus();
+            h.step();
+            h.event(egui::Event::Text(query.into()));
+            h.run_steps(2);
+            assert!(h.query(By::new().role(Role::TextInput).value(query)).is_some());
+            assert!(h.query_by_label("Recently Used Fonts").is_none());
+            h.key_press(egui::Key::Backspace);
+            h.run_steps(2);
+            assert!(h.query(By::new().role(Role::TextInput).value("")).is_some());
+            assert!(h.query_by_label("Recently Used Fonts").is_some(), "cleared query {query:?}");
+            assert!(h.query_by_label("All Fonts").is_some());
         }
     }
 
