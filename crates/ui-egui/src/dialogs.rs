@@ -471,6 +471,12 @@ pub enum Dialog {
         #[serde(skip)]
         basis: Box<TableForm>,
     },
+    /// Table Layout › Cell Margins: edits the table's default margins.
+    CellMargins {
+        form: Box<CellMarginsForm>,
+        #[serde(skip)]
+        basis: Box<CellMarginsForm>,
+    },
     /// Opening a password-protected document (#55): the password, then `file.open` with
     /// `params` again. The password is never serialised or printed.
     Password {
@@ -557,6 +563,47 @@ pub struct TableForm {
     pub cell_width: f32,
     /// `top`, `center` or `bottom`.
     pub valign: String,
+}
+
+/// The Cell Margins dialog's values, in the interface unit.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellMarginsForm {
+    pub top: f32,
+    pub left: f32,
+    pub bottom: f32,
+    pub right: f32,
+}
+
+impl CellMarginsForm {
+    pub(crate) fn read(app: &WordApp) -> Option<Self> {
+        let (tp, _, _) = app.session.sel.focus.path.cell()?;
+        let table = app.session.doc.table(app.session.sel.focus.story, &tp)?;
+        let scale = crate::options::unit().pt_per_unit();
+        let style = table.props.style.as_deref().and_then(|id| app.session.doc.styles.table_style(id));
+        let margins = table.props.cell_margins.or_else(|| style.and_then(|s| s.parts.cell_margins)).unwrap_or([0.0, 5.4, 0.0, 5.4]);
+        let field = |value: f32, fallback: f32| if value.is_finite() { value.clamp(0.0, 144.0) / scale } else { fallback / scale };
+        Some(Self { top: field(margins[0], 0.0), left: field(margins[1], 5.4), bottom: field(margins[2], 0.0), right: field(margins[3], 5.4) })
+    }
+
+    /// Send all four values together: changing one side must preserve the other three.
+    pub(crate) fn changes(&self, basis: &CellMarginsForm) -> Value {
+        if [self.top, self.left, self.bottom, self.right]
+            .into_iter()
+            .zip([basis.top, basis.left, basis.bottom, basis.right])
+            .all(|(a, b)| (a - b).abs() <= 1e-4)
+        {
+            return json!({});
+        }
+        let scale = crate::options::unit().pt_per_unit();
+        let points = |v: f32, old: f32| if v.is_finite() { (v * scale).clamp(0.0, 144.0) } else { old * scale };
+        json!({
+            "top": points(self.top, basis.top),
+            "left": points(self.left, basis.left),
+            "bottom": points(self.bottom, basis.bottom),
+            "right": points(self.right, basis.right),
+        })
+    }
 }
 
 impl TableForm {
@@ -832,6 +879,7 @@ impl Dialog {
             Dialog::MatchFields { .. } => "matchFields",
             Dialog::CheckErrors { .. } => "checkErrors",
             Dialog::TableProperties { .. } => "tableProperties",
+            Dialog::CellMargins { .. } => "tableCellMargins",
             Dialog::Password { .. } => "password",
             Dialog::EncryptPassword { .. } => "encryptPassword",
             Dialog::DefineList { .. } => "defineList",
@@ -1038,6 +1086,10 @@ impl Dialog {
             "tableProperties" => {
                 let form = Box::new(TableForm::read(app)?);
                 Dialog::TableProperties { basis: form.clone(), form }
+            }
+            "tableCellMargins" => {
+                let form = Box::new(CellMarginsForm::read(app)?);
+                Dialog::CellMargins { basis: form.clone(), form }
             }
             "enclose" => {
                 // The selection's text and its enclosure, if it has one.
@@ -1280,6 +1332,7 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context) {
         Dialog::MatchFields { .. } => "Match Fields",
         Dialog::CheckErrors { .. } => "Check for Errors",
         Dialog::TableProperties { .. } => "Table Properties",
+        Dialog::CellMargins { .. } => "Cell Margins",
         Dialog::Password { .. } => "Password",
         Dialog::EncryptPassword { .. } => "Encrypt with Password",
         Dialog::DefineList { .. } => "Define New Multilevel List",
@@ -1931,6 +1984,17 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 let changes = form.changes(basis);
                 if changes.as_object().is_some_and(|m| !m.is_empty()) {
                     let _ = app.run("table.properties", changes);
+                }
+            }
+            ok || cancel
+        }
+        Dialog::CellMargins { form, basis } => {
+            cell_margins_dialog(ui, form);
+            let (ok, cancel) = buttons(ui, tl!("OK"));
+            if ok {
+                let changes = form.changes(basis);
+                if changes.as_object().is_some_and(|m| !m.is_empty()) {
+                    let _ = app.run("table.cellMargins", changes);
                 }
             }
             ok || cancel
@@ -3050,6 +3114,18 @@ fn table_properties(ui: &mut Ui, f: &mut TableForm) {
             }
         });
         ui.end_row();
+    });
+}
+
+fn cell_margins_dialog(ui: &mut Ui, f: &mut CellMarginsForm) {
+    let unit = crate::options::unit();
+    let max = 144.0 / unit.pt_per_unit();
+    egui::Grid::new("cell_margins").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+        for (label, value) in [("Top:", &mut f.top), ("Left:", &mut f.left), ("Bottom:", &mut f.bottom), ("Right:", &mut f.right)] {
+            ui.label(tl!(label));
+            ui.add(egui::DragValue::new(value).speed(0.01).range(0.0..=max).measure(unit).max_decimals(2));
+            ui.end_row();
+        }
     });
 }
 
