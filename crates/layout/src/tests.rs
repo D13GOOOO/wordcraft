@@ -953,6 +953,44 @@ fn positional_tab_after_only_a_bookmark_stays_on_its_line() {
 }
 
 #[test]
+fn narrow_cells_keep_their_width() {
+    let mut p = wordcraft_doc::Paragraph::with_text("WW", wordcraft_doc::CharProps { size: Some(6.0), ..Default::default() });
+    p.props.space_before = Some(0.0);
+    p.props.space_after = Some(0.0);
+    let mut d = Document::new();
+    d.body = vec![wordcraft_doc::para_block(p.clone())];
+    let wide = lay(&d);
+    let advance = wide.pages[0]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Placed::Lines { para, .. } => Some(para.clusters.iter().map(|c| c.adv).sum::<f32>()),
+            _ => None,
+        })
+        .unwrap();
+    let narrow = advance - 0.25;
+    assert!(narrow > 6.0 && advance < 12.0, "probe width {advance}");
+    for (width, expected_lines) in [(narrow, 2), (1.0, 2), (12.0, 1)] {
+        let mut table = Table::new(1, 1, width);
+        table.props.style = None;
+        table.props.fixed = true;
+        table.props.cell_margins = Some([0.0; 4]);
+        table.rows[0].cells[0].blocks = vec![wordcraft_doc::para_block(p.clone())];
+        d.body = vec![std::sync::Arc::new(Block::Table(table))];
+        let l = lay(&d);
+        let lines = l.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Placed::Lines { para, .. } => Some(para.lines.len()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(lines, expected_lines, "cell width {width}, text width {advance}");
+    }
+}
+
+#[test]
 fn lists_get_labels_and_indent() {
     let mut d = Document::from_text("one\ntwo\nthree");
     let id = d.numbering.add_list(wordcraft_doc::ListKind::Numbered);
@@ -4685,6 +4723,136 @@ fn a_row_with_less_room_than_its_minimum_height_moves_on_whole() {
     assert_eq!(first_row_line_page(Some(63.6)), Some(1), "a row with a minimum height that doesn't fit moves on");
 }
 
+/// #1742: a paragraph that leaves `room` points of the letter page's 648 pt body, then the table
+/// `build` shapes (one 468 pt column, `rows` rows of one short line each); with `room` 648 the
+/// table comes first, at the top of the page. Returns the layout and, per page, the table rows
+/// that have a cell there.
+fn at_least_rows(room: f32, rows: usize, build: impl Fn(&mut Table)) -> (DocLayout, Vec<Vec<usize>>) {
+    let mut d = Document::from_text("Text above the table");
+    d.para_mut(StoryRef::Body, &Path::top(0)).unwrap().props.space_after = Some(648.0 - room - 14.0);
+    let mut t = Table::new(rows, 1, 468.0);
+    build(&mut t);
+    let at = if room >= 648.0 { 0 } else { 1 };
+    d.insert_block(StoryRef::Body, &Path::top(at), wordcraft_doc::Block::Table(t)).unwrap();
+    let l = lay(&d);
+    let pages = l
+        .pages
+        .iter()
+        .map(|p| {
+            let mut rows: Vec<usize> =
+                p.items.iter().filter_map(|i| if let Placed::Cell { row, cell: 0, .. } = i { Some(*row) } else { None }).collect();
+            rows.dedup();
+            rows
+        })
+        .collect();
+    (l, pages)
+}
+
+fn lines_in_cell(n: usize, what: &str) -> Vec<std::sync::Arc<wordcraft_doc::Block>> {
+    (1..=n).map(|k| wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text(&format!("{what} {k}"), Default::default()))).collect()
+}
+
+#[test]
+fn an_at_least_row_with_no_room_starts_the_next_page_whole_either_way_breaking_is_set() {
+    use wordcraft_doc::props::HeightRule;
+    // Word for Mac 16.113, A4 with about 2.6 cm (74 pt) left: row 2, at least 8 cm (226.8 pt),
+    // starts page 2 whole and row 1 stays on page 1, whether the row may break across pages or not.
+    for cant_split in [false, true] {
+        let (_, pages) = at_least_rows(74.0, 2, |t| {
+            t.rows[1].props.height = Some(226.8);
+            t.rows[1].props.height_rule = HeightRule::AtLeast;
+            t.rows[1].props.cant_split = cant_split;
+        });
+        assert_eq!(pages, vec![vec![0], vec![1]], "cant_split {cant_split}");
+    }
+}
+
+#[test]
+fn an_at_least_row_with_centred_lines_moves_whole_and_centres_them_in_its_height() {
+    use wordcraft_doc::props::{HeightRule, VAlign};
+    // Word: 10 short lines, centred vertically, in an "at least 8 cm" row with 2.6 cm left. The
+    // lines would split there, but the whole row goes to page 2 and they sit in the middle of it.
+    let (l, pages) = at_least_rows(74.0, 2, |t| {
+        t.rows[1].props.height = Some(226.8);
+        t.rows[1].props.height_rule = HeightRule::AtLeast;
+        t.rows[1].cells[0].props.valign = Some(VAlign::Center);
+        t.rows[1].cells[0].blocks = lines_in_cell(10, "Line");
+    });
+    assert_eq!(pages, vec![vec![0], vec![1]]);
+    let page = &l.pages[1];
+    let Some(cell) = page.items.iter().find_map(|i| if let Placed::Cell { rect, row: 1, .. } = i { Some(*rect) } else { None }) else {
+        panic!("no cell on page 2")
+    };
+    assert!(cell.h >= 226.8 - 0.01 && cell.h < 226.8 + 1.5, "the row keeps its minimum height: {}", cell.h);
+    let ys: Vec<f32> = page
+        .items
+        .iter()
+        .filter_map(|i| if let Placed::Lines { y, path, .. } = i { (path.0.first() == Some(&1)).then_some(*y) } else { None })
+        .collect();
+    assert_eq!(ys.len(), 10, "all ten lines on page 2: {ys:?}");
+    let (top, bottom) = (ys.iter().cloned().fold(f32::MAX, f32::min), ys.iter().cloned().fold(f32::MIN, f32::max));
+    let (above, below) = (top - cell.y, cell.y + cell.h - bottom);
+    assert!(above > 30.0 && below > 30.0, "the lines are centred in the row: {above} above, {below} below the line tops");
+}
+
+#[test]
+fn an_at_least_row_taller_than_a_page_splits_from_the_top_of_the_next_page() {
+    use wordcraft_doc::props::HeightRule;
+    // A row at least 700 pt tall (the body is 648 pt) holding 80 lines: it can't fit on any page,
+    // so it splits, but it starts on a fresh page rather than in the 200 pt left under the text.
+    let (_, pages) = at_least_rows(200.0, 1, |t| {
+        t.rows[0].props.height = Some(700.0);
+        t.rows[0].props.height_rule = HeightRule::AtLeast;
+        t.rows[0].cells[0].blocks = lines_in_cell(80, "Line");
+    });
+    assert_eq!(pages.first(), Some(&vec![]), "nothing of the row under the text: {pages:?}");
+    assert!(pages.len() >= 3 && pages[1..].iter().all(|p| p == &vec![0]), "it splits from page 2 on: {pages:?}");
+}
+
+#[test]
+fn an_at_least_row_at_the_top_of_a_page_splits_instead_of_moving_on() {
+    use wordcraft_doc::props::HeightRule;
+    // At the top of a page (or under the header rows repeated there) moving on gains nothing: a
+    // row taller than the room splits, and pagination ends.
+    let (_, pages) = at_least_rows(648.0, 1, |t| {
+        t.rows[0].props.height = Some(700.0);
+        t.rows[0].props.height_rule = HeightRule::AtLeast;
+        t.rows[0].cells[0].blocks = lines_in_cell(80, "Line");
+    });
+    assert!(pages.len() >= 2 && pages.iter().all(|p| p == &vec![0]), "{pages:?}");
+    // A 100 pt header row, then a row at least 600 pt with 80 lines: under the header only 548 pt
+    // are left on each page, so the row splits there instead of running past the bottom margin.
+    let (l, pages) = at_least_rows(648.0, 2, |t| {
+        t.rows[0].props.header = true;
+        t.rows[0].props.height = Some(100.0);
+        t.rows[0].props.height_rule = HeightRule::AtLeast;
+        t.rows[1].props.height = Some(600.0);
+        t.rows[1].props.height_rule = HeightRule::AtLeast;
+        t.rows[1].cells[0].blocks = lines_in_cell(80, "Line");
+    });
+    assert!(pages.len() >= 3 && pages.iter().all(|p| p == &vec![0, 1]), "{pages:?}");
+    for p in &l.pages {
+        let bottom = p.items.iter().filter_map(|i| if let Placed::Cell { rect, .. } = i { Some(rect.y + rect.h) } else { None }).fold(0.0, f32::max);
+        assert!(bottom <= 720.0 + 0.5, "a row part runs past the bottom margin to {bottom}");
+    }
+}
+
+#[test]
+fn repeated_header_moves_with_a_first_row_that_moves_on_whole() {
+    use wordcraft_doc::props::HeightRule;
+    // A 20 pt header, then a row at least 200 pt holding eight lines, with 100 pt left: the row
+    // moves on whole, so the header goes with it rather than staying alone at the foot of page 1.
+    let (_, pages) = at_least_rows(100.0, 2, |t| {
+        t.rows[0].props.header = true;
+        t.rows[0].props.height = Some(20.0);
+        t.rows[0].props.height_rule = HeightRule::AtLeast;
+        t.rows[1].props.height = Some(200.0);
+        t.rows[1].props.height_rule = HeightRule::AtLeast;
+        t.rows[1].cells[0].blocks = lines_in_cell(8, "Line");
+    });
+    assert_eq!(pages, vec![vec![], vec![0, 1]]);
+}
+
 #[test]
 fn text_overflowing_an_exact_row_is_clipped_to_it() {
     use wordcraft_doc::props::HeightRule;
@@ -5668,10 +5836,46 @@ fn hyphenation_and_proofing_follow_each_runs_language() {
     assert_eq!(flagged, ["żeka", "beautifull"]);
     // The layout and the Review commands report the same issues.
     let p = d.para(StoryRef::Body, &Path::top(0)).unwrap();
-    let issues = para::paragraph_issues(p, &para::proof_runs(&d, p, None), &Default::default(), true);
+    let issues = para::paragraph_issues(p, &para::proof_runs(&d, p, None), &Default::default(), true, false);
     assert_eq!(issues.iter().map(|i| (i.start, i.end, i.kind == wordcraft_proof::IssueKind::Grammar)).collect::<Vec<_>>(), para.issues);
     assert_eq!(issues[0].lang, wordcraft_proof::ProofLang::Pl);
     assert_eq!(issues[1].lang, wordcraft_proof::ProofLang::En);
+}
+
+/// A list item may be a fragment: the drawn squiggles skip its first word's missing capital, a
+/// plain paragraph's keep it (#1741). The list comes from the paragraph's own numbering or its
+/// style's; a paragraph that switches the style's list off (`num: 0`) is plain again.
+#[test]
+fn list_item_first_word_gets_no_capital_squiggle() {
+    use wordcraft_doc::props::NumRef;
+    let opts = LayoutOptions { proofing: true, ..LayoutOptions::default() };
+    let grammar_squiggles = |d: &Document| -> usize {
+        let l = layout(d, &mut LayoutCache::new(), &opts);
+        l.pages[0].items.iter().map(|i| if let Placed::Lines { para, .. } = i { para.issues.iter().filter(|x| x.2).count() } else { 0 }).sum()
+    };
+    let mut d = Document::from_text("item one");
+    let id = d.numbering.add_list(wordcraft_doc::ListKind::Bullet);
+    assert_eq!(grammar_squiggles(&d), 1, "plain paragraph");
+    // Direct numbering.
+    d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 0), &|p| p.numbering = Some(NumRef { num: id, level: 0 })).unwrap();
+    assert_eq!(grammar_squiggles(&d), 0, "own numbering");
+    // Numbering from the paragraph style.
+    d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 0), &|p| {
+        p.numbering = None;
+        p.style = Some("Bullets".into());
+    })
+    .unwrap();
+    d.styles.upsert(wordcraft_doc::Style {
+        id: "Bullets".into(),
+        name: "Bullets".into(),
+        kind: wordcraft_doc::StyleKind::Paragraph,
+        para: ParaProps { numbering: Some(NumRef { num: id, level: 0 }), ..Default::default() },
+        ..Default::default()
+    });
+    assert_eq!(grammar_squiggles(&d), 0, "style numbering");
+    // `num: 0` over the style's list.
+    d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 0), &|p| p.numbering = Some(NumRef { num: 0, level: 0 })).unwrap();
+    assert_eq!(grammar_squiggles(&d), 1, "list switched off");
 }
 
 /// Text in a language WordCraft can't proof gets no spelling marks, and "Do not check spelling
@@ -5997,6 +6201,29 @@ fn a_text_frame_in_a_cell_floats_beside_the_text() {
     let (frame, text) = (at(0), at(1));
     assert!((frame.top - text.top).abs() < 0.5, "the frame takes no room: {} vs {}", frame.top, text.top);
     assert!(frame.x > text.x + 200.0, "right-aligned in the cell: {} vs {}", frame.x, text.x);
+}
+
+/// Word has no frames inside a text box: a paragraph there whose style carries a frame (a
+/// letterhead's "Weld" and "Governor" styles, framed at the page's left) runs in the box's text
+/// like any other. WordCraft placed each one apart at the frame's offset, so two of them in a row
+/// were drawn over each other (#2357).
+#[test]
+fn a_frame_inside_a_text_box_flows_with_its_text() {
+    use wordcraft_doc::props::TextFrame;
+    let mut d = Document::from_text("Body");
+    let id = text_box(&mut d, 0, "", 150.0, 120.0, Default::default());
+    let frame = TextFrame { x: 27.3, y: 7.05, h_anchor: "page".into(), v_anchor: "text".into(), wrap: "notBeside".into(), ..Default::default() };
+    let para = |text: &str, framed: bool| {
+        let mut p = wordcraft_doc::Paragraph::with_text(text, Default::default());
+        p.props.frame = framed.then(|| frame.clone());
+        wordcraft_doc::para_block(p)
+    };
+    d.parts.get_mut(&id).unwrap().blocks = vec![para("Name", true), para("Secretary", true), para("Commissioner", false)];
+    let l = lay(&d);
+    let top = |i: usize| l.caret(&Pos { story: StoryRef::Part(id), path: Path::top(i), off: 0 }).unwrap().top;
+    let (name, secretary, commissioner) = (top(0), top(1), top(2));
+    assert!(secretary > name + 5.0, "the second framed paragraph goes under the first: {secretary} vs {name}");
+    assert!(commissioner > secretary + 5.0, "the text after them follows: {commissioner} vs {secretary}");
 }
 
 /// Where a list paragraph's text starts when its style has indents of its own (measured in Word,
@@ -6445,6 +6672,57 @@ fn kerning_follows_kerning_for_fonts_like_word() {
     let mut d = Document::new();
     d.styles.default_chr.kern = None;
     assert!(d.styles.resolve_char(None, &Default::default()).kern == 0.0, "no Kerning for fonts: not kerned");
+}
+
+/// The ligatures a document asks for (`w14:ligatures`, Word's Font ▸ Advanced ▸ Ligatures) are
+/// the ones shaped: `none` draws every letter, `standard` turns them back on over a style that
+/// turned them off. Without a value WordCraft keeps its default, standard and contextual.
+#[test]
+fn ligatures_follow_w14_ligatures() {
+    use wordcraft_doc::props::{CharProps, Ligatures};
+    use wordcraft_doc::styles::{Style, StyleKind};
+    let text = "office affinity";
+    let face = wordcraft_fonts::word::resolve("Source Serif 4", false, false).face;
+    assert_eq!(wordcraft_fonts::shape(&face, "fi", &[], |c| c).len(), 1, "the test font draws fi as one glyph");
+    let glyphs = |style: Option<Ligatures>, run: Option<Ligatures>| {
+        let mut d = Document::new();
+        d.styles.upsert(Style {
+            id: "Plain".into(),
+            name: "Plain".into(),
+            kind: StyleKind::Character,
+            chr: CharProps { ligatures: style, ..Default::default() },
+            ..Default::default()
+        });
+        let chr =
+            CharProps { style: Some("Plain".into()), font: Some("Source Serif 4".into()), size: Some(14.0), ligatures: run, ..Default::default() };
+        d.body = vec![wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text(text, chr))];
+        let l = lay(&d);
+        l.pages
+            .iter()
+            .flat_map(|p| &p.items)
+            .map(|it| if let Placed::Lines { story: StoryRef::Body, para, .. } = it { para.glyphs.len() } else { 0 })
+            .sum::<usize>()
+    };
+    let letters = text.chars().count();
+    let none = Ligatures::from_ooxml("none");
+    let standard = Ligatures::from_ooxml("standard");
+    assert!(glyphs(None, None) < letters, "WordCraft's default draws ligatures");
+    assert_eq!(glyphs(None, none), letters, "none: one glyph per letter");
+    assert_eq!(glyphs(none, None), letters, "none from the character style");
+    assert!(glyphs(none, standard) < letters, "standard over a style with none draws them again");
+    assert_eq!(glyphs(None, Ligatures::from_ooxml("contextual")), letters, "fi is a standard ligature, not a contextual one");
+}
+
+/// Each flag of `w14:ligatures` sets its OpenType feature: standard `liga`, contextual `clig`,
+/// historical `hlig`, discretional `dlig`.
+#[test]
+fn ligature_flags_map_to_opentype_features() {
+    use wordcraft_doc::props::Ligatures;
+    let f = |t: &[u8; 4], v: u32| wordcraft_fonts::feature_value(t, v);
+    let hd = Ligatures { historical: true, discretional: true, ..Default::default() };
+    assert_eq!(para::ligature_features(hd), [f(b"liga", 0), f(b"clig", 0), f(b"hlig", 1), f(b"dlig", 1)]);
+    let sc = Ligatures { standard: true, contextual: true, ..Default::default() };
+    assert_eq!(para::ligature_features(sc), [f(b"liga", 1), f(b"clig", 1), f(b"hlig", 0), f(b"dlig", 0)]);
 }
 
 /// Word's automatic (HTML-style) paragraph spacing, measured in Word for Windows: 14 pt at any
@@ -7802,4 +8080,169 @@ fn kept_prefix_stays_together() {
     middle.props.height_rule = wordcraft_doc::props::HeightRule::AtLeast;
     t.rows.insert(1, middle);
     assert_eq!(row_keep_pages(&d), [1, 1, 2], "an oversized follower cannot separate an already placed kept prefix");
+}
+
+/// Word and Adobe: a behind-text frame participates in a cell's vertical alignment,
+/// even when its anchor paragraph has no inline picture (synthetic two-cell probe).
+#[test]
+fn cell_frame_centres_empty() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    use wordcraft_doc::props::{HeightRule, VAlign};
+    let mut d = Document::new();
+    let mut t = Table::new(1, 2, 468.0);
+    t.rows[0].props.height = Some(182.5);
+    t.rows[0].props.height_rule = HeightRule::Exact;
+    for (ci, cell) in t.rows[0].cells.iter_mut().enumerate() {
+        cell.props.valign = Some(VAlign::Center);
+        cell.props.margins = Some([0.0; 4]);
+        let mut p = wordcraft_doc::Paragraph::with_text("", Default::default());
+        p.props.space_before = Some(0.0);
+        p.props.space_after = Some(0.0);
+        let float = Float { wrap: Wrap::BehindText, h_rel: Anchor::Column, v_rel: Anchor::Paragraph, y: -12.75, ..Default::default() };
+        p.insert_object(0, picture(231.0, 180.75, float), &Default::default()).unwrap();
+        if ci == 0 {
+            p.insert_object(p.text.len(), picture(207.0, 155.25, Default::default()), &Default::default()).unwrap();
+        }
+        cell.blocks = vec![wordcraft_doc::para_block(p)];
+    }
+    d.insert_block(StoryRef::Body, &Path::top(0), wordcraft_doc::Block::Table(t)).unwrap();
+    let l = lay(&d);
+    let frames: Vec<_> = l.pages[0]
+        .items
+        .iter()
+        .filter_map(|item| if let Placed::Object { rect, wrap: Wrap::BehindText, .. } = item { Some(rect) } else { None })
+        .collect();
+    assert_eq!(frames.len(), 2);
+    assert!((frames[0].y - frames[1].y).abs() < 0.01, "frames must align: {frames:?}");
+    assert!((frames[0].y - 66.5).abs() < 0.5, "Word frame top: {frames:?}");
+}
+
+#[test]
+fn section_start_summed_spacing() {
+    for summed in [false, true] {
+        let mut d = Document::from_text("Section end\nSection start");
+        d.settings.sum_paragraph_spacing = summed;
+        let first = d.para_mut(StoryRef::Body, &Path::top(0)).unwrap();
+        first.props.space_after = Some(10.0);
+        first.section = Some(Box::default());
+        let next = d.para_mut(StoryRef::Body, &Path::top(1)).unwrap();
+        next.props.space_before = Some(24.0);
+        let l = lay(&d);
+        let top = l.pages[1]
+            .items
+            .iter()
+            .find_map(|it| match it {
+                Placed::Lines { path, y, .. } if *path == Path::top(1) => Some(*y),
+                _ => None,
+            })
+            .unwrap();
+        let gap = if summed { 24.0 } else { 14.0 };
+        assert!((top - d.last_section.margin_top - gap).abs() < 0.01, "summed={summed}: {top}");
+    }
+}
+
+#[test]
+fn partial_margins_inherit() {
+    let height = |top, bottom| {
+        let mut table = Table::new(1, 1, 200.0);
+        table.props.style = None;
+        table.props.cell_margins = Some([top, 2.25, bottom, 2.75]);
+        let cell = &mut table.rows[0].cells[0];
+        cell.props.margins = None;
+        cell.props.partial_margins = Some([None, Some(0.0), None, None]);
+        let mut para = Paragraph::with_text("Point", Default::default());
+        para.props.line_spacing = Some(wordcraft_doc::props::LineSpacing::Exactly(11.0));
+        para.props.space_before = Some(0.0);
+        para.props.space_after = Some(0.0);
+        cell.blocks = vec![wordcraft_doc::para_block(para)];
+        let mut doc = Document::new();
+        doc.body = vec![std::sync::Arc::new(Block::Table(table))];
+        let layout = lay(&doc);
+        layout.pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Placed::Cell { rect, .. } => Some(rect.h),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert!((height(2.75, 2.75) - 16.5).abs() < 0.01);
+    assert!((height(6.0, 8.0) - 25.0).abs() < 0.01);
+}
+
+/// Exact line pitch keeps the text baseline even when an equation has a deep denominator.
+#[test]
+fn exact_math_keeps_run_baseline() {
+    use wordcraft_doc::props::LineSpacing;
+    for display in [false, true] {
+        for spacing in [LineSpacing::Exactly(12.0), LineSpacing::AtLeast(12.0), LineSpacing::Multiple(1.0)] {
+            let mut baseline = Vec::new();
+            let mut following = Vec::new();
+            for equation in [None, Some("a/(b/c)")] {
+                let chr = wordcraft_doc::CharProps { font: Some(wordcraft_doc::styles::BODY_FONT.into()), size: Some(12.0), ..Default::default() };
+                let mut p = wordcraft_doc::Paragraph::new();
+                p.props.line_spacing = Some(spacing);
+                match equation {
+                    None => {
+                        p.insert_text(0, "x", &chr).unwrap();
+                    }
+                    Some(text) => p
+                        .insert_object(
+                            0,
+                            InlineObject::Equation {
+                                linear: text.into(),
+                                display,
+                                math: wordcraft_doc::math::Math { nodes: wordcraft_doc::math::parse_linear(text), ..Default::default() },
+                            },
+                            &chr,
+                        )
+                        .unwrap(),
+                }
+                let mut d = Document::from_text("After");
+                d.body.insert(0, wordcraft_doc::para_block(p));
+                let l = lay(&d);
+                let (y, para) = l.pages[0]
+                    .items
+                    .iter()
+                    .find_map(|it| match it {
+                        Placed::Lines { path, y, para, .. } if *path == Path::top(0) => Some((*y, para)),
+                        _ => None,
+                    })
+                    .unwrap();
+                baseline.push(y + para.lines[0].baseline);
+                following.push(para_at(&l, &[1])[0].1);
+            }
+            match spacing {
+                LineSpacing::Exactly(_) => {
+                    assert!((baseline[0] - baseline[1]).abs() < 0.01, "display={display}: {baseline:?}");
+                    assert!((following[0] - following[1]).abs() < 0.01, "fixed pitch: {following:?}");
+                }
+                _ => assert!(following[1] > following[0], "minimum pitch grows for math: {following:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn float_font_keeps_line_height() {
+    use wordcraft_doc::CharProps;
+    use wordcraft_doc::para::{Float, Wrap};
+
+    let pitch = |wrap, size| {
+        let small = CharProps { size: Some(9.0), ..Default::default() };
+        let mut p = wordcraft_doc::Paragraph::with_text("Anchor", small.clone());
+        p.mark = small;
+        p.props.space_after = Some(0.0);
+        p.insert_object(0, picture(1.0, 1.0, Float { wrap, ..Default::default() }), &CharProps { size: Some(size), ..Default::default() }).unwrap();
+        let mut d = Document::from_text("After");
+        d.body.insert(0, wordcraft_doc::para_block(p));
+        let l = lay(&d);
+        l.caret(&Pos::body(1, 0)).unwrap().top - l.caret(&Pos::body(0, 0)).unwrap().top
+    };
+
+    for wrap in [Wrap::BehindText, Wrap::InFrontOfText] {
+        assert!((pitch(wrap, 40.0) - pitch(wrap, 9.0)).abs() < 0.01, "{wrap:?}");
+    }
+    assert!(pitch(Wrap::Inline, 40.0) > pitch(Wrap::Inline, 9.0));
 }

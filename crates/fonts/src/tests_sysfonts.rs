@@ -162,21 +162,26 @@ fn fallback_lookups_are_remembered_until_fonts_load() {
     let db = FontDb::with_font_dirs(vec![dir]);
     db.set_system_fallback(false);
     let latin = db.face(FALLBACK_FAMILY, "Regular");
-    let thai = 'ก';
-    assert!(db.fallback_for(thai, latin.id()).is_none(), "no bundled Thai font");
+    // A cache-miss fixture must stay absent even when Thai Craft fonts are embedded.
+    // The coverage-index regression below also uses this supplementary private-use range.
+    let missing = '\u{F0001}';
+    assert!(db.fallback_for(missing, latin.id()).is_none(), "no bundled font covers the cache-miss fixture");
+    if crate::CRAFT_FONTS.iter().any(|font| font.scripts.contains(&"Thai")) {
+        assert!(db.fallback_for('ก', latin.id()).is_some(), "the embedded Thai face supplies its glyph");
+    }
     let a = db.fallback_for('A', latin.id()).unwrap();
     assert_eq!(db.fallback_for('A', latin.id()).unwrap().id(), a.id(), "the same answer from the cache");
     {
         let cache = db.fallbacks.read().unwrap();
         assert_eq!(cache.faces, db.read_faces().len());
-        assert!(cache.map.contains_key(&(thai, latin.id())) && cache.map.contains_key(&('A', latin.id())));
+        assert!(cache.map.contains_key(&(missing, latin.id())) && cache.map.contains_key(&('A', latin.id())));
     }
     // Loading fonts (here, the installed family) makes the remembered answers stale.
     assert_eq!(db.face(FAMILY, "Regular").family, FAMILY);
     assert_eq!(db.fallback_for('A', latin.id()).unwrap().id(), a.id());
     let cache = db.fallbacks.read().unwrap();
     assert_eq!(cache.faces, db.read_faces().len());
-    assert!(!cache.map.contains_key(&(thai, latin.id())), "entries from before the fonts loaded are dropped");
+    assert!(!cache.map.contains_key(&(missing, latin.id())), "entries from before the fonts loaded are dropped");
 }
 
 #[test]
@@ -186,6 +191,45 @@ fn the_scan_reads_names_without_loading_the_font() {
     assert!(file_face_names(&dir.join("damaged.ttf")).is_empty());
     assert!(file_face_names(&dir.join("readme.txt")).is_empty());
     assert!(file_face_names(&dir.join("missing.ttf")).is_empty());
+}
+
+/// [`renamed`]`(file)` with its `glyf` table record tagged `tag`.
+fn with_glyf_as(file: &str, tag: &[u8; 4]) -> Vec<u8> {
+    let mut data = renamed(file);
+    let tables = u16::from_be_bytes([data[4], data[5]]) as usize;
+    let glyf = (0..tables).map(|r| 12 + r * 16).find(|&at| &data[at..at + 4] == b"glyf").unwrap();
+    data[glyf..glyf + 4].copy_from_slice(tag);
+    data
+}
+
+#[test]
+fn faces_without_outlines_are_not_cataloged() {
+    // The Bold's `glyf` table is tagged `hvgl` here, as in a face with outlines only in Apple's
+    // `hvgl` table. Its cmap maps characters, and skrifa reads no outline from it.
+    let hvgl = with_glyf_as("SourceSans3-Bold.ttf", b"hvgl");
+    let font = skrifa::FontRef::new(&hvgl).unwrap();
+    assert!(font.outline_glyphs().get(font.charmap().map('A').unwrap()).is_none());
+    let dir = font_dir("outlines");
+    std::fs::write(dir.join("Sub/Sysfont-Bold.TTF"), &hvgl).unwrap();
+    assert!(file_face_names(&dir.join("Sub/Sysfont-Bold.TTF")).is_empty());
+    // In a collection, the Semibold, which has outlines, is listed.
+    std::fs::write(dir.join("Sysfont.ttc"), collection(&[hvgl, renamed("SourceSans3-Semibold.ttf")])).unwrap();
+    let semibold = format!("{FAMILY} Semibold");
+    assert_eq!(names(&dir.join("Sysfont.ttc")), [(FAMILY.to_string(), "Semibold".to_string(), semibold)]);
+    let db = FontDb::with_font_dirs(vec![dir]);
+    assert_eq!(db.styles(FAMILY), ["Regular", "Semibold"]);
+    assert_eq!(db.load_system_fonts(), 2);
+}
+
+#[test]
+fn faces_with_color_bitmaps_are_cataloged_without_outlines() {
+    // A face with a `CBDT` or `sbix` table, the color bitmap tables the renderer draws, and no
+    // outline table is listed.
+    let dir = font_dir("color-bitmaps");
+    std::fs::write(dir.join("Sysfont-Regular.ttf"), with_glyf_as("SourceSans3-Regular.ttf", b"CBDT")).unwrap();
+    std::fs::write(dir.join("Sub/Sysfont-Bold.TTF"), with_glyf_as("SourceSans3-Bold.ttf", b"sbix")).unwrap();
+    let db = FontDb::with_font_dirs(vec![dir]);
+    assert_eq!(db.styles(FAMILY), ["Regular", "Bold"]);
 }
 
 #[test]
@@ -243,8 +287,12 @@ fn fallback_cache_is_dropped_when_a_face_loads_by_its_legacy_family_name() {
     let db = FontDb::with_font_dirs(vec![dir]);
     db.set_system_fallback(false);
     let latin = db.face(FALLBACK_FAMILY, "Regular");
-    let thai = 'ก';
-    assert!(db.fallback_for(thai, latin.id()).is_none());
+    // Keep the negative cache entry independent of the optional Thai font input.
+    let missing = '\u{F0001}';
+    assert!(db.fallback_for(missing, latin.id()).is_none());
+    if crate::CRAFT_FONTS.iter().any(|font| font.scripts.contains(&"Thai")) {
+        assert!(db.fallback_for('ก', latin.id()).is_some(), "the embedded Thai face supplies its glyph");
+    }
     let before = db.read_faces().len();
     let semibold = format!("{FAMILY} Semibold");
     let f = db.face(&semibold, "Regular");
@@ -253,7 +301,7 @@ fn fallback_cache_is_dropped_when_a_face_loads_by_its_legacy_family_name() {
     assert!(db.fallback_for('A', f.id()).is_some_and(|g| g.id() != f.id()));
     let cache = db.fallbacks.read().unwrap();
     assert_eq!(cache.faces, db.read_faces().len());
-    assert!(!cache.map.contains_key(&(thai, latin.id())), "answers from before the load are dropped");
+    assert!(!cache.map.contains_key(&(missing, latin.id())), "answers from before the load are dropped");
 }
 
 #[test]
@@ -539,7 +587,7 @@ fn circle_without_text_face() {
 fn circle_checks_face_coverage() {
     let db = FontDb::with_font_dirs(Vec::new());
     db.set_system_fallback(false);
-    db.add_document_fonts(vec![named_face("SourceSerif4-Regular.ttf", "Times New Roman")]);
+    db.add_document_fonts(vec![(named_face("SourceSerif4-Regular.ttf", "Times New Roman"), "Times New Roman".to_string())]);
     let preferred = db.face("Times New Roman", "Regular");
     assert!(!preferred.covers('●'));
     let primary = db.face("Source Serif 4", "Regular");

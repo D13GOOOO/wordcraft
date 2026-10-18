@@ -76,6 +76,17 @@ in [MCP server](mcp.md#character-and-paragraph-properties).
 
 Positions are `{"story": "body" | {"part": n}, "path": [block, row, cell, block, …], "off": byteOffset}`.
 
+### Keyboard and text input
+
+`ui.key` and `ui.text` go to this window's focused widget even when another app is in front
+(#2420). A focused Find field receives the text; a document receives it only while its canvas
+owns keyboard focus. Shortcuts, dialogs and document protection still apply. These methods do
+not activate the native window. `ui.focus` separately requests native activation.
+
+The `{"queued": true}` reply acknowledges the input queue, not a completed edit. Input is applied
+on subsequent UI frames. Inspect the resulting document or widget state before continuing with
+an operation that depends on it; do not replay an edit simply because its effect is not immediate.
+
 ### Closing the document
 
 `engine.execute` with `file.close` never shows the Save / Don't Save / Cancel prompt. On a
@@ -83,7 +94,8 @@ document with unsaved changes it replies with an error (the app keeps running an
 stay); save first (`file.save`), or pass `{"force": true}` to discard the changes and close.
 The bare form `{"method": "file.close", "force": true}` (a method name that is a command id) is
 guarded the same way, and only a boolean `true` counts as `force`. A document without unsaved
-changes closes at once (#1268).
+changes closes at once (#1268). Closing closes the document, not the app: the window stays and
+shows no page, and `file.new` or `file.open` goes on from there (#1712).
 
 ### Native printing
 

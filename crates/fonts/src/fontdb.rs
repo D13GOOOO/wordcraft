@@ -377,6 +377,9 @@ struct SysFallback {
     tried: std::collections::HashSet<&'static str>,
 }
 
+/// The longest name a document's font table gives an embedded font that faces take on.
+const MAX_FAMILY_NAME: usize = 128;
+
 /// Characters remembered as covered by no installed font (a cap on memory: once full the set
 /// starts over, and the coverage index answers again quickly).
 #[cfg(not(target_arch = "wasm32"))]
@@ -657,12 +660,18 @@ pub(crate) fn legacy_family(family: &str, style: &str) -> String {
     if extra.is_empty() { family.to_string() } else { format!("{family} {}", extra.join(" ")) }
 }
 
+/// The color bitmap tables the renderer draws glyphs from ([`FontFace::color_glyph`]).
+#[cfg(not(target_arch = "wasm32"))]
+const COLOR_BITMAP_TABLES: [&[u8; 4]; 2] = [b"sbix", b"CBDT"];
+
 /// The names of every face in the font file at `path`, reading only its table directories and
 /// `name` and `fvar` tables: a scan opens hundreds of font files, many of them megabytes long
 /// (CJK collections run to 20 MB and more). A variable font yields one entry per named instance,
-/// as it does loaded.
+/// as it does loaded. Faces with none of the [`OUTLINE_TABLES`](crate::ui_fallback::OUTLINE_TABLES)
+/// and [`COLOR_BITMAP_TABLES`] are left out.
 #[cfg(not(target_arch = "wasm32"))]
 fn file_face_names(path: &std::path::Path) -> Vec<Found> {
+    use crate::ui_fallback::OUTLINE_TABLES;
     use std::io::{Read, Seek, SeekFrom};
     /// Caps on what a (possibly damaged) file can make the scan read.
     const MAX_FACES: u32 = 256;
@@ -689,6 +698,9 @@ fn file_face_names(path: &std::path::Path) -> Vec<Found> {
             let dir = read_at(start.into(), 12)?;
             let tables = u16::from_be_bytes(dir.get(4..6)?.try_into().ok()?) as usize;
             let records = read_at(u64::from(start) + 12, tables * 16)?;
+            if !records.as_chunks::<16>().0.iter().any(|r| OUTLINE_TABLES.iter().chain(&COLOR_BITMAP_TABLES).any(|t| r.starts_with(*t))) {
+                return None;
+            }
             let mut table = |tag: &[u8; 4]| -> Option<Vec<u8>> {
                 let rec = records.as_chunks::<16>().0.iter().find(|r| r.starts_with(tag))?;
                 let (offset, len) = (be32(rec, 8)?, be32(rec, 12)?);
@@ -859,7 +871,9 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, legacy
     let instance = (!coords.is_empty())
         .then(|| harfrust::ShaperInstance::from_variations(&hb, settings.iter().map(|(t, v)| harfrust::Variation { tag: *t, value: *v })));
     let axis = |tag: &[u8; 4]| coords.iter().find(|(t, _)| t == tag).map(|(_, v)| *v);
-    let weight = axis(b"wght").unwrap_or(if coords.is_empty() { a.weight.value() } else { style_weight(&style) });
+    // Old releases of heavy faces (Arial Black in the core fonts) claim weight 400 where current
+    // ones say 900, which Word doesn't embolden: a family named for its weight is that heavy.
+    let weight = axis(b"wght").unwrap_or(if coords.is_empty() { static_weight(a.weight.value(), &legacy_family) } else { style_weight(&style) });
     let italic = axis(b"ital")
         .map(|v| v >= 0.5)
         .or(axis(b"slnt").map(|v| v.abs() > 0.1))
@@ -917,6 +931,19 @@ fn style_weight(style: &str) -> f32 {
         ("heavy", 900.0),
     ];
     TABLE.iter().find(|(k, _)| s.contains(k)).map(|(_, w)| *w).unwrap_or(400.0)
+}
+
+/// A static face's weight: the file's, or the weight the last word of its family name stands
+/// for (`Arial Black`, `Franklin Gothic Heavy`) when the file says less than semibold.
+fn static_weight(file: f32, family: &str) -> f32 {
+    if file >= 600.0 {
+        return file;
+    }
+    match family.split_whitespace().next_back().unwrap_or("").to_ascii_lowercase().as_str() {
+        "black" | "heavy" => 900.0,
+        "extrabold" | "ultrabold" => 800.0,
+        _ => file,
+    }
 }
 
 fn style_italic(style: &str) -> bool {
@@ -1109,20 +1136,26 @@ impl FontDb {
     /// Add a user font (TTF/OTF/TTC bytes). Returns the number of faces added (0 if unparseable or
     /// every face was already present).
     pub fn add_font(&self, bytes: Vec<u8>) -> usize {
-        self.add_fonts(vec![bytes])
+        self.add_fonts(vec![(bytes, None)])
     }
 
     /// Add the faces of several font files at once: lookups see all of them or none, never a
     /// family with only some of its styles (which would resolve, and be cached as, the wrong
-    /// face). Faces already present (same family and style) are skipped. Returns how many were
-    /// added.
-    fn add_fonts(&self, files: Vec<Vec<u8>>) -> usize {
+    /// face). A file given a `name` its faces don't go by (a document's font table's, see
+    /// [`FontDb::add_document_fonts`]) has them go by that name instead. Faces already present
+    /// (same family and style) are skipped. Returns how many were added.
+    fn add_fonts(&self, files: Vec<(Vec<u8>, Option<String>)>) -> usize {
         let mut new = Vec::new();
-        for bytes in files {
+        for (bytes, name) in files {
             let data = Arc::new(bytes);
+            let name: Option<String> = name.map(|n| n.trim().chars().take(MAX_FAMILY_NAME).collect()).filter(|n: &String| !n.is_empty());
             for f in enumerate_faces(&data) {
                 if let Some(mut face) = make_face(FontBytes::Owned(data.clone()), f.index, f.family, f.style, f.legacy, f.coords) {
                     face.local_names = f.local;
+                    if let Some(n) = name.as_deref().filter(|n| !face.named(n) && !face.local_names.iter().any(|l| l.name.eq_ignore_ascii_case(n))) {
+                        face.family = n.to_string();
+                        face.legacy_family = n.to_string();
+                    }
                     new.push(Arc::new(face));
                 }
             }
@@ -1236,7 +1269,7 @@ impl FontDb {
             p.dedup();
             p
         };
-        let files = paths.iter().filter_map(|p| std::fs::read(p).ok()).collect();
+        let files = paths.iter().filter_map(|p| std::fs::read(p).ok()).map(|b| (b, None)).collect();
         self.add_fonts(files) > 0
     }
 
@@ -1858,6 +1891,21 @@ mod tests {
         bundled.set_system_fallback(false);
         let latin = bundled.face(FALLBACK_FAMILY, "Regular");
         assert!(bundled.fallback_for_run(&chars, latin.id(), false, false).is_none());
+    }
+
+    #[test]
+    fn a_family_named_for_a_heavy_weight_is_that_heavy() {
+        let face = |bytes: &'static [u8], family: &str| {
+            make_face(FontBytes::Static(bytes), 0, family.into(), "Regular".into(), family.into(), Vec::new()).unwrap()
+        };
+        // The file says 400, as the core-fonts Arial Black does: bold must not embolden it again.
+        assert_eq!(face(BUNDLED[0], "Arial Black").weight, 900.0);
+        assert_eq!(face(BUNDLED[0], "Franklin Gothic Heavy ").weight, 900.0);
+        assert_eq!(face(BUNDLED[0], "Segoe UI ExtraBold").weight, 800.0);
+        assert_eq!(face(BUNDLED[0], "Blackadder ITC").weight, 400.0);
+        assert_eq!(face(BUNDLED[0], "Arial").weight, 400.0);
+        // A file that already says it is heavy keeps its own weight (Lato Heavy is 800, not 900).
+        assert_eq!(face(BUNDLED[1], "Source Sans 3 Heavy").weight, 600.0);
     }
 
     #[test]

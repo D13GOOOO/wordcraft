@@ -2652,3 +2652,9 @@
 	All Fonts	Összes betűtípus
 	Spike	Gyűjtő
 	Insert Spike	Beszúrás a gyűjtőből
+# Add Font status (#1789)
+	Added 1 font	1 betűtípus hozzáadva
+	Added {n} fonts	{n} betűtípus hozzáadva
+	{added}; {count} couldn't be read: {names}	{added}; {count} nem olvasható: {names}
+	{names} and {n} more	{names} és még {n}
+	{added}; {n} skipped (limit {max})	{added}; {n} kihagyva (korlát: {max})

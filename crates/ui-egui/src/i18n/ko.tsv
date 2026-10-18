@@ -2510,3 +2510,9 @@ preview	Title	제목
 	All Fonts	모든 글꼴
 	Spike	스파이크
 	Insert Spike	스파이크 삽입
+# Add Font status (#1789)
+	Added 1 font	글꼴 1개를 추가했습니다
+	Added {n} fonts	글꼴 {n}개를 추가했습니다
+	{added}; {count} couldn't be read: {names}	{added}; 읽을 수 없는 파일 {count}개: {names}
+	{names} and {n} more	{names} 외 {n}개
+	{added}; {n} skipped (limit {max})	{added}; {n}개 건너뜀 (한도 {max})

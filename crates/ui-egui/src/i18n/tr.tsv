@@ -2653,3 +2653,9 @@ preview	Title	Örnek
 	All Fonts	Tüm Yazı Tipleri
 	Spike	Biriktirici
 	Insert Spike	Biriktiriciyi Ekle
+# Add Font status (#1789)
+	Added 1 font	1 yazı tipi eklendi
+	Added {n} fonts	{n} yazı tipi eklendi
+	{added}; {count} couldn't be read: {names}	{added}; {count} okunamadı: {names}
+	{names} and {n} more	{names} ve {n} tane daha
+	{added}; {n} skipped (limit {max})	{added}; {n} atlandı (sınır {max})
