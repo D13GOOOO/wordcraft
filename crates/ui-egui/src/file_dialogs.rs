@@ -504,7 +504,8 @@ mod tests {
         let saved = dir.join("contract.docx");
         answer(&shown, Some(&saved.to_string_lossy()));
         assert_eq!(a.poll_file_dialog().unwrap().unwrap()["done"], true);
-        assert!(a.quit_requested, "Close runs only after the DOCX save succeeds");
+        // File › Close keeps the window (#1712): the document closes once the DOCX save succeeds.
+        assert!(!a.has_document() && !a.quit_requested, "Close runs only after the DOCX save succeeds");
         assert!(saved_text(&saved).contains("Revised Legacy contract"));
         assert_eq!(std::fs::read(&original).unwrap(), bytes);
         let _ = std::fs::remove_dir_all(dir);
