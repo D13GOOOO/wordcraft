@@ -488,6 +488,10 @@ pub struct CoreProps {
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub track_changes: bool,
+    /// Record a tracked cut and paste of a sentence or paragraph as a move (Track moves); off
+    /// when the file has `w:doNotTrackMoves` (ECMA-376 §17.15.1.29), and then it is an
+    /// ordinary deletion and insertion.
+    pub track_moves: bool,
     /// Default tab stop interval, points.
     pub default_tab: f32,
     pub even_odd_headers: bool,
@@ -654,6 +658,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             track_changes: false,
+            track_moves: true,
             default_tab: 36.0,
             even_odd_headers: false,
             mirror_margins: false,
@@ -1020,6 +1025,18 @@ impl Document {
             return s;
         }
         &mut self.last_section
+    }
+
+    /// Remove the section break on the mark of top-level body paragraph `block`: its section
+    /// joins the following one ([`SectionProps::absorb`]). False when there is no break there.
+    pub fn remove_section_break(&mut self, block: usize) -> bool {
+        if !matches!(self.body.get(block).map(|b| &**b), Some(Block::Para(p)) if p.section.is_some()) {
+            return false;
+        }
+        let Some(Block::Para(p)) = self.body.get_mut(block).map(Arc::make_mut) else { return false };
+        let Some(before) = p.section.take() else { return false };
+        self.section_mut(block).absorb(&before);
+        true
     }
 
     /// Allocate a new part id and insert the part. Part ids run out only past `u32::MAX` parts, more
@@ -1431,8 +1448,11 @@ pub fn count_words(s: &str) -> usize {
     s.split(|c: char| c.is_whitespace() || c == para::OBJ).filter(|w| w.chars().any(char::is_alphanumeric)).count()
 }
 
+/// How deep in nested tables [`Document::para_paths`] goes: cells below this are skipped.
+pub(crate) const PARA_WALK_DEPTH: usize = 16;
+
 fn walk(bl: &Blocks, prefix: &mut Vec<u32>, out: &mut Vec<Path>, depth: usize) {
-    if depth > 16 {
+    if depth > PARA_WALK_DEPTH {
         return;
     }
     for (i, b) in bl.iter().enumerate() {
