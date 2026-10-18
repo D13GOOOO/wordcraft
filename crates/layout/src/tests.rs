@@ -6662,6 +6662,29 @@ fn a_text_frame_in_a_cell_floats_beside_the_text() {
     assert!(frame.x > text.x + 200.0, "right-aligned in the cell: {} vs {}", frame.x, text.x);
 }
 
+/// Consecutive paragraphs with the same frame in a cell (or header) share the frame, one under
+/// the other, instead of being drawn over each other.
+#[test]
+fn text_frames_in_a_cell_share_one_frame() {
+    use wordcraft_doc::props::TextFrame;
+    let mut d = Document::from_text("Above");
+    let mut t = Table::new(1, 1, 300.0);
+    let fr =
+        TextFrame { x_align: Some("right".into()), h_anchor: "text".into(), v_anchor: "text".into(), wrap: "around".into(), ..Default::default() };
+    let framed = |s: &str| {
+        let mut p = wordcraft_doc::Paragraph::with_text(s, Default::default());
+        p.props.frame = Some(fr.clone());
+        wordcraft_doc::para_block(p)
+    };
+    t.rows[0].cells[0].blocks = vec![framed("7"), framed("8")];
+    d.insert_block(StoryRef::Body, &Path::top(1), wordcraft_doc::Block::Table(t)).unwrap();
+    let l = lay(&d);
+    let at = |i: u32| l.caret(&Pos { story: StoryRef::Body, path: Path(vec![1, 0, 0, i]), off: 0 }).unwrap();
+    let (a, b) = (at(0), at(1));
+    assert!(b.top > a.top + 5.0, "one under the other: {} vs {}", a.top, b.top);
+    assert!((a.x - b.x).abs() < 1.0);
+}
+
 /// Text frames in the body (a court form built from them, #2406) go where their frame puts them
 /// on the page; paragraphs with the same frame stack in it, and the text outside it flows as if
 /// the frame weren't there. WordCraft laid every framed paragraph out in line, one under the
