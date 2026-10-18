@@ -2953,7 +2953,7 @@ fn place_objects(
     depth: usize,
 ) -> (Vec<Placed>, Vec<Placed>) {
     // Each object's items behind and in front of the text, with its stacking order if floating.
-    let mut placed: Vec<(Option<u32>, Vec<Placed>, Vec<Placed>)> = Vec::new();
+    let mut placed: Vec<(Option<u64>, Vec<Placed>, Vec<Placed>)> = Vec::new();
     let Some(fl) = pl.lines.get(l0) else { return (Vec::new(), Vec::new()) };
     // Objects left out of the layout (hidden, or deleted in the final text) aren't placed.
     let left_out = left_out_objects(ctx.doc, p, at.table_chr, ctx.opts.show_hidden, ctx.hide_deleted);
