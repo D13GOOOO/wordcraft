@@ -2026,6 +2026,7 @@
 	Hyphenation zone:	Silbentrennzone:
 	Italian	Italienisch
 	Croatian	Kroatisch
+	Indonesian	Indonesisch
 	Japanese	Japanisch
 	Korean	Koreanisch
 	Limit consecutive hyphens to:	Aufeinanderfolgende Trennstriche begrenzen auf:
@@ -2232,3 +2233,15 @@
 # Reading Mode column widths (#1040)
 	Narrow	Schmal
 	Medium	Mittel
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Zellen vor dem Teilen verbinden
+	Table size	Tabellengröße
+	AutoFit behavior	Automatische Anpassung
+	Initial column width:	Anfangsspaltenbreite:
+	AutoFit to contents	An Inhalt anpassen
+	AutoFit to window	An Fenster anpassen
+	Separate text at	Text trennen bei
+	Commas	Kommas
+	Other:	Andere:
+	The number must be between 1 and {max}.	Die Zahl muss zwischen 1 und {max} liegen.
+	The measurement must be between {min} and {max}.	Das Maß muss zwischen {min} und {max} liegen.

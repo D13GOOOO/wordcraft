@@ -879,6 +879,17 @@ impl Reader<'_> {
             Some(e) => (e.instr(), if result.is_empty() { e.text } else { result }),
             None => (f.instr.trim().to_string(), result),
         };
+        // The visible result owns the field's formatting; empty results keep the begin's.
+        let props = f
+            .buf
+            .iter()
+            .find_map(|(it, p)| match it {
+                Item::Text(t) if !t.is_empty() => Some(p),
+                Item::Obj(o) if !o.plain_text().is_empty() => Some(p),
+                _ => None,
+            })
+            .unwrap_or(&f.props)
+            .clone();
         let obj = InlineObject::Field { instr, result, locked: f.locked, dirty: f.dirty, code: false, form: f.form };
         if let Some(parent) = sc.fields.last_mut()
             && !parent.spilled
@@ -887,7 +898,7 @@ impl Reader<'_> {
             parent.instr.push_str(obj.plain_text());
             return;
         }
-        self.emit_obj(sc, pb, obj, &f.props);
+        self.emit_obj(sc, pb, obj, &props);
     }
 
     /// At a paragraph end, open fields can't keep buffering: emit them (empty result) and
@@ -1327,7 +1338,15 @@ impl Reader<'_> {
             part.body.inset = (inset != wordcraft_doc::TEXT_BOX_INSET).then_some(inset);
             part.body.auto_fit = bp.child("a:spAutoFit").is_some();
         }
-        let mut extra = ShapeExtra::default();
+        // The shape style's text colour (`a:fontRef`, often `lt1`: white on the accent fill).
+        if let Some(id) = story
+            && let Some(c) = wsp.child("wps:style").and_then(|s| s.child("a:fontRef"))
+            && let Some(rgb) = super::drawing_color::color(c, &self.doc.settings.theme_colors)
+            && let Some(part) = self.doc.parts.get_mut(&id)
+        {
+            part.body.auto_color = Some(rgb);
+        }
+        let mut extra = ShapeExtra { dash: super::shape_style::line_dash(ln), ..Default::default() };
         // A rounded rectangle's own corner (`adj`, ECMA-376 §20.1.10.56); other presets drawn as
         // rounded rectangles keep the default.
         if prst == "roundRect" {

@@ -2202,6 +2202,7 @@
 	Hyphenation zone:	Elválasztási zóna:
 	Italian	Olasz
 	Croatian	Horvát
+	Indonesian	Indonéz
 	Japanese	Japán
 	Korean	Koreai
 	Limit consecutive hyphens to:	Egymást követő elválasztások legfeljebb:
@@ -2628,3 +2629,15 @@
 # Reading Mode column widths (#1040)
 	Narrow	Keskeny
 	Medium	Közepes
+# Split Cells and Convert Text to Table (#2592)
+	Merge cells before split	Cellák egyesítése felosztás előtt
+	Table size	Táblázat mérete
+	AutoFit behavior	Automatikus igazítás
+	Initial column width:	Kezdeti oszlopszélesség:
+	AutoFit to contents	Igazítás a tartalomhoz
+	AutoFit to window	Igazítás az ablakhoz
+	Separate text at	Szöveg elválasztása
+	Commas	Vesszők
+	Other:	Egyéb:
+	The number must be between 1 and {max}.	A számnak 1 és {max} között kell lennie.
+	The measurement must be between {min} and {max}.	A méretnek {min} és {max} között kell lennie.
