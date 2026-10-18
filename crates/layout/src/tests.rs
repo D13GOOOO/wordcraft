@@ -3631,6 +3631,23 @@ fn floating_objects_are_drawn_in_their_stacking_order() {
     assert_eq!(drawn, [40.0, 50.0, 10.0, 20.0, 30.0], "behind the text, then in front, each lowest first");
 }
 
+/// An object made here (no stacking order) still goes over one whose stored order is the
+/// highest a file can give (`relativeHeight="4294967295"`), though it comes first in the text.
+#[test]
+fn an_object_with_no_stacking_order_goes_over_the_highest_stored_one() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = Document::from_text("Two trees.");
+    let at =
+        |x: f32, z: Option<u32>| Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z, ..Default::default() };
+    // Inserted at the start, so the text order is the reverse: 20, 10.
+    for f in [at(10.0, Some(u32::MAX)), at(20.0, None)] {
+        d.insert_object(&Pos::body(0, 0), rect_shape(100.0, 50.0, f), &Default::default()).unwrap();
+    }
+    let l = lay(&d);
+    let drawn: Vec<f32> = shapes(&l.pages[0].items).iter().map(|r| r.x).collect();
+    assert_eq!(drawn, [10.0, 20.0], "the one with no order is drawn last, on top");
+}
+
 #[test]
 fn top_and_bottom_float_pushes_its_own_first_line_down() {
     use wordcraft_doc::para::{Anchor, Float, Wrap};

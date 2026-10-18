@@ -262,9 +262,10 @@ fn is_false(v: &bool) -> bool {
 }
 
 impl Float {
-    /// Where it stacks among the floating objects of its layer: see [`Float::z`].
-    pub fn stack(&self) -> u32 {
-        self.z.unwrap_or(u32::MAX)
+    /// Where it stacks among the floating objects of its layer: see [`Float::z`]. `None` is
+    /// past every stored order, `u32::MAX` included.
+    pub fn stack(&self) -> u64 {
+        self.z.map_or(u64::from(u32::MAX) + 1, u64::from)
     }
     /// The rotation and flips, the angle normalised to `0..360` (a NaN angle is no rotation).
     pub fn spin(&self) -> wordcraft_geom::Spin {

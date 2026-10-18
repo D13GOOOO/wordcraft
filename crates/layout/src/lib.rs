@@ -3009,7 +3009,7 @@ fn place_objects(
 /// The items of objects placed in text order (each with its stacking order if floating), the
 /// floating ones put in stacking order (a stable sort: equal ones keep text order). Inline
 /// objects keep their places.
-fn stack_objects(mut placed: Vec<(Option<u32>, Vec<Placed>, Vec<Placed>)>) -> (Vec<Placed>, Vec<Placed>) {
+fn stack_objects(mut placed: Vec<(Option<u64>, Vec<Placed>, Vec<Placed>)>) -> (Vec<Placed>, Vec<Placed>) {
     let floating: Vec<bool> = placed.iter().map(|o| o.0.is_some()).collect();
     let mut stacked: Vec<_> = placed.iter_mut().filter(|o| o.0.is_some()).map(std::mem::take).collect();
     stacked.sort_by_key(|o| o.0);
