@@ -134,6 +134,12 @@ fn latin_text_keeps_its_digits_spaces_and_punctuation_in_order() {
     // Inside an explicit isolate the Latin text is one run at the isolate's level.
     let s = "سلام \u{2067}2-x\u{2069}";
     assert_eq!(&bidi_levels(s, true)[at(s, 6)..at(s, 9)], &[4, 4, 4]);
+    // Inside an explicit left-to-right embedding (LRE) one level above the paragraph's, the
+    // space before the Latin text keeps the embedding's level, so it stays before "foo".
+    let s = "سلام \u{202A} foo\u{202C}";
+    let lv = bidi_levels(s, true);
+    assert_eq!(&lv[at(s, 6)..at(s, 10)], &[2, 2, 2, 2], "{lv:?}");
+    assert_eq!(lv, unicode_levels(s, true));
     // Numbers alone and text across a tab are left to UAX #9.
     for s in ["سال 5-10", "سال 2 و 3", "سلام 2\tx"] {
         assert_eq!(bidi_levels(s, true), unicode_levels(s, true), "{s:?}");

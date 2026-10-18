@@ -645,6 +645,22 @@ fn keep_latin_text_together(text: &str, base: u8, levels: &mut [u8]) {
     let chars: Vec<(usize, char, unicode_bidi::BidiClass)> = text.char_indices().map(|(i, c)| (i, c, unicode_bidi::bidi_class(c))).collect();
     let stop = |c: &unicode_bidi::BidiClass| matches!(c, R | AL | B | S | LRE | RLE | LRO | RLO | PDF | LRI | RLI | FSI | PDI);
     let sentence_end = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '…' | '،' | '؛' | '؟');
+    // Whether each byte is inside an explicit embedding, override or isolate: the paragraph's
+    // level isn't the neutrals' one there. The marks split the segments, so a segment is all in
+    // or all out.
+    let mut embedded = vec![false; text.len()];
+    let mut depth = 0u32;
+    for &(i, c, class) in &chars {
+        match class {
+            LRE | RLE | LRO | RLO | LRI | RLI | FSI => depth = depth.saturating_add(1),
+            PDF | PDI => depth = depth.saturating_sub(1),
+            B => depth = 0,
+            _ => {}
+        }
+        if let Some(e) = embedded.get_mut(i..i + c.len_utf8()) {
+            e.fill(depth > 0);
+        }
+    }
     for seg in chars.split(|(_, _, c)| stop(c)) {
         let Some(first) = seg.iter().position(|(_, _, c)| *c == L) else { continue };
         let Some(last) = seg.iter().rposition(|(_, _, c)| matches!(c, L | EN | AN)) else { continue };
@@ -665,7 +681,7 @@ fn keep_latin_text_together(text: &str, base: u8, levels: &mut [u8]) {
         };
         span.iter().for_each(|ch| set(ch, lv));
         // Inside an explicit embedding the paragraph's level isn't the neutrals' one: leave them.
-        if lv > base.saturating_add(1) {
+        if lv > base.saturating_add(1) || seg.first().is_some_and(|&(i, _, _)| embedded.get(i).copied().unwrap_or(false)) {
             continue;
         }
         let neutral = |ch: &&(usize, char, unicode_bidi::BidiClass)| matches!(ch.2, WS | ON | CS | ES | ET | BN | NSM);
