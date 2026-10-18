@@ -358,6 +358,13 @@ pub(crate) fn member_bounds(s: &mut Session, v: &Value) -> Option<CmdResult> {
         (None, None) => None,
         _ => return Some(Err(CmdError::Params("`x` and `y` go together".into()))),
     };
+    // `x`/`y` are on the canvas's page: a drop on another page would put the member outside it.
+    if to.is_some()
+        && let Some(page) = p::u64(v, "page").and_then(|n| usize::try_from(n).ok())
+        && s.layout().object(&pos, s.page_hint).is_some_and(|o| o.page != page)
+    {
+        return Some(Err(CmdError::Disabled("a shape can't leave its drawing canvas".into())));
+    }
     let (nw, nh) = (p::f32(v, "width"), p::f32(v, "height"));
     Some(edit_member(s, &pos, index, |frame, (sx, sy), c| {
         if let Some((x, y)) = to {
@@ -613,5 +620,27 @@ mod tests {
         s.run("select.member", &json!({"index": 1})).unwrap();
         s.run("canvas.member", &json!({"index": 0, "delete": true})).unwrap();
         assert!(selected_member(&s).is_none(), "the pick doesn't slide onto the member that moved up");
+
+        // Commands that replace the selection (the whole canvas) are refused too.
+        s.run("select.member", &json!({"index": 0})).unwrap();
+        for (id, v) in [
+            ("insert.table", json!({"rows": 1, "cols": 1})),
+            ("table.quick", json!({})),
+            ("insert.equation", json!({})),
+            ("insert.symbol", json!({"char": "§"})),
+            ("insert.field", json!({"instr": "AUTHOR"})),
+            ("insert.pageBreak", json!({})),
+        ] {
+            assert!(s.run(id, &v).is_err(), "{id}");
+            assert_eq!(members(&canvas(&s)).len(), 2, "{id}: the canvas and its members stay");
+        }
+        // Moving the member: on the canvas's page it moves; a drop on another page is refused.
+        let frame = s.layout().object(&selected_canvas(&s).unwrap().0, 0).unwrap();
+        let before = members(&canvas(&s));
+        let other = frame.page + 1;
+        assert!(matches!(s.run("arrange.bounds", &json!({"page": other, "x": 100, "y": 100})), Err(CmdError::Disabled(_))));
+        assert_eq!(members(&canvas(&s)), before);
+        s.run("arrange.bounds", &json!({"page": frame.page, "x": frame.rect.x + 5.0, "y": frame.rect.y + 5.0})).unwrap();
+        assert_ne!(members(&canvas(&s)), before);
     }
 }
