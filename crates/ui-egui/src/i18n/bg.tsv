@@ -796,6 +796,8 @@
 	Space before/after:	Разстояние преди/след:
 	Spacing	Разстояние
 	Spacing (pt):	Разстояние (пт):
+	Kerning for fonts:	Кернинг на шрифтове:
+	Points and above	пт и повече
 	Speech	Реч
 	Spelling & Grammar	Правопис и граматика
 	Spelling &\nGrammar	Правопис и\nграматика
@@ -1405,6 +1407,8 @@
 	Customize Ribbon	Персонализиране на лентата
 	Add to Quick Access Toolbar	Добавяне към лентата с инструменти за бърз достъп
 	Remove from Quick Access Toolbar	Премахване от лентата с инструменти за бърз достъп
+	Hide Quick Access Toolbar	Скриване на лентата с инструменти за бърз достъп
+	Show Quick Access Toolbar	Показване на лентата с инструменти за бърз достъп
 	Customize the Ribbon…	Персонализиране на лентата…
 	Customize Quick Access Toolbar…	Персонализиране на лентата с инструменти за бърз достъп…
 	More Commands…	Още команди…

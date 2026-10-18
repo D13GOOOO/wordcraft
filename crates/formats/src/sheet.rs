@@ -748,12 +748,15 @@ fn iso_datetime(v: &str) -> Option<String> {
     let mut it = date.splitn(3, '-');
     let y: i64 = it.next()?.parse().ok()?;
     let m: u32 = it.next()?.parse().ok()?;
-    let d: u32 = it.next()?.get(..2)?.parse().ok()?;
+    let d_part = it.next()?;
+    let d_digits: String = d_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let d: u32 = d_digits.parse().ok()?;
     if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
         return None;
     }
     let mut out = format!("{y:04}-{m:02}-{d:02}");
-    let hms: Vec<u32> = time.split(['Z', '+', '.']).next().unwrap_or("").split(':').filter_map(|p| p.parse().ok()).collect();
+    let time_clean = time.split(['Z', '+', '-', '.']).next().unwrap_or("");
+    let hms: Vec<u32> = time_clean.split(':').filter_map(|p| p.parse().ok()).collect();
     if let [h, mi, rest @ ..] = hms.as_slice() {
         let s = rest.first().copied().unwrap_or(0);
         if (*h, *mi, s) != (0, 0, 0) {
@@ -1065,5 +1068,9 @@ mod tests {
         assert_eq!(serial_date(-1.0, false, DateKind::Date), None);
         assert_eq!(number(1234567.0), "1234567");
         assert_eq!(number(0.1 + 0.2), "0.3");
+        assert_eq!(iso_datetime("2024-03-05T13:45:30-05:00").as_deref(), Some("2024-03-05 13:45:30"));
+        assert_eq!(iso_datetime("2024-03-5T13:45:00").as_deref(), Some("2024-03-05 13:45"));
+        assert_eq!(iso_datetime("2024-3-1").as_deref(), Some("2024-03-01"));
+        assert_eq!(iso_datetime("2024-03-05Z").as_deref(), Some("2024-03-05"));
     }
 }

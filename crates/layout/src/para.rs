@@ -417,6 +417,9 @@ pub struct ParaEnv<'a> {
     pub table: Option<&'a CellText>,
     /// Check spelling (and grammar, as the options say) for squiggles; `None` = no squiggles.
     pub proofing: Option<crate::ProofOptions>,
+    /// The byte range of the word being typed in this paragraph: it gets no spelling squiggle
+    /// until the caret leaves it ([`crate::LayoutOptions::typing_word`]).
+    pub typing_word: Option<(usize, usize)>,
     /// How digits look on screen (an unresolved `System` shows Western digits).
     pub numeral: NumeralMode,
     /// Areas text must flow around (floating objects), relative to the paragraph: x from the
@@ -1514,6 +1517,8 @@ pub fn layout_para(p: &Paragraph, env: &ParaEnv) -> ParaLayout {
             match c {
                 '\t' => push(&mut b, ClKind::Tab, 0.0, 0.0),
                 LINE_BREAK | '\r' => push(&mut b, ClKind::LineBreak, 0.0, 0.0),
+                // Word ignores explicit page breaks in cells, preserving their source offsets.
+                PAGE_BREAK if env.table.is_some() => push(&mut b, ClKind::Marker, 0.0, 0.0),
                 PAGE_BREAK => push(&mut b, ClKind::PageBreak, 0.0, 0.0),
                 COLUMN_BREAK => push(&mut b, ClKind::ColumnBreak, 0.0, 0.0),
                 _ => {
@@ -1540,8 +1545,32 @@ pub fn layout_para(p: &Paragraph, env: &ParaEnv) -> ParaLayout {
                                 push(&mut b, ClKind::Object(k), 0.0, 0.0);
                             }
                         }
-                        Some(InlineObject::Field { instr, result, code, .. }) => {
-                            if env.field_codes != *code {
+                        Some(o @ InlineObject::Field { instr, result, code, .. }) => {
+                            let form = if env.field_codes != *code { None } else { o.legacy_form() };
+                            if let Some(wordcraft_doc::legacy_form::LegacyForm::CheckBox { size, .. }) = form {
+                                // Word draws a legacy check box as a square as tall as the text's
+                                // line (its ascent and descent), scaled to an explicit size, and
+                                // takes that much room on the line (see `display::check_box`).
+                                let (a, d) = b.styles.get(si as usize).map_or((rc.size * 0.8, rc.size * 0.2), |s| (s.ascent, s.descent));
+                                let scale = size.map_or(1.0, |sz| sz / rc.size.max(0.5));
+                                let (a, d) = (a * scale, d * scale);
+                                b.clusters.push(Cluster {
+                                    start,
+                                    end,
+                                    adv: a + d,
+                                    kind: ClKind::Object(k),
+                                    style: si,
+                                    g0: g,
+                                    g1: g,
+                                    break_after: false,
+                                    obj_h: a.max(0.01),
+                                    obj_d: d,
+                                    dot: false,
+                                });
+                            } else if let Some(text) = form.as_ref().and_then(|f| f.shown_text()) {
+                                // A drop-down shows its selected entry, whatever result was saved.
+                                b.shape_atomic(text, start, end, &rc);
+                            } else if env.field_codes != *code {
                                 // The code in braces on grey, like Word's field shading.
                                 let mut shaded = (*rc).clone();
                                 if shaded.highlight.is_none() && shaded.shading.is_none() {
@@ -1759,7 +1788,7 @@ pub fn layout_para(p: &Paragraph, env: &ParaEnv) -> ParaLayout {
         text_len: p.text.len(),
         has_page_fields,
         notes,
-        issues: env.proofing.map(|o| proof_issues(p, &runs, &o, is_list_item(doc, p))).unwrap_or_default(),
+        issues: env.proofing.map(|o| proof_issues(p, &runs, &o, env.typing_word, is_list_item(doc, p))).unwrap_or_default(),
         drop_cap,
         hyph_after: Vec::new(),
         bidi_levels: b.levels,
@@ -2061,8 +2090,11 @@ fn break_lines(pl: &mut ParaLayout, env: &ParaEnv, mark_style: u32, level: Optio
             let fits =
                 absorbs || x + c.adv - pl.auto_space_after(j) <= right_edge + shrink + 0.01 || c.kind == ClKind::Space || c.kind == ClKind::Marker;
             // A line's first item stays on it even when it doesn't fit; markers before it
-            // (a content control's start, a bookmark) take no room and don't count (Word).
-            if !fits && (c0..j).any(|k| pl.clusters.get(k).is_some_and(|c| c.kind != ClKind::Marker)) {
+            // (a content control's start, a bookmark) and floating objects' anchors take no room
+            // and don't count (Word: a picture a little wider than the line, after an anchor,
+            // stays on the first line rather than leaving the anchor a line of its own).
+            let takes_room = |c: &Cluster| c.kind != ClKind::Marker && !(matches!(c.kind, ClKind::Object(_)) && c.adv == 0.0 && c.obj_h == 0.0);
+            if !fits && (c0..j).any(|k| pl.clusters.get(k).is_some_and(takes_room)) {
                 // Wrap: back up to the last break opportunity on this line.
                 end = LineEnd::Wrap;
                 // Hyphenate only when the plain break leaves more than the hyphenation zone empty.
@@ -2956,11 +2988,18 @@ pub fn is_list_item(doc: &Document, p: &Paragraph) -> bool {
     p.props.numbering.or_else(|| doc.styles.resolve_para(&p.props).numbering).is_some_and(|n| n.num != 0)
 }
 
-/// Spelling and grammar issues in a paragraph as squiggles: (start, end, is grammar).
-fn proof_issues(p: &Paragraph, runs: &[ProofRun], opts: &crate::ProofOptions, list_item: bool) -> Vec<(usize, usize, bool)> {
+/// Spelling and grammar issues as squiggles (start, end, is grammar), less spelling issues overlapping `typing`.
+fn proof_issues(
+    p: &Paragraph,
+    runs: &[ProofRun],
+    opts: &crate::ProofOptions,
+    typing: Option<(usize, usize)>,
+    list_item: bool,
+) -> Vec<(usize, usize, bool)> {
     paragraph_issues(p, runs, &opts.spelling, opts.grammar, list_item)
         .into_iter()
         .map(|i| (i.start, i.end, i.kind == wordcraft_proof::IssueKind::Grammar))
+        .filter(|&(a, b, grammar)| grammar || !typing.is_some_and(|(s, e)| a < e && s < b))
         .collect()
 }
 
@@ -3002,6 +3041,7 @@ mod label_spacing_tests {
             hide_deleted: Default::default(),
             table: None,
             proofing: None,
+            typing_word: None,
             field_codes: false,
             grid: Grid::default(),
             exclusions: &[],

@@ -836,6 +836,8 @@
 	Space before/after:	段落前/後間距：
 	Spacing	間距
 	Spacing (pt):	間距（點）：
+	Kerning for fonts:	字型的字距調整：
+	Points and above	點及以上
 	Speech	語音
 	Spelling & Grammar	拼字及文法
 	Spelling &\nGrammar	拼字及文法
@@ -1550,6 +1552,8 @@
 	Customize Ribbon	自訂功能區
 	Add to Quick Access Toolbar	新增至快速存取工具列
 	Remove from Quick Access Toolbar	從快速存取工具列移除
+	Hide Quick Access Toolbar	隱藏快速存取工具列
+	Show Quick Access Toolbar	顯示快速存取工具列
 	Customize the Ribbon…	自訂功能區…
 	Customize Quick Access Toolbar…	自訂快速存取工具列…
 	More Commands…	其他命令…

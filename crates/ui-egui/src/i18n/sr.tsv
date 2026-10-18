@@ -893,6 +893,8 @@
 	Space before: {pt} pt	Размак пре: {pt} пт
 	Spacing	Размак
 	Spacing (pt):	Размак (пт):
+	Kerning for fonts:	Кернинг фонтова:
+	Points and above	пт и више
 	Speech	Говор
 	Spelling & Grammar	Правопис и граматика
 	Spelling &\nGrammar	Правопис\nи граматика
@@ -1563,6 +1565,8 @@
 	Customize Ribbon	Прилагоди траку
 	Add to Quick Access Toolbar	Додај на траку са алаткама за брзи приступ
 	Remove from Quick Access Toolbar	Уклони са траке са алаткама за брзи приступ
+	Hide Quick Access Toolbar	Сакриј траку са алаткама за брзи приступ
+	Show Quick Access Toolbar	Прикажи траку са алаткама за брзи приступ
 	Customize the Ribbon…	Прилагоди траку…
 	Customize Quick Access Toolbar…	Прилагоди траку са алаткама за брзи приступ…
 	More Commands…	Још команди…

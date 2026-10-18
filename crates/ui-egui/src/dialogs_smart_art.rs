@@ -264,6 +264,52 @@ pub fn items_without(g: &SmartArtSpec, i: usize) -> Value {
     json!({"items": items})
 }
 
+/// The Text Pane button on the left edge of the selected graphic's frame, as in Word, while
+/// the pane is closed.
+pub fn frame_button(app: &mut WordApp, ctx: &egui::Context, layout: &wordcraft_layout::DocLayout, pages: &[Rect], scale: f32, clip: Rect) {
+    // The pane goes with the graphic: it opens again only on request.
+    if wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).is_none() {
+        app.session.view.smart_art_pane = false;
+        return;
+    }
+    if app.session.view.smart_art_pane {
+        return;
+    }
+    let Some((hit, _)) = crate::objects::active(app, layout) else { return };
+    let Some(page) = pages.get(hit.page) else { return };
+    let frame = crate::frame::to_screen(*page, scale, hit.rect);
+    let at = pos2(frame.min.x - 28.0, frame.center().y - 14.0);
+    if !clip.contains(at) {
+        return;
+    }
+    let t = Tokens::get(ctx);
+    egui::Area::new(egui::Id::new("smart_art_frame_button")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).corner_radius(4).inner_margin(2).show(ui, |ui| {
+            if crate::widgets::icon_button(ui, "textPane", tl!("Text Pane")).clicked() {
+                let _ = app.run("smartArt.textPane", json!({"value": true}));
+            }
+        });
+    });
+}
+
+/// Text typed with a SmartArt graphic selected goes at the end of its current item (the first,
+/// before any is picked), and the Text Pane opens, as Word does; it never replaces the graphic.
+/// False when no graphic is selected.
+pub fn type_into(app: &mut WordApp, typed: &str) -> bool {
+    let Some(g) = wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session) else { return false };
+    let Some(i) = app.smart_art_item.filter(|i| *i < g.items.len()).or((!g.items.is_empty()).then_some(0)) else { return true };
+    let text = g.items.get(i).map_or(String::new(), |it| it.text.clone()) + typed;
+    if app.smart_art_typing == Some(i) {
+        app.session.join_next_undo();
+    }
+    if app.run("smartArt.items", items_with(&g, i, &text)).is_ok() {
+        app.smart_art_item = Some(i);
+        app.smart_art_typing = Some(i);
+    }
+    let _ = app.run("smartArt.textPane", json!({"value": true}));
+    true
+}
+
 /// The Text Pane: a row per item, indented by level. Typing changes the graphic as you go (one
 /// undo step per item typed in); Enter adds an item after the current one.
 pub fn text_pane(app: &mut WordApp, ui: &mut Ui) {

@@ -702,6 +702,8 @@
 	Space before/after:	Önce/sonra boşluk:
 	Spacing	Aralık
 	Spacing (pt):	Aralık (pt):
+	Kerning for fonts:	Yazı tipi aralık ayarı:
+	Points and above	punto ve üzeri
 	Speech	Konuşma
 	Spelling & Grammar	Yazım ve Dilbilgisi
 	Spelling &\nGrammar	Yazım ve\nDilbilgisi
@@ -1773,6 +1775,8 @@ preview	Title	Örnek
 	Customize Ribbon	Şeridi Özelleştir
 	Add to Quick Access Toolbar	Hızlı Erişim Araç Çubuğuna Ekle
 	Remove from Quick Access Toolbar	Hızlı Erişim Araç Çubuğundan Kaldır
+	Hide Quick Access Toolbar	Hızlı Erişim Araç Çubuğunu Gizle
+	Show Quick Access Toolbar	Hızlı Erişim Araç Çubuğunu Göster
 	Customize the Ribbon…	Şeridi Özelleştir…
 	Customize Quick Access Toolbar…	Hızlı Erişim Araç Çubuğunu Özelleştir…
 	More Commands…	Diğer Komutlar…

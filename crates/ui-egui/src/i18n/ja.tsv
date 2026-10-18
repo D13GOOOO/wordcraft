@@ -835,6 +835,8 @@
 	Space before/after:	段落前/後の間隔:
 	Spacing	間隔
 	Spacing (pt):	間隔 (pt):
+	Kerning for fonts:	カーニングを行う:
+	Points and above	pt 以上
 	Speech	音声
 	Spelling & Grammar	スペル チェックと文章校正
 	Spelling &\nGrammar	スペル チェックと文章校正
@@ -1549,6 +1551,8 @@
 	Customize Ribbon	リボンのユーザー設定
 	Add to Quick Access Toolbar	クイック アクセス ツール バーに追加
 	Remove from Quick Access Toolbar	クイック アクセス ツール バーから削除
+	Hide Quick Access Toolbar	クイック アクセス ツール バーを非表示にする
+	Show Quick Access Toolbar	クイック アクセス ツール バーを表示する
 	Customize the Ribbon…	リボンのユーザー設定…
 	Customize Quick Access Toolbar…	クイック アクセス ツール バーのユーザー設定…
 	More Commands…	その他のコマンド…

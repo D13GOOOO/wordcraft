@@ -274,8 +274,10 @@ fn sep(ui: &mut egui::Ui, t: &Tokens) {
     p.vline(r.center().x, r.y_range().shrink(4.0), egui::Stroke::new(1.0, t.border));
 }
 
-/// Highlight colour grid, matching the ribbon's.
-fn highlight_menu(ui: &mut egui::Ui, app: &mut WordApp) {
+/// Highlight colour grid and No Color, shared by the ribbon and the mini toolbar. The pick,
+/// No Color too, becomes the split button's colour, as in Word: after No Color a click on the
+/// button removes highlighting (#2105).
+pub(crate) fn highlight_menu(ui: &mut egui::Ui, app: &mut WordApp) {
     egui::Grid::new("mini_hl").spacing(Vec2::new(3.0, 3.0)).show(ui, |ui| {
         for (i, h) in wordcraft_doc::props::Highlight::ALL.iter().enumerate().skip(1) {
             let Some(c) = h.rgb() else { continue };
@@ -291,8 +293,10 @@ fn highlight_menu(ui: &mut egui::Ui, app: &mut WordApp) {
             }
         }
     });
-    if ui.selectable_label(false, "No Color").clicked() {
-        let _ = app.run("format.highlight", json!({"color": "none"}));
+    let enabled = widgets::enabled(app, "format.highlight");
+    if ui.add_enabled(enabled, egui::Button::new(tl!("No Color")).min_size(Vec2::new(200.0, 0.0))).clicked() {
+        app.canvas.last_highlight = "none".into();
+        widgets::run_from_ribbon(app, "format.highlight", json!({"color": "none"}));
         ui.close();
     }
 }
@@ -637,5 +641,41 @@ mod tests {
         click_at(&mut h, twenty);
         assert_eq!(format_state(&mut h).get("size").and_then(Value::as_f64), Some(20.0), "the bar's size list applied 20 pt");
         assert!(visible(h.state()) && bar_layer(&h).is_some(), "the bar stays up after its own list is used");
+    }
+
+    /// #2105: No Color removed the highlight but the Highlight button kept the colour picked
+    /// before, so the next click on it highlighted again. As in Word, No Color becomes the
+    /// button's choice: the next click removes highlighting.
+    #[test]
+    fn no_color_becomes_the_highlight_buttons_choice() {
+        use egui_kittest::kittest::{By, Queryable};
+        let mut h = bar_over("brown fox");
+        h.state_mut().run("format.highlight", json!({"color": "yellow"})).unwrap();
+        steps(&mut h);
+        // The bar's split buttons are Highlight then Font Color; their arrows are 11 × 22.
+        let highlight_arrow = |h: &egui_kittest::Harness<'static, WordApp>| {
+            let [bar, _] = h.ctx.data(|d| d.get_temp::<[Rect; 2]>(shown_id())).expect("the bar is shown over a selection");
+            h.query_all(
+                By::new().predicate(|n| n.raw_bounds().is_some_and(|r| ((r.x1 - r.x0) - 11.0).abs() < 0.5 && ((r.y1 - r.y0) - 22.0).abs() < 0.5)),
+            )
+            .map(|n| n.rect())
+            .filter(|r| bar.contains_rect(*r))
+            .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
+            .expect("the bar has the Highlight split button")
+        };
+        let arrow = highlight_arrow(&h);
+        click_at(&mut h, arrow.center());
+        let no_color = h.get(By::new().label_contains("No Color")).rect().center();
+        click_at(&mut h, no_color);
+        assert_eq!(format_state(&mut h).get("highlight"), Some(&Value::Null), "No Color removed the highlight");
+        assert_eq!(h.state().canvas.last_highlight, "none");
+
+        // Other highlighted text, then the button itself (left of its arrow): no highlight.
+        h.state_mut().run("select.text", json!({"text": "lazy"})).unwrap();
+        h.state_mut().run("format.highlight", json!({"color": "yellow"})).unwrap();
+        steps(&mut h);
+        let arrow = highlight_arrow(&h);
+        click_at(&mut h, pos2(arrow.min.x - 12.0, arrow.center().y));
+        assert_eq!(format_state(&mut h).get("highlight"), Some(&Value::Null), "the button applies No Color, not yellow again");
     }
 }

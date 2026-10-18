@@ -697,6 +697,8 @@
 	Space before/after:	Интервал перед/после:
 	Spacing	Интервал
 	Spacing (pt):	Интервал (пт):
+	Kerning for fonts:	Кернинг шрифтов:
+	Points and above	пт и более
 	Speech	Речь
 	Spelling & Grammar	Орфография и грамматика
 	Spelling &\nGrammar	Орфография\nи грамматика
@@ -1771,6 +1773,8 @@ preview	Title	Пример
 	Customize Ribbon	Настройка ленты
 	Add to Quick Access Toolbar	Добавить на панель быстрого доступа
 	Remove from Quick Access Toolbar	Удалить с панели быстрого доступа
+	Hide Quick Access Toolbar	Скрыть панель быстрого доступа
+	Show Quick Access Toolbar	Показать панель быстрого доступа
 	Customize the Ribbon…	Настроить ленту…
 	Customize Quick Access Toolbar…	Настроить панель быстрого доступа…
 	More Commands…	Другие команды…

@@ -659,8 +659,9 @@ impl Reader<'_> {
                 let ch = k.attr("w:char").and_then(|h| u32::from_str_radix(h.trim(), 16).ok()).and_then(char::from_u32).filter(|c| *c as u32 >= 0x20);
                 if let Some(ch) = ch {
                     let mut p = props.clone();
-                    if let Some(f) = k.attr("w:font").filter(|f| !f.is_empty()) {
-                        p.font = Some(f.to_string());
+                    // The symbol's own font, kept apart from the run's (ECMA-376 §17.3.3.30).
+                    if let Some(f) = k.attr("w:font").filter(|f| !f.trim().is_empty()) {
+                        p.sym_font = Some(f.to_string());
                     }
                     self.emit_text(sc, pb, &ch.to_string(), &p);
                 }
@@ -1115,6 +1116,29 @@ impl Reader<'_> {
         Some(InlineObject::Graphic { w, h, alt, float, graphic })
     }
 
+    /// A group or canvas member that is native ink (`content`, a `w14:contentPart`, inside
+    /// `alternate` when it has a picture fallback): what to write back (the whole alternate when
+    /// it can be kept, else the ink alone) and its fallback picture (a `Document::media` key).
+    /// `None` when the ink's part is missing or isn't InkML.
+    fn ink_member(&mut self, content: &El, alternate: Option<&El>, rels: &Rels) -> Option<(Arc<Embedded>, Option<String>)> {
+        let InlineObject::Graphic { graphic, .. } = self.read_ink_content_part(content, rels)? else { return None };
+        let mut source = graphic.source.clone()?;
+        let mut preview = None;
+        let choice = alternate.and_then(children_of_choice).filter(|c| c.name == "mc:Choice");
+        if let (Some(choice), Some(fallback)) = (choice, alternate.and_then(|a| a.child("mc:Fallback"))) {
+            let kept = El { name: "mc:AlternateContent".into(), attrs: Vec::new(), kids: vec![Node::El(choice.clone()), Node::El(fallback.clone())] };
+            // A malformed or over-budget fallback must not discard a valid native part.
+            if let Some(whole) = self.keep_embedded(&kept, rels, &[]) {
+                source = whole;
+                preview = match fallback.child("pic:pic").and_then(|p| self.read_pic(p, rels, 0.0, 0.0, String::new(), Float::default())) {
+                    Some(InlineObject::Image { media, .. }) => Some(media),
+                    _ => None,
+                };
+            }
+        }
+        Some((source, preview))
+    }
+
     fn read_ink_content_part(&mut self, content: &El, rels: &Rels) -> Option<InlineObject> {
         let part = super::part_of(rels, content.attr("r:id")?, INK_REL)?;
         let pkg = self.pkg;
@@ -1246,16 +1270,32 @@ impl Reader<'_> {
             if out.len() >= wordcraft_doc::para::MAX_GROUP_CHILDREN {
                 return;
             }
-            let e = match e.name.as_str() {
-                "mc:AlternateContent" => match children_of_choice(e).and_then(|c| c.els().next()) {
-                    Some(c) => c,
-                    None => continue,
-                },
-                _ => e,
+            // Native ink (`w14:contentPart`), alone or with a picture fallback: kept whole, in its
+            // place among the members. Ink that can't be kept gives way to its fallback.
+            let (e, ink) = match e.name.as_str() {
+                "w14:contentPart" => (e, self.ink_member(e, None, rels)),
+                "mc:AlternateContent" => {
+                    let choice = children_of_choice(e);
+                    match choice.filter(|c| c.name == "mc:Choice").and_then(|c| c.els().next()).filter(|c| c.name == "w14:contentPart") {
+                        Some(content) => match self.ink_member(content, Some(e), rels) {
+                            Some(ink) => (content, Some(ink)),
+                            None => match e.child("mc:Fallback").and_then(|f| f.els().next()) {
+                                Some(c) => (c, None),
+                                None => continue,
+                            },
+                        },
+                        None => match choice.and_then(|c| c.els().next()) {
+                            Some(c) => (c, None),
+                            None => continue,
+                        },
+                    }
+                }
+                _ => (e, None),
             };
             let sppr = match e.name.as_str() {
                 "wps:wsp" => e.child("wps:spPr"),
                 "pic:pic" => e.child("pic:spPr"),
+                "w14:contentPart" if ink.is_some() => Some(e),
                 // A group inside a canvas is a whole `wpg:wgp`.
                 "wpg:grpSp" | "wpg:wgp" => e.child("wpg:grpSpPr"),
                 _ => continue,
@@ -1277,10 +1317,21 @@ impl Reader<'_> {
             let max = crate::units::MAX_LEN_PT;
             let fit = |v: f32, lo: f32| wordcraft_geom::finite(v).clamp(lo, max);
             let (w, h) = (fit(ew * sx, 0.0), fit(eh * sy, 0.0));
-            let nv = if e.name == "pic:pic" { e.find("pic:cNvPr") } else { e.child("wps:cNvPr") };
+            let nv = match e.name.as_str() {
+                "pic:pic" => e.find("pic:cNvPr"),
+                "w14:contentPart" => e.child("w14:nvContentPartPr").and_then(|p| p.child("w14:cNvPr")),
+                _ => e.child("wps:cNvPr"),
+            };
             let (alt, meta) = nv_alt(nv);
             let float = Float { alt: meta, hidden: nv.is_some_and(|p| on_off_attr(p, "hidden")), ..Float::default() };
-            let obj = if e.name == "pic:pic" {
+            let obj = if let Some((source, preview)) = ink {
+                let mut float = float;
+                float.set_spin(xfrm_spin(e.child("w14:xfrm")));
+                // As drawing-level ink: its fallback picture, else the missing-picture box.
+                let items = vec![GraphicItem::Image { rect: [0.0, 0.0, w, h], media: preview.unwrap_or_default() }];
+                let graphic = Arc::new(Graphic { kind: GraphicKind::Ink, items, w, h, source: Some(source), ..Default::default() });
+                Some(InlineObject::Graphic { w, h, alt: alt.clone(), float, graphic })
+            } else if e.name == "pic:pic" {
                 self.read_pic(e, rels, w, h, alt.clone(), float)
             } else {
                 let mut o = self.read_wsp(sc, e, rels, w, h, float);
@@ -2156,7 +2207,8 @@ fn xfrm_spin(sppr: Option<&El>) -> wordcraft_geom::Spin {
 
 /// The `a:xfrm` in shape properties `sppr` (zeros when missing).
 fn group_xfrm(sppr: Option<&El>) -> Xfrm {
-    let x = sppr.and_then(|s| s.child("a:xfrm"));
+    // A content part (native ink) has its own `w14:xfrm`.
+    let x = sppr.and_then(|s| s.child("a:xfrm").or_else(|| s.child("w14:xfrm")));
     let pair = |name: &str, a: &str, b: &str, lim: f32| {
         let e = x.and_then(|x| x.child(name))?;
         let v = |n: &str| e.attr(n).and_then(|v| measure(v, 12_700.0)).map(|v| v.clamp(-lim, lim)).unwrap_or(0.0);

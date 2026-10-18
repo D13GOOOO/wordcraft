@@ -764,6 +764,8 @@
 	Space before/after:	Abstand vor/nach:
 	Spacing	Abstand
 	Spacing (pt):	Abstand (pt):
+	Kerning for fonts:	Unterschneidung für Schriftarten:
+	Points and above	Punkt und größer
 	Speech	Sprache
 	Spelling & Grammar	Rechtschreibung und Grammatik
 	Spelling &\nGrammar	Rechtschreibung und\nGrammatik
@@ -1403,6 +1405,8 @@
 	Customize Ribbon	Menüband anpassen
 	Add to Quick Access Toolbar	Zur Symbolleiste für den Schnellzugriff hinzufügen
 	Remove from Quick Access Toolbar	Aus der Symbolleiste für den Schnellzugriff entfernen
+	Hide Quick Access Toolbar	Symbolleiste für den Schnellzugriff ausblenden
+	Show Quick Access Toolbar	Symbolleiste für den Schnellzugriff einblenden
 	Customize the Ribbon…	Menüband anpassen…
 	Customize Quick Access Toolbar…	Symbolleiste für den Schnellzugriff anpassen…
 	More Commands…	Weitere Befehle…

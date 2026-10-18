@@ -840,6 +840,8 @@
 	Space before/after:	앞/뒤 간격:
 	Spacing	간격
 	Spacing (pt):	간격 (pt):
+	Kerning for fonts:	글꼴 커닝:
+	Points and above	pt 이상
 	Speech	음성
 	Spelling & Grammar	맞춤법 및 문법
 	Spelling &\nGrammar	맞춤법 및\n문법
@@ -1530,6 +1532,8 @@
 	Customize Ribbon	리본 사용자 지정
 	Add to Quick Access Toolbar	빠른 실행 도구 모음에 추가
 	Remove from Quick Access Toolbar	빠른 실행 도구 모음에서 제거
+	Hide Quick Access Toolbar	빠른 실행 도구 모음 숨기기
+	Show Quick Access Toolbar	빠른 실행 도구 모음 표시
 	Customize the Ribbon…	리본 사용자 지정…
 	Customize Quick Access Toolbar…	빠른 실행 도구 모음 사용자 지정…
 	More Commands…	명령 더 보기…

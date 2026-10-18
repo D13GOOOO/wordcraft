@@ -484,6 +484,55 @@ fn dashes() {
     assert_eq!(s.doc.plain_text(StoryRef::Body), "A – b and c – d and e—f and café—g ");
 }
 
+/// #2036: a dash AutoFormat makes right after a symbol is text, not the symbol's font.
+#[test]
+fn a_dash_after_a_symbol_is_not_in_the_symbol_font() {
+    let mut s = s();
+    typ(&mut s, "e");
+    run(&mut s, "insert.symbol", json!({"char": "\u{F0FC}", "font": "Wingdings"}));
+    typ(&mut s, "--f ");
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    let dash = p.text.find('\u{2014}').expect("em dash");
+    assert_eq!(p.props_of_char(dash).sym_font, None);
+}
+
+/// #2036: the en dashes of "x -- y" and "x - y" after a symbol (and its symbol-font space) are
+/// text, not the symbol's font.
+#[test]
+fn en_dashes_after_a_symbol_are_not_in_the_symbol_font() {
+    for keys in ["-- f ", "- f "] {
+        let mut s = s();
+        typ(&mut s, "e");
+        run(&mut s, "insert.symbol", json!({"char": "\u{F0FC} ", "font": "Wingdings"}));
+        typ(&mut s, keys);
+        let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+        let dash = p.text.find('\u{2013}').unwrap_or_else(|| panic!("en dash for {keys:?}: {:?}", p.text));
+        assert_eq!(p.props_of_char(dash).sym_font, None, "{keys:?}");
+    }
+}
+
+/// #2036: an AutoCorrect replacement of a word that starts with a symbol-font character is text.
+#[test]
+fn an_autocorrect_replacement_of_a_symbol_word_is_not_in_the_symbol_font() {
+    let mut s = s();
+    run(&mut s, "insert.symbol", json!({"char": "(", "font": "Symbol"}));
+    typ(&mut s, "c) ");
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    let c = p.text.find('\u{A9}').unwrap_or_else(|| panic!("(c) → ©: {:?}", p.text));
+    assert_eq!(p.props_of_char(c).sym_font, None);
+}
+
+/// #2036: a letter AutoCorrect capitalises after a symbol-font character is text, not the symbol's font.
+#[test]
+fn a_capitalised_word_after_a_symbol_is_not_in_the_symbol_font() {
+    let mut s = s();
+    run(&mut s, "insert.symbol", json!({"char": "m", "font": "Wingdings"}));
+    typ(&mut s, "onday ");
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    let m = p.text.find('M').unwrap_or_else(|| panic!("monday → Monday: {:?}", p.text));
+    assert_eq!(p.props_of_char(m).sym_font, None);
+}
+
 #[test]
 fn border_line_autoformat() {
     let s = typed("Above\n---\nBelow");
@@ -1907,4 +1956,163 @@ fn autocorrect_capitalisation_follows_turkic_case_mapping() {
     run(&mut s, "review.language", json!({"lang": "en-US", "default": true}));
     typ(&mut s, "İNgilizce ");
     assert_eq!(s.doc.plain_text(StoryRef::Body), "İngilizce ", "no combining dot in any language");
+}
+
+// Spelling as you type (#1552): the word being typed gets no red squiggle until the caret leaves
+// it; F7 and the Spelling pane still report it. See docs/typing-parity.md. Paragraphs start with
+// a correct word so AutoCorrect's sentence capital doesn't change the misspelled one.
+
+/// The words body paragraph `i` has a spelling squiggle under, in order.
+fn squiggles(s: &mut Session, i: usize) -> Vec<String> {
+    let path = wordcraft_doc::Path::top(i);
+    let text = s.doc.para(StoryRef::Body, &path).map(|p| p.text.clone()).unwrap_or_default();
+    let l = s.layout();
+    l.pages
+        .iter()
+        .flat_map(|pg| pg.items.iter())
+        .filter_map(|it| match it {
+            wordcraft_layout::Placed::Lines { para, path: p, l0: 0, .. } if *p == path => {
+                Some(para.issues.iter().filter(|i| !i.2).filter_map(|i| text.get(i.0..i.1).map(str::to_string)).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// The misspelled words `review.issues` (the Spelling pane) reports, in order.
+fn reported(s: &mut Session) -> Vec<String> {
+    let issues = s.run("review.issues", &json!({})).unwrap();
+    issues.as_array().unwrap().iter().filter(|i| i["kind"] == "spelling").map(|i| i["text"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn the_word_being_typed_is_not_marked_until_it_ends() {
+    let mut s = typed("The helo");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new(), "no squiggle while the word is typed");
+    // F7 and the Spelling pane still see it.
+    assert_eq!(reported(&mut s), ["helo"]);
+    let next = s.run("review.spelling", &json!({})).unwrap();
+    assert_eq!(next["text"], "helo");
+    // A space ends the word.
+    let mut s = typed("The helo ");
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+    typ(&mut s, "wrld");
+    assert_eq!(squiggles(&mut s, 0), ["helo"], "the next word is being typed");
+    assert_eq!(reported(&mut s), ["helo", "wrld"]);
+    // So does punctuation.
+    typ(&mut s, ".");
+    assert_eq!(squiggles(&mut s, 0), ["helo", "wrld"]);
+    // Enter and Tab too.
+    let mut s = typed("The helo\n");
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+    let mut s = typed("The helo\t");
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+}
+
+#[test]
+fn moving_the_caret_out_of_the_typed_word_marks_it() {
+    for key in ["caret.left", "caret.home", "caret.wordLeft", "caret.docStart"] {
+        let mut s = typed("The helo");
+        run(&mut s, key, json!({}));
+        assert_eq!(squiggles(&mut s, 0), ["helo"], "{key}");
+        // Coming back to the end of the word doesn't hide the squiggle again.
+        run(&mut s, "caret.end", json!({}));
+        assert_eq!(s.sel.focus, Pos::body(0, 8));
+        assert_eq!(squiggles(&mut s, 0), ["helo"], "{key} then End");
+    }
+    // A selection ends it too.
+    let mut s = typed("The helo");
+    run(&mut s, "select.all", json!({}));
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+}
+
+#[test]
+fn a_click_elsewhere_marks_the_typed_word_and_a_click_back_keeps_the_mark() {
+    let mut s = typed("Fine\nThe helo");
+    assert_eq!(squiggles(&mut s, 1), Vec::<String>::new());
+    // The canvas sets the caret directly on a click.
+    s.sel = crate::Selection::caret(Pos::body(0, 2));
+    assert_eq!(squiggles(&mut s, 1), ["helo"]);
+    s.sel = crate::Selection::caret(Pos::body(1, 8));
+    assert_eq!(squiggles(&mut s, 1), ["helo"], "an existing misspelled word keeps its squiggle");
+    // Typing into it makes it the word being typed again.
+    typ(&mut s, "o");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "Fine\nThe heloo");
+    assert_eq!(squiggles(&mut s, 1), Vec::<String>::new());
+    typ(&mut s, " ");
+    assert_eq!(squiggles(&mut s, 1), ["heloo"]);
+}
+
+#[test]
+fn backspace_into_a_finished_word_edits_it_again() {
+    let mut s = typed("The helo ");
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+    typ(&mut s, "\u{8}");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    typ(&mut s, "\u{8}\u{8}llo ");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "The hello ");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+}
+
+#[test]
+fn autocorrect_and_inserted_text_are_marked_as_usual() {
+    // AutoCorrect fixes the word as the space ends it: nothing to mark.
+    let mut s = typed("I typed teh ");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "I typed the ");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    // Text inserted whole (a paste, an agent): only the word the caret ends in is being typed.
+    let mut s = typed("");
+    run(&mut s, "text.insert", json!({"text": "The helo wrld"}));
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+    // Undo moves the caret: whatever is left is marked, as the Spelling pane reports it.
+    let mut s = typed("The helo");
+    run(&mut s, "caret.left", json!({}));
+    typ(&mut s, "x");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "The helxo");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "The helo");
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+    assert_eq!(reported(&mut s), ["helo"]);
+}
+
+#[test]
+fn apostrophes_and_hyphens_stay_part_of_the_word_being_typed() {
+    // Smart quotes turn the apostrophe into ’, which the spelling check keeps in the word.
+    let mut s = typed("It doesn'");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "It doesn’");
+    assert_eq!(reported(&mut s), ["doesn"], "the stem alone is a misspelling");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    let mut s = typed("It doesn't ");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    // A hyphen joins the parts of a compound being typed.
+    let mut s = typed("The nonn-");
+    assert_eq!(reported(&mut s), ["nonn"]);
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    typ(&mut s, "exist");
+    assert_eq!(squiggles(&mut s, 0), Vec::<String>::new());
+    typ(&mut s, " ");
+    assert!(!squiggles(&mut s, 0).is_empty());
+    assert_eq!(squiggles(&mut s, 0), reported(&mut s));
+    // A hyphen after a space starts no word.
+    let mut s = typed("The helo -");
+    assert_eq!(squiggles(&mut s, 0), ["helo"]);
+}
+
+#[test]
+fn text_commands_that_edit_nothing_leave_an_existing_word_marked() {
+    let mut s = typed("Fine\nThe helo");
+    s.sel = crate::Selection::caret(Pos::body(0, 2));
+    assert_eq!(squiggles(&mut s, 1), ["helo"]);
+    s.sel = crate::Selection::caret(Pos::body(1, 8));
+    // Insert switches overtype; Delete at the end of the document and Shift+Tab change no text.
+    run(&mut s, "text.overtype", json!({}));
+    assert_eq!(squiggles(&mut s, 1), ["helo"], "Insert");
+    run(&mut s, "text.overtype", json!({}));
+    let _ = s.run("text.delete", &json!({}));
+    assert_eq!(squiggles(&mut s, 1), ["helo"], "Delete with nothing after the caret");
+    let _ = s.run("text.backTab", &json!({}));
+    assert_eq!(squiggles(&mut s, 1), ["helo"], "Shift+Tab");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "Fine\nThe helo");
 }
