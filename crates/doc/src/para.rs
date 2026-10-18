@@ -743,6 +743,14 @@ impl InlineObject {
             })
             .collect()
     }
+    /// A legacy form field's definition (`FORMCHECKBOX`, `FORMTEXT`, `FORMDROPDOWN`), read from
+    /// the `w:ffData` it keeps; `None` for anything else.
+    pub fn legacy_form(&self) -> Option<crate::legacy_form::LegacyForm> {
+        match self {
+            InlineObject::Field { form, .. } if !form.is_empty() => crate::legacy_form::LegacyForm::parse(form),
+            _ => None,
+        }
+    }
     /// Zero-width markers don't take part in layout.
     pub fn is_marker(&self) -> bool {
         matches!(
@@ -936,7 +944,7 @@ impl Paragraph {
                 k += 1;
                 continue;
             }
-            let font = runs.peek().filter(|(r, _)| r.contains(&i)).and_then(|(_, p)| p.font.as_deref());
+            let font = runs.peek().filter(|(r, _)| r.contains(&i)).and_then(|(_, p)| p.shown_font());
             out.push(font.and_then(|f| crate::symbol_fonts::symbol_char(f, c)).unwrap_or(c));
         }
         out

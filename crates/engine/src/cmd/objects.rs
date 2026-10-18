@@ -4,6 +4,7 @@
 //! caret). Picture adjustments re-encode the bitmap (originals are kept for Reset Picture).
 
 use serde_json::{Value, json};
+use wordcraft_doc::graphic::GraphicKind;
 use wordcraft_doc::para::{Float, InlineObject, Wrap, WrapText};
 use wordcraft_doc::props::{Rgb, TextVert, VAlign};
 use wordcraft_doc::{Pos, StoryRef, TextBody};
@@ -56,9 +57,17 @@ fn has_movable(s: &Session) -> Option<&'static str> {
         _ => has_object(s),
     }
 }
+/// Word's own ink in a group is kept in the form a group member takes; it can't stand on its own
+/// yet, so such a group stays whole.
+const INK_GROUP: &str = "a group holding Word ink can't be ungrouped yet";
+/// Does group `o` hold a member that can't stand on its own (Word's ink)?
+fn holds_ink(o: &InlineObject) -> bool {
+    matches!(o, InlineObject::Group { children, .. } if children.iter().any(|c| matches!(&c.obj, InlineObject::Graphic { graphic, .. } if graphic.kind == GraphicKind::Ink)))
+}
 fn has_group(s: &Session) -> Option<&'static str> {
     match selected(s) {
         Some((_, o)) if o.is_canvas() => Some("a drawing canvas can't be ungrouped"),
+        Some((_, o)) if holds_ink(&o) => Some(INK_GROUP),
         Some((_, InlineObject::Group { .. })) => None,
         _ => Some("select a group first"),
     }
@@ -1434,6 +1443,9 @@ fn group(s: &mut Session, _: &Value) -> CmdResult {
 fn ungroup(s: &mut Session, _: &Value) -> CmdResult {
     let (pos, obj) = selected(s).ok_or_else(|| CmdError::Disabled("select a group first".into()))?;
     let InlineObject::Group { w, h, float, .. } = &obj else { return Err(CmdError::Disabled("select a group first".into())) };
+    if holds_ink(&obj) {
+        return Err(CmdError::Disabled(INK_GROUP.into()));
+    }
     // Its offsets, explicit: the members are placed from the same anchor.
     let pos = if float.wrap == Wrap::Inline {
         if pos.path.depth() > 0 || !movable_story(s, pos.story) {
@@ -1667,6 +1679,41 @@ mod tests {
         s.run("insert.picture", &json!({"data": data})).unwrap();
         s.run("insert.picture", &json!({"data": data})).unwrap();
         assert_eq!(s.run("arrange.selectionPane", &json!({})).unwrap().as_array().map(Vec::len), Some(2));
+    }
+
+    /// #2019: Insert › Shapes adds each new shape beside the selected one, as Word draws it, so
+    /// shapes inserted in a row are all kept (the second used to replace the first, which stays
+    /// selected after its insert). Selected text stays too, and the new shape is selected.
+    #[test]
+    fn shapes_inserted_in_a_row_are_all_kept_and_keep_selected_text() {
+        let objects = |s: &mut Session| s.run("arrange.selectionPane", &json!({})).unwrap().as_array().map(Vec::len);
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        for kind in ["rectangle", "ellipse", "star"] {
+            s.run("insert.shape", &json!({"kind": kind})).unwrap();
+        }
+        assert_eq!(objects(&mut s), Some(3));
+
+        let mut s = Session::new(wordcraft_doc::Document::from_text("Kiln room"));
+        s.run("select.text", &json!({"text": "Kiln"})).unwrap();
+        s.run("insert.shape", &json!({"kind": "rectangle"})).unwrap();
+        let text = s.doc.plain_text(StoryRef::Body);
+        assert!(text.starts_with("Kiln") && text.ends_with(" room"), "{text:?}");
+        assert_eq!(objects(&mut s), Some(1));
+        let (a, b) = s.sel.ordered();
+        let obj = wordcraft_doc::para::OBJ.len_utf8();
+        assert_eq!((a.off, b.off), (4, 4 + obj), "the new shape, after the text, is selected");
+    }
+
+    /// Insert › Pictures does replace a selected picture, as Word does (checked in Word for
+    /// Windows while fixing #2019): only shapes are added beside the selection.
+    #[test]
+    fn an_inserted_picture_replaces_a_selected_picture() {
+        let data = super::super::insert::base64_encode(&png(20, 10));
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("insert.picture", &json!({"data": data})).unwrap();
+        s.sel = crate::Selection { anchor: Pos::body(0, 0), focus: Pos::body(0, wordcraft_doc::para::OBJ.len_utf8()) };
+        s.run("insert.picture", &json!({"data": data})).unwrap();
+        assert_eq!(s.run("arrange.selectionPane", &json!({})).unwrap().as_array().map(Vec::len), Some(1));
     }
 
     #[test]
@@ -2336,5 +2383,101 @@ mod tests {
         let mid = (cols[0].0 + cols[0].1) / 2.0;
         let got = anchor_paragraph(&s.doc, &layout, 1, (mid, top + 1.0), StoryRef::Body);
         assert_eq!(got, Some(wordcraft_doc::Path::top(plain)));
+    }
+
+    /// A Word file whose only paragraph holds a group of a rectangle and Word's own ink (with its
+    /// picture fallback).
+    fn group_with_word_ink() -> Vec<u8> {
+        use std::io::Write;
+        let ns = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk""#;
+        let rect = r#"<wps:wsp><wps:cNvPr id="2" name="Box"/><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></wps:spPr><wps:bodyPr/></wps:wsp>"#;
+        let ink = r#"<mc:AlternateContent><mc:Choice Requires="wpi"><w14:contentPart bwMode="auto" r:id="rInk"><w14:nvContentPartPr><w14:cNvPr id="3" name="Ink 3"/><w14:cNvContentPartPr/></w14:nvContentPartPr><w14:xfrm><a:off x="914400" y="0"/><a:ext cx="914400" cy="457200"/></w14:xfrm></w14:contentPart></mc:Choice><mc:Fallback><pic:pic><pic:nvPicPr><pic:cNvPr id="3" name="Ink 3"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rPreview"/></pic:blipFill><pic:spPr><a:xfrm><a:off x="914400" y="0"/><a:ext cx="914400" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></mc:Fallback></mc:AlternateContent>"#;
+        let group = format!(
+            r#"<w:drawing><wp:anchor behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1" relativeHeight="1" simplePos="0" distT="0" distB="0" distL="0" distR="0"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="1828800" cy="914400"/><wp:wrapNone/><wp:docPr id="1" name="Group 1"/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"><wpg:wgp><wpg:cNvGrpSpPr/><wpg:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="914400"/><a:chOff x="0" y="0"/><a:chExt cx="1828800" cy="914400"/></a:xfrm></wpg:grpSpPr>{rect}{ink}</wpg:wgp></a:graphicData></a:graphic></wp:anchor></w:drawing>"#
+        );
+        let rel = |id: &str, ty: &str, target: &str| {
+            format!(r#"<Relationship Id="{id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/{ty}" Target="{target}"/>"#)
+        };
+        let parts = [
+            ("_rels/.rels", format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{}</Relationships>"#, rel("rId1", "officeDocument", "word/document.xml"))),
+            ("[Content_Types].xml", r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/ink/ink1.xml" ContentType="application/inkml+xml"/><Default Extension="png" ContentType="image/png"/></Types>"#.to_string()),
+            ("word/document.xml", format!(r#"<w:document {ns}><w:body><w:p><w:r>{group}</w:r></w:p></w:body></w:document>"#)),
+            (
+                "word/_rels/document.xml.rels",
+                format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{}{}</Relationships>"#, rel("rInk", "customXml", "ink/ink1.xml"), rel("rPreview", "image", "media/preview.png")),
+            ),
+            ("word/ink/ink1.xml", r#"<ink xmlns="http://www.w3.org/2003/InkML"><trace>0 0, 1 1</trace></ink>"#.to_string()),
+        ];
+        let mut zw = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, xml) in parts {
+            zw.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            zw.write_all(xml.as_bytes()).unwrap();
+        }
+        zw.start_file("word/media/preview.png", zip::write::SimpleFileOptions::default()).unwrap();
+        zw.write_all(&png(8, 4)).unwrap();
+        zw.finish().unwrap().into_inner()
+    }
+
+    fn ink_members(doc: &wordcraft_doc::Document) -> usize {
+        let groups: Vec<_> = doc.body.iter().filter_map(|b| b.as_para()).flat_map(|p| p.objects.iter()).collect();
+        let nested = groups
+            .iter()
+            .filter_map(|o| match o {
+                InlineObject::Group { children, .. } => Some(children.iter().filter(|c| matches!(c.obj, InlineObject::Graphic { .. })).count()),
+                _ => None,
+            })
+            .sum::<usize>();
+        let alone = groups.iter().filter(|o| matches!(o, InlineObject::Graphic { .. })).count();
+        nested + alone
+    }
+
+    /// Gap 2 review: a group holding Word's own ink can't be ungrouped (its ink can't stand alone
+    /// yet), so open → Ungroup → save → reopen keeps the ink in the group with its part.
+    #[test]
+    fn ungroup_refuses_a_group_holding_word_ink_and_the_ink_survives_saving() {
+        use std::io::Read;
+        let mut s = Session::new(wordcraft_docx::read(&group_with_word_ink()).unwrap());
+        assert_eq!(ink_members(&s.doc), 1, "the fixture's ink is read into the group");
+        let pos = Pos::body(0, 0);
+        s.sel = Selection { anchor: pos.clone(), focus: Pos { off: pos.off + wordcraft_doc::para::OBJ.len_utf8(), ..pos } };
+        assert!(matches!(selected(&s), Some((_, InlineObject::Group { .. }))));
+        let before = wordcraft_docx::write(&s.doc).unwrap();
+        assert!(has_group(&s).is_some(), "Ungroup is greyed out");
+        let err = s.run("arrange.ungroup", &json!({})).unwrap_err();
+        assert!(matches!(err, CmdError::Disabled(_)), "{err:?}");
+        let err = ungroup(&mut s, &json!({})).unwrap_err();
+        assert!(matches!(err, CmdError::Disabled(_)), "{err:?}");
+        let bytes = wordcraft_docx::write(&s.doc).unwrap();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).unwrap();
+        let mut xml = String::new();
+        z.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
+        assert_eq!(xml.matches("<w14:contentPart").count(), 1, "{xml}");
+        assert!(xml.contains("<mc:Fallback>"), "{xml}");
+        assert_eq!(bytes, before, "the refused ungroup leaves the document unchanged");
+        let names: Vec<String> = z.file_names().map(String::from).collect();
+        assert_eq!(names.iter().filter(|n| n.starts_with("word/ink/")).count(), 1, "{names:?}");
+        let mut rels = String::new();
+        z.by_name("word/_rels/document.xml.rels").unwrap().read_to_string(&mut rels).unwrap();
+        assert_eq!(rels.matches("/customXml\"").count(), 1, "one ink relationship: {rels}");
+        let back = wordcraft_docx::read(&bytes).unwrap();
+        assert_eq!(ink_members(&back), 1);
+    }
+
+    /// Review: only Word's ink pins a group; a group of charts or diagrams ungroups as before.
+    #[test]
+    fn only_ink_members_pin_a_group() {
+        let s = Session::new(wordcraft_docx::read(&group_with_word_ink()).unwrap());
+        let pos = Pos::body(0, 0);
+        let mut s = s;
+        s.sel = Selection { anchor: pos.clone(), focus: Pos { off: pos.off + wordcraft_doc::para::OBJ.len_utf8(), ..pos } };
+        let Some((_, mut group)) = selected(&s) else { panic!("no group") };
+        assert!(holds_ink(&group));
+        let InlineObject::Group { children, .. } = &mut group else { panic!("not a group") };
+        for c in children.iter_mut() {
+            if let InlineObject::Graphic { graphic, .. } = &mut c.obj {
+                std::sync::Arc::make_mut(graphic).kind = GraphicKind::Chart;
+            }
+        }
+        assert!(!holds_ink(&group), "a group of charts is not pinned");
     }
 }

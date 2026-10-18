@@ -484,6 +484,55 @@ fn dashes() {
     assert_eq!(s.doc.plain_text(StoryRef::Body), "A – b and c – d and e—f and café—g ");
 }
 
+/// #2036: a dash AutoFormat makes right after a symbol is text, not the symbol's font.
+#[test]
+fn a_dash_after_a_symbol_is_not_in_the_symbol_font() {
+    let mut s = s();
+    typ(&mut s, "e");
+    run(&mut s, "insert.symbol", json!({"char": "\u{F0FC}", "font": "Wingdings"}));
+    typ(&mut s, "--f ");
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    let dash = p.text.find('\u{2014}').expect("em dash");
+    assert_eq!(p.props_of_char(dash).sym_font, None);
+}
+
+/// #2036: the en dashes of "x -- y" and "x - y" after a symbol (and its symbol-font space) are
+/// text, not the symbol's font.
+#[test]
+fn en_dashes_after_a_symbol_are_not_in_the_symbol_font() {
+    for keys in ["-- f ", "- f "] {
+        let mut s = s();
+        typ(&mut s, "e");
+        run(&mut s, "insert.symbol", json!({"char": "\u{F0FC} ", "font": "Wingdings"}));
+        typ(&mut s, keys);
+        let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+        let dash = p.text.find('\u{2013}').unwrap_or_else(|| panic!("en dash for {keys:?}: {:?}", p.text));
+        assert_eq!(p.props_of_char(dash).sym_font, None, "{keys:?}");
+    }
+}
+
+/// #2036: an AutoCorrect replacement of a word that starts with a symbol-font character is text.
+#[test]
+fn an_autocorrect_replacement_of_a_symbol_word_is_not_in_the_symbol_font() {
+    let mut s = s();
+    run(&mut s, "insert.symbol", json!({"char": "(", "font": "Symbol"}));
+    typ(&mut s, "c) ");
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    let c = p.text.find('\u{A9}').unwrap_or_else(|| panic!("(c) → ©: {:?}", p.text));
+    assert_eq!(p.props_of_char(c).sym_font, None);
+}
+
+/// #2036: a letter AutoCorrect capitalises after a symbol-font character is text, not the symbol's font.
+#[test]
+fn a_capitalised_word_after_a_symbol_is_not_in_the_symbol_font() {
+    let mut s = s();
+    run(&mut s, "insert.symbol", json!({"char": "m", "font": "Wingdings"}));
+    typ(&mut s, "onday ");
+    let p = s.doc.para_at(&Pos::body(0, 0)).unwrap();
+    let m = p.text.find('M').unwrap_or_else(|| panic!("monday → Monday: {:?}", p.text));
+    assert_eq!(p.props_of_char(m).sym_font, None);
+}
+
 #[test]
 fn border_line_autoformat() {
     let s = typed("Above\n---\nBelow");

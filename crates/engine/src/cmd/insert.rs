@@ -348,8 +348,11 @@ fn shape(s: &mut Session, v: &Value) -> CmdResult {
     if super::canvas::add_member(s, obj.clone())?.is_some() {
         return sel_result(s);
     }
+    // Word draws a new shape beside what is selected and never deletes it: the shape just
+    // inserted (which is selected) stays, and so does selected text (#2019). It goes after the
+    // selection and becomes the selection. (A picture does replace the selection, as in Word.)
     let props = s.typing_props();
-    let at = delete_selection(s)?;
+    let (_, at) = s.sel.ordered();
     let end = s.doc.insert_object(&at, obj, &props)?;
     s.sel = Selection { anchor: at, focus: end };
     sel_result(s)
@@ -886,10 +889,27 @@ fn symbol(s: &mut Session, v: &Value) -> CmdResult {
         return Err(CmdError::Params("font: a family name".into()));
     }
     let base = s.typing_props();
-    let mut props = base.clone();
-    props.font = Some(font.to_string());
-    s.pending = Some(props);
-    let r = type_text(s, c);
+    // A symbol font's character remembers it as its own font (`w:sym`), so changing the text's
+    // font later keeps the symbol; other fonts are ordinary run formatting. `w:sym` holds a 16-bit
+    // code, so a character beyond the Basic Multilingual Plane stays ordinary text in that font.
+    // Each character decides for itself, so a mixed string keeps its symbols and its text apart.
+    let font_is_symbol = wordcraft_doc::symbol_fonts::is_symbol_font(font);
+    let mut r = Ok(());
+    let mut buf = [0u8; 4];
+    for ch in c.chars() {
+        let mut props = base.clone();
+        let private_use = ('\u{F020}'..='\u{F0FF}').contains(&ch);
+        if u32::from(ch) <= 0xFFFF && (font_is_symbol || private_use) {
+            props.sym_font = Some(font.to_string());
+        } else {
+            props.font = Some(font.to_string());
+        }
+        s.pending = Some(props);
+        r = type_text(s, ch.encode_utf8(&mut buf));
+        if r.is_err() {
+            break;
+        }
+    }
     // Typing on after the symbol goes on in the text's own font.
     s.pending = Some(base);
     r?;
@@ -1156,6 +1176,27 @@ mod tests {
     }
 
     /// Insert › Symbol with a font: only the symbol takes it, the caret's font carries on after.
+    #[test]
+    fn a_mixed_symbol_string_keeps_symbols_and_text_apart() {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("a"));
+        s.run("caret.docEnd", &json!({})).unwrap();
+        s.run("insert.symbol", &json!({"char": "\u{F041}A", "font": "My Custom Font"})).unwrap();
+        let p = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+        assert_eq!(p.props_of_char(1).sym_font.as_deref(), Some("My Custom Font"), "the private-use glyph");
+        assert_eq!(p.props_of_char(4).sym_font, None, "the plain letter");
+        assert_eq!(p.props_of_char(4).font.as_deref(), Some("My Custom Font"));
+    }
+
+    #[test]
+    fn an_astral_symbol_stays_text_in_its_font() {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("a"));
+        s.run("caret.docEnd", &json!({})).unwrap();
+        s.run("insert.symbol", &json!({"char": "\u{1F600}", "font": "Wingdings"})).unwrap();
+        let p = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+        assert_eq!(p.props_of_char(1).sym_font, None, "w:sym can't hold it");
+        assert_eq!(p.props_of_char(1).font.as_deref(), Some("Wingdings"));
+    }
+
     #[test]
     fn symbol_takes_its_own_font() {
         let mut s = Session::new(wordcraft_doc::Document::from_text("ab"));

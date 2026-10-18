@@ -729,6 +729,68 @@ fn page_break_char_starts_new_page() {
     assert_eq!(l.pages.len(), 2);
 }
 
+/// Legacy form fields are drawn as Word draws them: a check box is a square as tall as the text's
+/// line, inset 1.16 pt, taking that line height of room, with an X when checked (`w:checked`
+/// beating `w:default`); a drop-down shows its selected entry whatever result was saved.
+#[test]
+fn legacy_form_fields_are_drawn() {
+    let field = |form: &str| InlineObject::Field {
+        instr: "FORMCHECKBOX".into(),
+        result: String::new(),
+        locked: false,
+        dirty: false,
+        code: false,
+        form: form.into(),
+    };
+    let check_box = |state: &str| format!(r#"<w:ffData><w:name w:val="Box"/><w:checkBox><w:sizeAuto/>{state}</w:checkBox></w:ffData>"#);
+    let draws_of = |o: InlineObject| {
+        let mut d = Document::from_text("ab");
+        d.insert_object(&Pos::body(0, 1), o, &Default::default()).unwrap();
+        let l = lay(&d);
+        let b_x = l.caret(&Pos::body(0, 1 + wordcraft_doc::para::OBJ.len_utf8())).unwrap().x;
+        let a_x = l.caret(&Pos::body(0, 1)).unwrap().x;
+        (display::page_display(&d, &l.pages[0], &display::DisplayOptions::default()), b_x - a_x)
+    };
+    let squares = |items: &[display::Draw]| -> Vec<wordcraft_geom::Rect> {
+        items
+            .iter()
+            .filter_map(|i| {
+                if let display::Draw::Shape { rect, kind: wordcraft_doc::para::ShapeKind::Rectangle, stroke: Some(_), .. } = i {
+                    Some(*rect)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    let diagonals = |items: &[display::Draw]| {
+        items.iter().filter(|i| matches!(i, display::Draw::Line { x0, x1, y0, y1, .. } if (x1 - x0).abs() > 1.0 && (y1 - y0).abs() > 1.0)).count()
+    };
+    let (items, room) = draws_of(field(&check_box(r#"<w:default w:val="0"/>"#)));
+    let sq = squares(&items);
+    assert_eq!(sq.len(), 1, "one square: {items:?}");
+    assert!((sq[0].w - sq[0].h).abs() < 0.01 && (room - sq[0].w - 2.0 * display::CHECK_BOX_INSET).abs() < 0.01, "{:?} in {room}", sq[0]);
+    assert!(sq[0].w > 8.0 && sq[0].w < 14.0, "about the line's height: {}", sq[0].w);
+    assert_eq!(diagonals(&items), 0, "unchecked");
+    assert_eq!(diagonals(&draws_of(field(&check_box(r#"<w:default w:val="1"/>"#))).0), 2, "checked by default");
+    assert_eq!(diagonals(&draws_of(field(&check_box(r#"<w:default w:val="1"/><w:checked w:val="0"/>"#))).0), 0, "w:checked wins");
+    // An explicit size: 20 pt is about twice the 10-11 pt text's square.
+    let (big, _) = draws_of(field(&check_box(r#"<w:size w:val="40"/><w:default w:val="0"/>"#)));
+    assert!(squares(&big)[0].w > sq[0].w * 1.6, "{:?} vs {:?}", squares(&big), sq);
+    // A drop-down shows its selected entry.
+    let dd = InlineObject::Field {
+        instr: "FORMDROPDOWN".into(),
+        result: String::new(),
+        locked: false,
+        dirty: false,
+        code: false,
+        form: r#"<w:ffData><w:name w:val="List"/><w:ddList><w:result w:val="1"/><w:listEntry w:val="Alpha"/><w:listEntry w:val="Beta"/></w:ddList></w:ffData>"#.into(),
+    };
+    let (items, _) = draws_of(dd);
+    let text: String = items.iter().filter_map(|i| if let display::Draw::Glyphs { text, .. } = i { Some(text.as_str()) } else { None }).collect();
+    assert!(text.contains("Beta") && !text.contains("Alpha"), "{text}");
+}
+
 #[test]
 fn a_missing_roman_font_is_drawn_as_word_draws_it() {
     // Measured in Word: a font that isn't installed is drawn in Cambria when the font table calls
@@ -4546,6 +4608,26 @@ fn inline_picture_wider_than_the_text_keeps_its_size() {
     assert!((r.w - 1000.0).abs() < 0.01 && (r.h - 100.0).abs() < 0.01, "{r:?}");
 }
 
+/// A floating object's anchor takes no room on a line: an inline picture a little wider than the
+/// line, after an anchor, stays on the first line as the line's first item, instead of leaving
+/// the anchor an empty line of its own above it (Word).
+#[test]
+fn a_float_anchor_does_not_push_a_wide_picture_to_a_second_line() {
+    let lines_of = |with_anchor: bool| {
+        let mut d = Document::from_text("");
+        let mut at = Pos::body(0, 0);
+        if with_anchor {
+            at = d.insert_object(&at, rect_shape(50.0, 30.0, page_float(300.0, 300.0)), &Default::default()).unwrap();
+        }
+        // 480 pt wide on a 468 pt line.
+        d.insert_object(&at, picture(480.0, 100.0, wordcraft_doc::para::Float::default()), &Default::default()).unwrap();
+        let l = lay(&d);
+        para_at(&l, &[0])[0].2
+    };
+    assert_eq!(lines_of(false), 1);
+    assert_eq!(lines_of(true), 1, "the anchor gets no line of its own");
+}
+
 #[test]
 fn a_picture_too_wide_after_a_content_control_start_stays_on_the_first_line() {
     // The picture opening a picture content control (a logo in a text box a little too
@@ -8245,4 +8327,49 @@ fn float_font_keeps_line_height() {
         assert!((pitch(wrap, 40.0) - pitch(wrap, 9.0)).abs() < 0.01, "{wrap:?}");
     }
     assert!(pitch(Wrap::Inline, 40.0) > pitch(Wrap::Inline, 9.0));
+}
+
+/// Native ink inside a group is drawn as drawing-level ink is: its fallback picture, in its place.
+#[test]
+fn ink_member_of_a_group_draws_its_fallback_picture() {
+    use crate::display::Draw;
+    use std::sync::Arc;
+    use wordcraft_doc::graphic::{Graphic, GraphicItem, GraphicKind};
+    use wordcraft_doc::para::{Float, GroupChild};
+    let items = vec![GraphicItem::Image { rect: [0.0, 0.0, 60.0, 30.0], media: "preview".into() }];
+    let ink = InlineObject::Graphic {
+        w: 60.0,
+        h: 30.0,
+        alt: String::new(),
+        float: Float::default(),
+        graphic: Arc::new(Graphic { kind: GraphicKind::Ink, items, w: 60.0, h: 30.0, ..Default::default() }),
+    };
+    let group = InlineObject::Group {
+        w: 200.0,
+        h: 100.0,
+        float: Float::default(),
+        ch_w: 200.0,
+        ch_h: 100.0,
+        children: vec![GroupChild { x: 20.0, y: 30.0, obj: ink }],
+        canvas: None,
+    };
+    let mut d = Document::from_text("Text by the group.");
+    d.insert_object(&Pos::body(0, 0), group, &Default::default()).unwrap();
+    let l = lay(&d);
+    let frame = l.object(&Pos::body(0, 0), 0).unwrap().rect;
+    fn images(draws: &[Draw], out: &mut Vec<Rect>) {
+        for d in draws {
+            match d {
+                Draw::Image { rect, media, .. } if media == "preview" => out.push(*rect),
+                Draw::Rotated { items, .. } | Draw::Clip { items, .. } => images(items, out),
+                Draw::Figure { draws, .. } => images(draws, out),
+                _ => {}
+            }
+        }
+    }
+    let mut found = Vec::new();
+    images(&crate::display::page_display(&d, &l.pages[0], &Default::default()), &mut found);
+    let [r] = found.as_slice() else { panic!("ink preview not drawn: {found:?}") };
+    assert!((r.x - (frame.x + 20.0)).abs() < 0.01 && (r.y - (frame.y + 30.0)).abs() < 0.01, "{r:?} in {frame:?}");
+    assert!((r.w - 60.0).abs() < 0.01 && (r.h - 30.0).abs() < 0.01, "{r:?}");
 }

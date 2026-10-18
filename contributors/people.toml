@@ -150,3 +150,7 @@ sync_github_name = false
 [people.rem5411]
 real_name = "Vivien Janny"
 sync_github_name = true
+
+[people.C00kieMonsta]
+real_name = "Antoine Boxho"
+sync_github_name = true

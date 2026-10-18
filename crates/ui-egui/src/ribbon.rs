@@ -628,6 +628,17 @@ pub(crate) fn mi(ui: &mut Ui, app: &mut WordApp, label: &str, id: &str, params: 
     mi_text(ui, app, tl!(label), id, params);
 }
 
+/// [`mi`] with a drawn icon before the label.
+fn mi_icon(ui: &mut Ui, app: &mut WordApp, icon: &str, label: &str, id: &str, params: Value) {
+    let sc = crate::widgets::shortcut_text(app, id);
+    let enabled = crate::widgets::enabled(app, id);
+    let resp = ui.add_enabled_ui(enabled, |ui| crate::widgets::icon_menu_item(ui, icon, tl!(label), &sc, 200.0)).inner;
+    if resp.clicked() {
+        crate::widgets::run_from_ribbon(app, id, params);
+        ui.close();
+    }
+}
+
 /// A menu item whose text is already in the interface language.
 fn mi_text(ui: &mut Ui, app: &mut WordApp, text: &str, id: &str, params: Value) {
     let sc = crate::widgets::shortcut_text(app, id);
@@ -1223,10 +1234,10 @@ fn insert(app: &mut WordApp, ui: &mut Ui) {
                 ("Star", "star"),
                 ("Heart", "heart"),
             ] {
-                mi(ui, app, l, "insert.shape", json!({"kind": k}));
+                mi_icon(ui, app, &format!("shape.{k}"), l, "insert.shape", json!({"kind": k}));
             }
             ui.separator();
-            mi(ui, app, "New Drawing Canvas", "insert.canvas", json!({}));
+            mi_icon(ui, app, "canvas", "New Drawing Canvas", "insert.canvas", json!({}));
             // Connectors: glue their ends to shapes by dragging them (shape.connect).
             for (l, k, arrow) in [
                 ("Straight Connector", "straightConnector", "none"),
@@ -1236,7 +1247,8 @@ fn insert(app: &mut WordApp, ui: &mut Ui) {
                 ("Curved Connector", "curvedConnector", "none"),
                 ("Curved Arrow Connector", "curvedConnector", "end"),
             ] {
-                mi(ui, app, l, "insert.shape", json!({"kind": k, "arrow": arrow}));
+                let icon = if arrow == "end" { k.replace("Connector", "ArrowConnector") } else { k.to_string() };
+                mi_icon(ui, app, &format!("shape.{icon}"), l, "insert.shape", json!({"kind": k, "arrow": arrow}));
             }
         });
         stack(ui, |ui| {
