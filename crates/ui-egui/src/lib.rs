@@ -2439,6 +2439,8 @@ fn input_dialog(id: &str, params: &Value) -> Option<&'static str> {
         "chart.editData" if !["data", "categories", "series"].into_iter().any(has) => Some("chartData"),
         // Table Properties without settings shows the dialog (with settings it applies them).
         "table.properties" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableProperties"),
+        // Cell Margins without settings shows the dialog; values continue through the same command.
+        "table.cellMargins" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableCellMargins"),
         // Formula without one asks for it, suggested from the numbers next to the cell (#1201).
         "table.formula" if !has("formula") => Some("tableFormula"),
         // Sort without settings asks for the column, order and header row (#1200).
@@ -3009,6 +3011,33 @@ mod tests {
         let basis = g.clone();
         g.rtl = true;
         assert_eq!(g.changes(&basis), json!({"rtl": true}));
+    }
+
+    /// Table Layout › Cell Margins opens with the table defaults and does not replace imported
+    /// values until the user changes a value and confirms.
+    #[test]
+    fn cell_margins_button_preserves_existing_values_until_confirmed() {
+        let mut a = app();
+        a.run("insert.table", json!({"rows": 1, "cols": 1})).unwrap();
+        let (tp, _, _) = a.session.sel.focus.path.cell().unwrap();
+        let table = a.session.doc.table_mut(a.session.sel.focus.story, &tp).unwrap();
+        table.props.cell_margins = Some([3.0, 6.0, 9.0, 12.0]);
+        table.rows[0].cells[0].props.margins = Some([1.0, 2.0, 3.0, 4.0]);
+
+        a.run("table.cellMargins", json!({})).unwrap();
+        let Some(dialogs::Dialog::CellMargins { form, basis }) = a.dialog.clone() else { panic!("no dialog: {:?}", a.dialog) };
+        assert_eq!((form.top, form.left, form.bottom, form.right), (3.0 / 72.0, 6.0 / 72.0, 9.0 / 72.0, 12.0 / 72.0));
+        assert_eq!(form.changes(&basis), json!({}), "an untouched dialog does not reset margins");
+
+        let mut changed = (*form).clone();
+        changed.right = 18.0 / 72.0;
+        let params = changed.changes(&basis);
+        assert_eq!(params, json!({"top": 3.0, "left": 6.0, "bottom": 9.0, "right": 18.0}));
+        a.dialog = None;
+        a.run("table.cellMargins", params).unwrap();
+        let table = a.session.doc.table(a.session.sel.focus.story, &tp).unwrap();
+        assert_eq!(table.props.cell_margins, Some([3.0, 6.0, 9.0, 18.0]));
+        assert_eq!(table.rows[0].cells[0].props.margins, Some([1.0, 2.0, 3.0, 4.0]), "cell-specific margins remain intact");
     }
 
     /// Home › Font › Enclose Characters (#297): the button opens the dialog on the selected
