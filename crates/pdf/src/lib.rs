@@ -91,11 +91,15 @@ pub struct PdfOptions {
     pub comments: bool,
     /// Compress content streams.
     pub compress: bool,
+    /// Print on this paper (width, height in points) instead of each page's own size: the page
+    /// is scaled to fit and centred, the paper turned to the page's orientation (Scale to paper
+    /// size, #2108). `None` keeps the document's page sizes.
+    pub paper: Option<(f32, f32)>,
 }
 
 impl Default for PdfOptions {
     fn default() -> Self {
-        PdfOptions { pages: None, title: None, author: None, tagged: true, include_markup: false, comments: false, compress: true }
+        PdfOptions { pages: None, title: None, author: None, tagged: true, include_markup: false, comments: false, compress: true, paper: None }
     }
 }
 
@@ -179,19 +183,19 @@ fn write_attempt(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[us
     }
     for &pi in pages {
         let Some(page) = lay.pages.get(pi) else { return Err(PdfError::BadPage(pi.saturating_add(1))) };
-        let fit = Fit::of(page);
-        let (w, h) = (clamp_side(fit.paper_w), clamp_side(page.h));
-        let size = Size::from_wh(w, h).ok_or(PdfError::NoPages)?;
+        let fit = Fit::of(page, opts.paper);
+        let size = Size::from_wh(clamp_side(fit.paper_w), clamp_side(fit.paper_h)).ok_or(PdfError::NoPages)?;
         let mut kp = pdf.start_page_with(PageSettings::new(size));
         let mut s = kp.surface();
         ex.links.clear();
-        // A page with a markup area is scaled down to fit its paper with the area beside it.
-        let scaled = fit.k < 1.0;
+        // A page with a markup area is scaled down to fit its paper with the area beside it; a
+        // print on other paper is scaled to it and centred.
+        let scaled = fit.k != 1.0 || fit.dx != 0.0 || fit.dy != 0.0;
         if scaled {
-            s.push_transform(&Transform::from_row(fit.k, 0.0, 0.0, fit.k, 0.0, fit.dy));
+            s.push_transform(&Transform::from_row(fit.k, 0.0, 0.0, fit.k, fit.dx, fit.dy));
         }
-        // `w` is the document page's width: the page colour and watermark stay off the markup area.
-        ex.page(&mut s, page, w, h);
+        // `page_w` is the document page's width: the page colour and watermark stay off the markup area.
+        ex.page(&mut s, page, clamp_side(fit.page_w), clamp_side(page.h));
         if scaled {
             s.pop();
         }
@@ -224,28 +228,38 @@ fn write_attempt(doc: &Document, lay: &DocLayout, opts: &PdfOptions, pages: &[us
 }
 
 /// How a layout page maps onto its PDF page: a page with a markup area (Print Markup) is scaled
-/// by `k` to its paper width and centred vertically (`dy`); any other page is drawn as it is.
+/// by `k` to its paper width and centred vertically (`dy`). With [`PdfOptions::paper`] that
+/// sheet is then scaled to the chosen paper and centred on it (`dx`, `dy`). Any other page is
+/// drawn as it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Fit {
+    /// The PDF page.
     paper_w: f32,
+    paper_h: f32,
+    /// The document page's width in layout points (without the markup area).
+    page_w: f32,
     k: f32,
+    dx: f32,
     dy: f32,
 }
 
 impl Fit {
-    fn of(page: &Page) -> Fit {
+    fn of(page: &Page, paper: Option<(f32, f32)>) -> Fit {
         let paper_w = page.w - page.markup;
-        if page.markup > 0.0 && ok(page.markup) && ok(page.w) && paper_w > 1.0 {
+        let own = if page.markup > 0.0 && ok(page.markup) && ok(page.w) && paper_w > 1.0 {
             let k = paper_w / page.w;
-            Fit { paper_w, k, dy: page.h * (1.0 - k) / 2.0 }
+            Fit { paper_w, paper_h: page.h, page_w: paper_w, k, dx: 0.0, dy: page.h * (1.0 - k) / 2.0 }
         } else {
-            Fit { paper_w: page.w, k: 1.0, dy: 0.0 }
-        }
+            Fit { paper_w: page.w, paper_h: page.h, page_w: page.w, k: 1.0, dx: 0.0, dy: 0.0 }
+        };
+        let Some((w, h)) = paper else { return own };
+        let f = wordcraft_geom::fit_to_paper(own.paper_w, own.paper_h, w, h);
+        Fit { paper_w: f.paper_w, paper_h: f.paper_h, page_w: own.page_w, k: own.k * f.k, dx: f.dx, dy: own.dy * f.k + f.dy }
     }
 
     /// A layout point on the PDF page.
     fn point(self, x: f32, y: f32) -> (f32, f32) {
-        (x * self.k, y * self.k + self.dy)
+        (x * self.k + self.dx, y * self.k + self.dy)
     }
 }
 
@@ -1155,22 +1169,33 @@ impl Exporter<'_> {
                 seg(s, -nx, -ny);
             }
             LineStyle::Wave => {
-                let (a, b) = (x0.min(x1), x0.max(x1));
                 let amp = (w * 1.2).max(0.8);
                 let step = amp * 2.0;
-                let mut pb = PathBuilder::new();
-                pb.move_to(a, y0);
-                let mut x = a;
-                let mut up = true;
-                while x < b && x - a < 20_000.0 {
-                    let nx = (x + step).min(b);
-                    pb.quad_to((x + nx) / 2.0, if up { y0 - amp } else { y0 + amp }, nx, y0);
-                    x = nx;
-                    up = !up;
-                }
-                s.set_stroke(Some(stroke(w * 0.8, None, LineCap::Round)));
-                if let Some(p) = pb.finish() {
-                    s.draw_path(&p);
+                let (dx, dy) = (x1 - x0, y1 - y0);
+                let len = (dx * dx + dy * dy).sqrt();
+                if len >= 1e-3 {
+                    let (ux, uy) = (dx / len, dy / len);
+                    let (nx, ny) = (-uy, ux);
+                    let mut pb = PathBuilder::new();
+                    pb.move_to(x0, y0);
+                    let mut t = 0.0;
+                    let mut up = true;
+                    while t < len && t < 20_000.0 {
+                        let nt = (t + step).min(len);
+                        let mid_t = (t + nt) / 2.0;
+                        let sign = if up { -1.0 } else { 1.0 };
+                        let cx = x0 + ux * mid_t + nx * amp * sign;
+                        let cy = y0 + uy * mid_t + ny * amp * sign;
+                        let ex = x0 + ux * nt;
+                        let ey = y0 + uy * nt;
+                        pb.quad_to(cx, cy, ex, ey);
+                        t = nt;
+                        up = !up;
+                    }
+                    s.set_stroke(Some(stroke(w * 0.8, None, LineCap::Round)));
+                    if let Some(p) = pb.finish() {
+                        s.draw_path(&p);
+                    }
                 }
             }
         }
@@ -1437,7 +1462,7 @@ impl Exporter<'_> {
                     _ => None,
                 })
                 .unwrap_or(c.x);
-            let (x, y) = self.lay.pages.get(c.page).map(|p| Fit::of(p).point(x, c.top)).unwrap_or((x, c.top));
+            let (x, y) = self.lay.pages.get(c.page).map(|p| Fit::of(p, self.opts.paper).point(x, c.top)).unwrap_or((x, c.top));
             return Some((*out, x, y));
         }
         self.locate(pos.story, &pos.path)
@@ -1450,7 +1475,7 @@ impl Exporter<'_> {
             let Some(out) = self.out_index.get(pi) else { continue };
             let Some(page) = self.lay.pages.get(*pi) else { continue };
             let (x, y) = match page.items.get(*ii) {
-                Some(Placed::Lines { x, y, .. }) => Fit::of(page).point(*x, *y),
+                Some(Placed::Lines { x, y, .. }) => Fit::of(page, self.opts.paper).point(*x, *y),
                 _ => (0.0, 0.0),
             };
             return Some((*out, x, y));
@@ -1510,7 +1535,7 @@ impl Exporter<'_> {
                 if title.is_empty() {
                     continue;
                 }
-                let (x, y) = Fit::of(page).point(*x, *y + line.top - piece.top);
+                let (x, y) = Fit::of(page, self.opts.paper).point(*x, *y + line.top - piece.top);
                 flat.push((level.min(8), title, out, x, y));
             }
         }

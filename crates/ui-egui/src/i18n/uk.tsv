@@ -861,6 +861,8 @@
 	Space before/after:	Інтервал перед/після:
 	Spacing	Інтервал
 	Spacing (pt):	Інтервал (пункти):
+	Kerning for fonts:	Кернінг шрифтів:
+	Points and above	пт і більше
 	Speech	Мовлення
 	Spelling & Grammar	Правопис і граматика
 	Spelling &\nGrammar	Правопис і\nграматика
@@ -1561,6 +1563,8 @@
 	Customize Ribbon	Налаштувати стрічку
 	Add to Quick Access Toolbar	Додати на панель швидкого доступу
 	Remove from Quick Access Toolbar	Видалити з панелі швидкого доступу
+	Hide Quick Access Toolbar	Приховати панель швидкого доступу
+	Show Quick Access Toolbar	Показати панель швидкого доступу
 	Customize the Ribbon…	Налаштувати стрічку…
 	Customize Quick Access Toolbar…	Налаштувати панель швидкого доступу…
 	More Commands…	Інші команди…
@@ -2148,6 +2152,10 @@
 	Contains	Містить
 	Does not contain	Не містить
 	{count} of {total} recipients will be merged.	Одержувачів для злиття: {count} з {total}.
+	Find in list:	Знайти в списку:
+	Any field	Будь-яке поле
+	Matches: {count}	Збігів: {count}
+	Show only records that will be merged	Показувати лише записи для злиття
 	Take the last match on the page	Брати останній збіг на сторінці
 	Show its list number	Показувати його номер у списку
 	Show its number relative to this field	Показувати його номер відносно цього поля
@@ -2269,3 +2277,26 @@
 	All Fonts	Усі шрифти
 	Spike	Накопичувач
 	Insert Spike	Вставити з накопичувача
+# Add Font status (#1789)
+	Added 1 font	Додано 1 шрифт
+	Added {n} fonts	Додано шрифтів: {n}
+	{added}; {count} couldn't be read: {names}	{added}; не вдалося прочитати ({count}): {names}
+	{names} and {n} more	{names} та ще {n}
+	{added}; {n} skipped (limit {max})	{added}; пропущено: {n} (ліміт {max})
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	У тексті
+	In margin	На полі
+	Drop Cap Options…	Параметри буквиці…
+	Lines to drop:	Висота в рядках:
+	Distance from text:	Відстань від тексту:
+	Distance from text	Відстань від тексту
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Зберігати пропорції
+	Relative to original picture size	Відносно початкового розміру зображення
+	Original size	Початковий розмір
+	{width} × {height} pixels	{width} × {height} пікс.
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Введіть розмір у будь-яких одиницях, наприклад 5 cm або 300 px. Інша сторона зміниться разом із нею, тож зображення збереже пропорції.
+
+	Import…	Імпортувати…

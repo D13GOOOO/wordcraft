@@ -1,6 +1,6 @@
 # Typing parity with Word
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-18 · **Change:** trivial (Turkish and Azerbaijani case mapping in AutoCorrect, #1923; previously trivial: smart quotes in Hebrew pinned: logical order, ” in acronyms as in Word, #1670; previously trivial: Backspace on a selected table, rows or columns deletes them, Delete clears them, #1844; previously trivial: typed text takes its direction from its own letters, #1543; previously trivial: an input method's request to erase text around the caret is honoured, so web typing in Cyrillic and other non-Latin text no longer repeats, #1480; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: a heading-list preset keeps Heading styles and makes other paragraphs Heading 1, as in Word, #1793; previously trivial: numbered headings: a heading-linked Multilevel List numbers new headings by their style; numbering keeps a heading a heading, #1793; previously trivial: reversing an automatic capital adds an exception, #1857; previously trivial: smart quotes open after guillemets and low quotes and nest; previously trivial: Enter on an empty list item numbered by its paragraph style moves it up a level, #2143; previously trivial: Backspace after a section break and Delete before it remove the break, also on the last paragraph, #2127; previously trivial: a table inserted in right-to-left text is right to left, so Tab moves left, #2634; previously trivial: Shift+Delete cuts the selection on every platform, #1669; previously trivial: Select All then Delete removes a table the document starts with, #1198; previously trivial: Alt+numpad character codes, #961; previously trivial: Down and Up from a line start beside a table go into it, #1007; previously trivial: sample-text formulas on Enter, #1067; previously trivial: Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864); previously minor: Correct TWo INitial CApitals, cAPS LOCK and table-cell capitals, #544; previously trivial: complex-script caret and Backspace, #604; Move Paragraph Up/Down, Promote/Demote, Go Back and Alt+X keys, #343) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-18 · **Change:** trivial (a slash opening a word travels whole to the next line, #2963; previously trivial: typing over a selection takes the first selected character's formatting, also when the selection was made right to left, #2879; previously trivial: Turkish and Azerbaijani case mapping in AutoCorrect, #1923; previously trivial: smart quotes in Hebrew pinned: logical order, ” in acronyms as in Word, #1670; previously trivial: Backspace on a selected table, rows or columns deletes them, Delete clears them, #1844; previously trivial: typed text takes its direction from its own letters, #1543; previously trivial: an input method's request to erase text around the caret is honoured, so web typing in Cyrillic and other non-Latin text no longer repeats, #1480; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: a heading-list preset keeps Heading styles and makes other paragraphs Heading 1, as in Word, #1793; previously trivial: numbered headings: a heading-linked Multilevel List numbers new headings by their style; numbering keeps a heading a heading, #1793; previously trivial: reversing an automatic capital adds an exception, #1857; previously trivial: smart quotes open after guillemets and low quotes and nest; previously trivial: Enter on an empty list item numbered by its paragraph style moves it up a level, #2143; previously trivial: Backspace after a section break and Delete before it remove the break, also on the last paragraph, #2127; previously trivial: a table inserted in right-to-left text is right to left, so Tab moves left, #2634; previously trivial: Shift+Delete cuts the selection on every platform, #1669; previously trivial: Select All then Delete removes a table the document starts with, #1198; previously trivial: Alt+numpad character codes, #961; previously trivial: Down and Up from a line start beside a table go into it, #1007; previously trivial: sample-text formulas on Enter, #1067; previously trivial: Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864); previously minor: Correct TWo INitial CApitals, cAPS LOCK and table-cell capitals, #544; previously trivial: complex-script caret and Backspace, #604; Move Paragraph Up/Down, Promote/Demote, Go Back and Alt+X keys, #343) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
 
 What Word does when you type, observed black-box (same keystrokes typed into Word and
 WordCraft, results read back paragraph by paragraph) and pinned by tests in
@@ -55,6 +55,17 @@ formatting use the existing editing primitives. Tests: `sample_text_formulas_exp
 | type, select some of it, type over it | two undo steps: the first ⌘Z brings the selected text back (still selected), the second removes the typing. Uninterrupted typing stays one step | `typing_then_selecting_then_typing_are_two_undo_steps` |
 | ⌘B with nothing selected, ⌘Z, type | the text isn't bold (Undo takes the waiting caret formatting back too); ⌘Y brings it back | `undoing_bold_at_the_caret_turns_bold_typing_off_again` |
 
+## Paste
+
+| Keys | Word's result | Test |
+|---|---|---|
+| Paste (⌘V) of plain text with several lines from another program, in the middle of a right-to-left paragraph | pasted as Keep Text Only pastes it: every line becomes a paragraph formatted like the paragraph it lands in (direction, style, alignment, indents, list), and so does the text after the caret. One ⌘Z takes the whole paste out ² | `plain_text_paste_gives_every_line_the_formatting_of_its_paragraph` |
+| … with empty lines, or a line break at the end | each empty line is an empty paragraph with that formatting too, in a list an empty item. The text takes the formatting before the caret (bold there makes it bold) ² | `plain_text_paste_keeps_empty_lines_as_paragraphs`, `plain_text_paste_keeps_an_empty_paragraph_in_a_list` |
+
+² From Microsoft's description of the paste options: Word offers no options for text without
+formatting, and Keep Text Only gives text the style of the paragraph where it is pasted and the
+formatting of the text before the cursor. Not yet compared side by side in Word.
+
 ## Track Changes
 
 | Keys | Word's result | Test |
@@ -79,6 +90,7 @@ Windows/Linux keys are given first, macOS second.
 
 | Keys | Word's result | Test |
 |---|---|---|
+| select text right to left (from its end), type | the new text takes the first selected character's formatting (font, size…), as with a selection made left to right; not the text's before it (#2879) | `typing_over_backward_selection_keeps_its_font` |
 | Down / Up (↓ / ↑) from a line beside a table | into the table's nearest row: the cell under the caret, or the nearest one when the caret is left or right of the cells' text (the start of the line above a table is left of the first cell's text); never past the table to the paragraph beyond it | `down_and_up_from_a_line_start_beside_a_table_go_into_it` |
 | Alt+Shift+Up / Down (⌃⇧↑ / ⌃⇧↓) | the paragraphs the selection touches swap with the paragraph above / below, keeping style and list membership; the selection moves with them; one undo step. A selection ending at the start of a paragraph doesn't take it along. Refused at the top or bottom of the story or cell, next to a table and across a section break | `alt_shift_down_then_up_moves_a_paragraph_and_back_and_undoes` |
 | Alt+Shift+Left / Right (⌃⇧← / ⌃⇧→) | Promote / Demote: a heading goes up or down one level (Heading 1 and Heading 9 are the ends); promoted body text becomes a heading at the level of the heading before it; a list item changes level like Shift+Tab / Tab | `alt_shift_left_and_right_promote_and_demote_headings_and_list_items` |
@@ -191,6 +203,34 @@ Applied when a word is finished by a space, punctuation **or Enter** (`enter_fin
 
 ¹ From Word's documented AutoFormat and AutoCorrect options; not yet keystroke-compared with
 Word.
+## Spelling as you type (#1552)
+
+Word draws no red squiggle under the word being typed. The squiggle comes when the word ends
+(space, punctuation, Enter, Tab) or when the caret leaves it any other way (arrow keys, Home,
+End, a click, a selection). Only the word being typed is exempt: clicking into a misspelled word
+that is already there does not hide its squiggle, and typing into it makes it the word being
+typed again. F7 and the Spelling pane report the word all the while. Grammar marks are not held
+back.
+
+| Keys | Result | Test |
+|---|---|---|
+| `The helo` | no squiggle under `helo`; `review.issues` and F7 (`review.spelling`) still list it | `the_word_being_typed_is_not_marked_until_it_ends` |
+| `The helo` then space, `.`, Enter or Tab | `helo` underlined | same |
+| `The helo` then Left, Home, Ctrl+Left, Ctrl+Home or Select All; End after that | `helo` underlined, and still underlined when the caret comes back | `moving_the_caret_out_of_the_typed_word_marks_it` |
+| `The helo` in one paragraph, a click into another, a click back, `o` typed into it | underlined on leaving; still underlined on return ¹; typing into it hides the mark again until the next space ¹ | `a_click_elsewhere_marks_the_typed_word_and_a_click_back_keeps_the_mark` |
+| `The helo ` then Backspace | the mark goes while the word is edited again ¹ | `backspace_into_a_finished_word_edits_it_again` |
+| `I typed teh ` (AutoCorrect); a phrase by one `text.insert`; Undo | AutoCorrect's result is checked as usual; of inserted text only the word the caret ends in is exempt; Undo moves the caret, so what is left is marked | `autocorrect_and_inserted_text_are_marked_as_usual` |
+| `It doesn'` (smart quotes make it `doesn’`); `The nonn-` then `exist` | no squiggle until the word ends: the apostrophe and the hyphen stay part of the word, as in the spelling check ¹ | `apostrophes_and_hyphens_stay_part_of_the_word_being_typed` |
+| A click at the end of `helo`, then Insert, Delete with nothing after the caret, or Shift+Tab | `helo` stays underlined: only an edit to the text makes it the word being typed ¹ | `text_commands_that_edit_nothing_leave_an_existing_word_marked` |
+
+¹ Follows the rule above; not yet keystroke-compared with Word.
+
+The exemption is a layout input (`LayoutOptions::typing_word`, filtered in
+`crates/layout/src/para.rs`). The Session records the word after a `text.*` command that changes
+the caret's paragraph, and drops it once the caret is anywhere else or the word changed under it
+(`crates/engine/src/session.rs`), so a caret move without an edit lays only that paragraph out
+again.
+
 ## Editing options (File › Options › Advanced)
 
 | Keys / setting | Result | Test |
@@ -221,7 +261,10 @@ Word.
 ## Layout
 
 - No line break right after a slash (`and/or`, URLs) unless the word can't fit a line
-  (`layout::tests::no_line_break_right_after_a_slash`).
+  (`layout::tests::no_line_break_right_after_a_slash`). A slash that opens a word after a
+  space (`Kazakh /Russian` captions) travels with it: the break is before the slash, so
+  `/заполняется` moves to the next line whole and is never split between its letters (#2963,
+  `layout::tests::a_word_after_a_slash_wraps_whole`, also in a fixed table cell and not after a no-break space).
 
 ## Complex scripts
 
@@ -282,6 +325,7 @@ Word.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | trivial | Typing over a selection takes the first selected character's formatting, also when the selection was made right to left (#2879) |
 | 2026-10-17 | trivial | A table inserted in a right-to-left paragraph is a right-to-left table, so Tab moves to the cell on the left (#2634) |
 | 2026-10-15 | trivial | Backspace after a section break and Delete before it remove the break, also one on the last paragraph's mark; the text takes the following section's setup and keeps the headers it showed (#2127) |
 | 2026-10-15 | trivial | Enter on an empty nested list item whose numbering comes from its paragraph style (List Number 2) moves it up a level instead of adding another item (#2143) |
@@ -295,6 +339,8 @@ Word.
 | 2026-10-15 | trivial | Input methods: `DeleteSurrounding` erases around the caret, so web typing in non-Latin text no longer repeats; Chrome's caret jump in the hidden field is listed as a known gap (#1480) |
 | 2026-10-15 | minor | Backspace with a whole table, whole rows or whole columns selected deletes them; Delete clears them; a selection covering a table and the text beside it removes the table (#1844) |
 | 2026-10-16 | trivial | Smart quotes in Hebrew follow logical order; ” (not gershayim) in acronyms, as Word does (#1670) |
+| 2026-10-15 | trivial | Paste: plain text from another program pastes as Keep Text Only does. Every line takes the formatting of the paragraph it lands in (a right-to-left paragraph stays right-to-left), and empty lines stay empty paragraphs |
+| 2026-10-15 | trivial | Spelling as you type: the word being typed, apostrophes and hyphens included, is not marked until the caret leaves it; F7 and the Spelling pane still report it (#1552) |
 | 2026-10-14 | trivial | Shift+Delete cuts the selection, and does nothing without one, on macOS and Linux too, as in Word for Windows (#1669); Shift+Backspace already erased (#707) |
 | 2026-10-13 | trivial | Select All then Delete or Backspace removes a table the document starts with (#1198) |
 | 2026-10-12 | trivial | Editing keys: Down and Up from the start of a line beside a table go into it instead of skipping it (#1007) |

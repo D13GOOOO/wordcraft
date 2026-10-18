@@ -313,22 +313,28 @@ fn dictionaries(app: &mut WordApp, ui: &mut Ui) {
     // The dictionary each language found, looked up again after the folder changes.
     let found_id = egui::Id::new("options_dictionaries_found");
     let generation = wordcraft_engine::proof::dictionary_generation();
-    let cached = ui.data(|d| d.get_temp::<(u64, Vec<(String, Option<String>)>)>(found_id)).filter(|(g, _)| *g == generation);
+    let cached = ui.data(|d| d.get_temp::<(u64, Vec<(String, Option<String>, Option<String>)>)>(found_id)).filter(|(g, _)| *g == generation);
     let found = match cached {
         Some((_, f)) => f,
         None => {
-            let f: Vec<(String, Option<String>)> = wordcraft_engine::proof::installed_dictionaries()
+            let f: Vec<(String, Option<String>, Option<String>)> = wordcraft_engine::proof::installed_dictionaries()
                 .into_iter()
-                .map(|(lang, dic)| (language_name(lang).to_string(), dic.map(|d| d.to_string_lossy().into_owned())))
+                .map(|(lang, dic)| {
+                    let error = wordcraft_engine::proof::dictionary_load_error(lang);
+                    (language_name(lang).to_string(), dic.map(|d| d.to_string_lossy().into_owned()), error)
+                })
                 .collect();
             ui.data_mut(|d| d.insert_temp(found_id, (generation, f.clone())));
             f
         }
     };
-    for (language, file) in found {
-        let line = match file {
-            Some(f) => crate::i18n::fmt(tl!("{language}: {file}"), &[("language", &language), ("file", &f)]),
-            None => crate::i18n::fmt(tl!("{language}: no dictionary found"), &[("language", &language)]),
+    for (language, file, error) in found {
+        let line = match (file, error) {
+            (Some(f), Some(e)) => {
+                crate::i18n::fmt(tl!("{language}: {file} (unreadable: {reason})"), &[("language", &language), ("file", &f), ("reason", &e)])
+            }
+            (Some(f), None) => crate::i18n::fmt(tl!("{language}: {file}"), &[("language", &language), ("file", &f)]),
+            (None, _) => crate::i18n::fmt(tl!("{language}: no dictionary found"), &[("language", &language)]),
         };
         ui.add(egui::Label::new(RichText::new(line).small()).truncate());
     }

@@ -287,6 +287,10 @@ fn insert_text(s: &mut Session, text: &str, enter: bool) -> Result<(), CmdError>
     if let Some(p) = controls::prepare_edit(s)? {
         props = p;
     }
+    // Pasted text is text: pending properties left by AutoCorrect don't give it a symbol's font (#2036).
+    if !enter {
+        props = props.without_symbol();
+    }
     delete_selection(s)?;
     // Typed text is new: never deleted, and not a formatting change of the text around it.
     props.fmt_change = None;

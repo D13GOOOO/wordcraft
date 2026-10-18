@@ -847,6 +847,8 @@
 	Space before/after:	段前/段后间距：
 	Spacing	间距
 	Spacing (pt):	间距（磅）：
+	Kerning for fonts:	为字体调整字间距：
+	Points and above	磅或更大
 	Speech	语音
 	Spelling & Grammar	拼写和语法
 	Spelling &\nGrammar	拼写和语法
@@ -1561,6 +1563,8 @@
 	Customize Ribbon	自定义功能区
 	Add to Quick Access Toolbar	添加到快速访问工具栏
 	Remove from Quick Access Toolbar	从快速访问工具栏删除
+	Hide Quick Access Toolbar	隐藏快速访问工具栏
+	Show Quick Access Toolbar	显示快速访问工具栏
 	Customize the Ribbon…	自定义功能区…
 	Customize Quick Access Toolbar…	自定义快速访问工具栏…
 	More Commands…	其他命令…
@@ -2148,6 +2152,10 @@
 	Contains	包含
 	Does not contain	不包含
 	{count} of {total} recipients will be merged.	将合并 {total} 位收件人中的 {count} 位。
+	Find in list:	在列表中查找：
+	Any field	任意字段
+	Matches: {count}	匹配项：{count}
+	Show only records that will be merged	仅显示将要合并的记录
 	Take the last match on the page	取本页最后一个匹配项
 	Show its list number	显示其列表编号
 	Show its number relative to this field	显示相对于此域的编号
@@ -2269,3 +2277,26 @@
 	All Fonts	所有字体
 	Spike	图文场
 	Insert Spike	插入图文场
+# Add Font status (#1789)
+	Added 1 font	已添加 1 个字体
+	Added {n} fonts	已添加 {n} 个字体
+	{added}; {count} couldn't be read: {names}	{added}；{count} 个无法读取：{names}
+	{names} and {n} more	{names} 等另外 {n} 个
+	{added}; {n} skipped (limit {max})	{added}；已跳过 {n} 个（上限 {max}）
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	下沉
+	In margin	悬挂
+	Drop Cap Options…	首字下沉选项…
+	Lines to drop:	下沉行数：
+	Distance from text:	距正文：
+	Distance from text	距正文
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	锁定纵横比
+	Relative to original picture size	相对于原始图片大小
+	Original size	原始大小
+	{width} × {height} pixels	{width} × {height} 像素
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	可用任意单位输入大小，例如 5 cm 或 300 px。另一边随之调整，图片保持原有比例。
+
+	Import…	导入…

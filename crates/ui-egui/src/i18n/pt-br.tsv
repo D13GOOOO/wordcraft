@@ -836,6 +836,8 @@
 	Space before/after:	Espaço antes/depois:
 	Spacing	Espaçamento
 	Spacing (pt):	Espaçamento (pt):
+	Kerning for fonts:	Kerning para fontes:
+	Points and above	pontos ou mais
 	Speech	Fala
 	Spelling & Grammar	Ortografia e gramática
 	Spelling &\nGrammar	Ortografia e\ngramática
@@ -1561,6 +1563,8 @@
 	Customize Ribbon	Personalizar Faixa de Opções
 	Add to Quick Access Toolbar	Adicionar à Barra de Ferramentas de Acesso Rápido
 	Remove from Quick Access Toolbar	Remover da Barra de Ferramentas de Acesso Rápido
+	Hide Quick Access Toolbar	Ocultar Barra de Ferramentas de Acesso Rápido
+	Show Quick Access Toolbar	Mostrar Barra de Ferramentas de Acesso Rápido
 	Customize the Ribbon…	Personalizar a Faixa de Opções…
 	Customize Quick Access Toolbar…	Personalizar Barra de Ferramentas de Acesso Rápido…
 	More Commands…	Mais Comandos…
@@ -2148,6 +2152,10 @@
 	Contains	Contém
 	Does not contain	Não contém
 	{count} of {total} recipients will be merged.	{count} de {total} destinatários serão mesclados.
+	Find in list:	Localizar na lista:
+	Any field	Qualquer campo
+	Matches: {count}	Correspondências: {count}
+	Show only records that will be merged	Mostrar somente os registros que serão mesclados
 	Take the last match on the page	Usar a última ocorrência da página
 	Show its list number	Mostrar seu número na lista
 	Show its number relative to this field	Mostrar seu número em relação a este campo
@@ -2269,3 +2277,26 @@
 	All Fonts	Todas as fontes
 	Spike	Coletor
 	Insert Spike	Inserir coletor
+# Add Font status (#1789)
+	Added 1 font	1 fonte adicionada
+	Added {n} fonts	{n} fontes adicionadas
+	{added}; {count} couldn't be read: {names}	{added}; {count} não puderam ser lidas: {names}
+	{names} and {n} more	{names} e mais {n}
+	{added}; {n} skipped (limit {max})	{added}; {n} ignoradas (limite de {max})
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	No texto
+	In margin	Na margem
+	Drop Cap Options…	Opções de capitular…
+	Lines to drop:	Linhas ocupadas:
+	Distance from text:	Distância do texto:
+	Distance from text	Distância do texto
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	Bloquear proporção
+	Relative to original picture size	Em relação ao tamanho original da imagem
+	Original size	Tamanho original
+	{width} × {height} pixels	{width} × {height} pixels
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Digite um tamanho em qualquer unidade, como 5 cm ou 300 px. O outro lado acompanha, e a imagem mantém as proporções.
+
+	Import…	Importar…
