@@ -190,7 +190,7 @@ fn dash_autoformat(s: &mut Session) -> Result<(), CmdError> {
     {
         // "word -- word" → "word – word" once the next word is typed.
         let p = s.doc.para_mut(f.story, &f.path)?;
-        let props = p.props_at(i + 1).clone();
+        let props = p.props_at(i + 1).clone().without_symbol();
         p.delete(i + 1, i + 3)?;
         p.insert_text(i + 1, "\u{2013}", &props)?;
         s.sel = Selection::caret(Pos { off: f.off + 1, ..f });
@@ -199,7 +199,7 @@ fn dash_autoformat(s: &mut Session) -> Result<(), CmdError> {
         && !before.trim_end()[i + 3..].contains(' ')
     {
         let p = s.doc.para_mut(f.story, &f.path)?;
-        let props = p.props_at(i + 1).clone();
+        let props = p.props_at(i + 1).clone().without_symbol();
         p.delete(i + 1, i + 2)?;
         p.insert_text(i + 1, "\u{2013}", &props)?;
         s.sel = Selection::caret(Pos { off: f.off + 2, ..f });
@@ -209,7 +209,7 @@ fn dash_autoformat(s: &mut Session) -> Result<(), CmdError> {
         && before.trim_end()[..i].chars().next_back().is_some_and(|c| c != ' ')
     {
         let p = s.doc.para_mut(f.story, &f.path)?;
-        let props = p.props_at(i).clone();
+        let props = p.props_at(i).clone().without_symbol();
         p.delete(i, i + 2)?;
         p.insert_text(i, "\u{2014}", &props)?;
         s.sel = Selection::caret(Pos { off: f.off + 1, ..f });

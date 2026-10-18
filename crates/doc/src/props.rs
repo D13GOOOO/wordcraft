@@ -326,6 +326,11 @@ pub struct CharProps {
     pub style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
+    /// The symbol's own font (OOXML `w:sym/@w:font`, ECMA-376 §17.3.3.30), set on a symbol
+    /// character from a `w:sym` or Insert › Symbol: it is shown in this font whatever `font` is,
+    /// so changing the text's font keeps the symbol. `None` = the run's font.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sym_font: Option<String>,
     /// Points.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<f32>,
@@ -542,7 +547,7 @@ impl CharProps {
     /// The fields of `self` that differ from `base` (equal ones unset): what `self` adds when
     /// overlaid on `base`.
     pub fn minus(mut self, base: &CharProps) -> CharProps {
-        drop_same_fields!(self, base; style, font, size, bold, italic, underline, underline_color, strike, double_strike, color, highlight,
+        drop_same_fields!(self, base; style, font, sym_font, size, bold, italic, underline, underline_color, strike, double_strike, color, highlight,
             shading, border, vert_align, caps, small_caps, hidden, spacing, scale, position, kern, outline, shadow, emboss, engrave, lang, no_proof, rtl,
             cs, font_cs, size_cs, bold_cs, italic_cs, lang_bidi, east_asian_layout, link, ins, del, ligatures);
         self
@@ -553,7 +558,7 @@ impl CharProps {
     /// Plain and complex-script properties inherit independently. Commands that intend to
     /// format both scripts must set both values explicitly.
     pub fn overlay(&mut self, patch: &CharProps) {
-        overlay_fields!(self, patch; style, font, size, bold, italic, underline, underline_color, strike, double_strike, color, highlight,
+        overlay_fields!(self, patch; style, font, sym_font, size, bold, italic, underline, underline_color, strike, double_strike, color, highlight,
             shading, border, vert_align, caps, small_caps, hidden, spacing, scale, position, kern, outline, shadow, emboss, engrave, lang, no_proof, rtl,
             cs, font_cs, font_ea, size_cs, bold_cs, italic_cs, lang_bidi, east_asian_layout, link, ins, del, fmt_change, ligatures);
         if let Some(p) = &patch.text_effects {
@@ -567,10 +572,29 @@ impl CharProps {
     pub fn is_empty(&self) -> bool {
         *self == CharProps::default()
     }
+    /// The font a character of this run is shown in: the symbol's own font when it has one
+    /// ([`Self::sym_font`]), else the run's font.
+    pub fn shown_font(&self) -> Option<&str> {
+        self.sym_font.as_deref().filter(|f| !f.trim().is_empty()).or(self.font.as_deref())
+    }
+    /// The same formatting for text typed or painted next to a symbol: without the symbol's own
+    /// font.
+    pub fn without_symbol(mut self) -> CharProps {
+        self.sym_font = None;
+        self
+    }
     /// Clear direct formatting but keep what isn't "formatting" (links, revisions, character style
     /// is cleared too, as Word's Clear Formatting does).
     pub fn cleared(&self) -> CharProps {
-        CharProps { link: self.link.clone(), ins: self.ins, del: self.del, fmt_change: self.fmt_change.clone(), ..Default::default() }
+        CharProps {
+            link: self.link.clone(),
+            ins: self.ins,
+            del: self.del,
+            fmt_change: self.fmt_change.clone(),
+            // A symbol stays the symbol it is.
+            sym_font: self.sym_font.clone(),
+            ..Default::default()
+        }
     }
     /// Just the formatting: without the link, revision marks and tracked formatting change.
     pub fn formatting(&self) -> CharProps {
@@ -895,6 +919,16 @@ pub struct ParaProps {
     /// Drop cap: lines to drop (0 = none) — applies to the first character(s).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drop_cap: Option<u8>,
+    /// Drop cap "In margin" (`w:dropCap="margin"`): the letter hangs in the left margin and the
+    /// text keeps its indent. Unset = dropped into the text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_cap_margin: Option<bool>,
+    /// The drop cap's distance from the text, in points (`w:hSpace`). Unset = 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_cap_distance: Option<f32>,
+    /// The drop cap letter's font family (the cap run's `w:rFonts`). Unset = the text's font.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_cap_font: Option<String>,
     /// A text frame (`w:framePr` other than a drop cap): the paragraph is placed apart from the
     /// text, which may wrap around it — a footer's page number in a frame, for instance.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -935,7 +969,7 @@ impl ParaProps {
     pub fn overlay(&mut self, patch: &ParaProps) {
         overlay_fields!(self, patch; style, align, indent_left, indent_right, indent_first, indent_left_chars, indent_right_chars, indent_first_chars, space_before, space_after, space_before_auto, space_after_auto, line_spacing,
             contextual_spacing, mirror_indents, keep_next, keep_lines, page_break_before, widow_control, outline_level, numbering, tabs, shading, borders,
-            suppress_hyphens, suppress_line_numbers, bidi, drop_cap, frame, kinsoku, word_wrap, overflow_punct, top_line_punct, auto_space_de, auto_space_dn,
+            suppress_hyphens, suppress_line_numbers, bidi, drop_cap, drop_cap_margin, drop_cap_distance, drop_cap_font, frame, kinsoku, word_wrap, overflow_punct, top_line_punct, auto_space_de, auto_space_dn,
             snap_to_grid);
     }
     pub fn overlaid(mut self, patch: &ParaProps) -> ParaProps {
@@ -1403,5 +1437,20 @@ mod tests {
         assert_eq!(s, r#"{"bold":true}"#);
         let back: CharProps = serde_json::from_str(&s).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn symbol_font_is_optional_in_json_and_survives_font_changes() {
+        // Older documents (no `symFont`) still load.
+        let old: CharProps = serde_json::from_str(r#"{"font":"Arial"}"#).unwrap();
+        assert_eq!(old.sym_font, None);
+        let p = CharProps { font: Some("Arial".into()), sym_font: Some("Wingdings".into()), ..Default::default() };
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(s.contains(r#""symFont":"Wingdings""#), "{s}");
+        assert_eq!(serde_json::from_str::<CharProps>(&s).unwrap(), p);
+        // A font change keeps the symbol's own font; Clear Formatting too.
+        let changed = p.clone().overlaid(&CharProps { font: Some("Times New Roman".into()), ..Default::default() });
+        assert_eq!(changed.sym_font.as_deref(), Some("Wingdings"));
+        assert_eq!(p.cleared().sym_font.as_deref(), Some("Wingdings"));
     }
 }

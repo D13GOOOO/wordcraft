@@ -290,7 +290,7 @@ pub fn style(name: &str) -> &'static CiteStyle {
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("references.sources", "Manage Sources", "References › Citations & Bibliography", sources)
-            .params(r#"{"add"?: Source, "remove"?: tag} → list"#),
+            .params(r#"{"add"?: Source, "remove"?: tag, "import"?: path (a Word bibliography file, `b:Sources` / `Sources.xml`)} → list"#),
         CommandSpec::new("references.citation", "Insert Citation", "References › Citations & Bibliography", citation).params(r#"{"tag"?: string, "source"?: Source (added if new), "pages"?: string}"#),
         CommandSpec::new("references.citationStyle", "Style", "References › Citations & Bibliography", |s, v| {
             let st = p::str(v, "style").unwrap_or("APA");
@@ -522,12 +522,7 @@ pub fn entry(src: &Source, style_name: &str, n: usize) -> String {
 /// The tag a new source gets, as Word makes it: the first three letters of the first author's
 /// name and the last two digits of the year (`Smi20`), with `1`, `2`… added while it is taken.
 fn auto_tag(doc: &Document, src: &Source) -> String {
-    let name: String =
-        authors(&src.author).first().map(|x| x.0.clone()).unwrap_or_default().chars().filter(|c| c.is_alphanumeric()).take(3).collect();
-    let name = if name.is_empty() { "Src".to_string() } else { name };
-    let digits: Vec<char> = src.year.chars().filter(char::is_ascii_digit).collect();
-    let year: String = digits.get(digits.len().saturating_sub(2)..).unwrap_or_default().iter().collect();
-    let base = format!("{name}{year}");
+    let base = auto_tag_base(src);
     let taken = |t: &str| doc.sources.iter().any(|x| x.tag == t);
     if !taken(&base) {
         return base;
@@ -535,6 +530,25 @@ fn auto_tag(doc: &Document, src: &Source) -> String {
     (1u32..).map(|n| format!("{base}{n}")).find(|t| !taken(t)).unwrap_or(base)
 }
 
+/// The author of a source for matching untagged entries: the editor when there is no author.
+fn by_author(x: &Source) -> &str {
+    if x.author.is_empty() { x.editor.as_str() } else { x.author.as_str() }
+}
+
+/// The stem of a new source's tag, before `1`, `2`… are added while it is taken: the first three
+/// alphanumerics of the first author's name (nothing of the author's, `Src`) and the last two
+/// digits of the year.
+fn auto_tag_base(src: &Source) -> String {
+    let name: String =
+        authors(&src.author).first().map(|x| x.0.clone()).unwrap_or_default().chars().filter(|c| c.is_alphanumeric()).take(3).collect();
+    let name = if name.is_empty() { "Src".to_string() } else { name };
+    let digits: Vec<char> = src.year.chars().filter(char::is_ascii_digit).collect();
+    let year: String = digits.get(digits.len().saturating_sub(2)..).unwrap_or_default().iter().collect();
+    format!("{name}{year}")
+}
+
+/// Manage Sources: applies `add`, `remove` and `import` (in that order) and returns the
+/// document's sources. `import` reads a Word bibliography file (`b:Sources`, #2640).
 fn sources(s: &mut Session, v: &Value) -> CmdResult {
     if let Some(a) = v.get("add") {
         let mut src: Source = serde_json::from_value(a.clone()).map_err(|e| CmdError::Params(e.to_string()))?;
@@ -557,7 +571,72 @@ fn sources(s: &mut Session, v: &Value) -> CmdResult {
     if let Some(t) = p::str(v, "remove") {
         s.doc.sources.retain(|x| x.tag != t);
     }
+    if let Some(path) = p::str(v, "import") {
+        import_sources(s, path)?;
+    }
     Ok(serde_json::to_value(&s.doc.sources).unwrap_or(Value::Null))
+}
+
+/// The largest bibliography sources file imported from disk.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_SOURCES_FILE: u64 = 32 << 20;
+
+/// Import the sources of a Word bibliography file (`b:Sources`: Word's own `Sources.xml`) into
+/// this document (#2640). A tag already here is left alone — an import never overwrites an
+/// edited source; a source with no tag is matched to an existing one by title and author, and
+/// otherwise gets a tag the way a new source does.
+fn import_sources(s: &mut Session, path: &str) -> Result<(), CmdError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (s, path);
+        return Err(CmdError::Failed("reading files by path isn't available on the web".into()));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Through `io`, which keeps automation inside its read root (#769).
+        let bytes = crate::io::read_file_capped(path, MAX_SOURCES_FILE, "sources file").map_err(CmdError::Failed)?;
+        let file = wordcraft_docx::read_sources(&bytes).map_err(|e| CmdError::Failed(e.to_string()))?;
+        let mut added = false;
+        // The tags and (title, author-or-editor) keys already here, once: an import of thousands
+        // of untagged sources must not rescan the list per source. Tags follow `auto_tag`: the
+        // stem, then 1, 2… while taken.
+        let mut tags: std::collections::HashSet<String> = s.doc.sources.iter().map(|x| x.tag.clone()).collect();
+        let mut keys: std::collections::HashSet<(String, String)> =
+            s.doc.sources.iter().map(|x| (x.title.clone(), by_author(x).to_string())).collect();
+        let mut next: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for mut src in file.sources {
+            if s.doc.sources.len() >= wordcraft_docx::MAX_SOURCES {
+                break;
+            }
+            if src.tag.is_empty() {
+                // A source with no tag is matched to one already here by its title and author (or
+                // editor), as repeated parts of a document are; otherwise it gets a tag the way a
+                // new source does.
+                if keys.contains(&(src.title.clone(), by_author(&src).to_string())) {
+                    continue;
+                }
+                let base = auto_tag_base(&src);
+                let n = next.entry(base.clone()).or_insert(0);
+                let mut tag = if *n == 0 { base.clone() } else { format!("{base}{}", *n) };
+                while tags.contains(&tag) {
+                    *n += 1;
+                    tag = format!("{base}{}", *n);
+                }
+                *n = n.saturating_add(1);
+                src.tag = tag;
+            }
+            if !tags.insert(src.tag.clone()) {
+                continue;
+            }
+            keys.insert((src.title.clone(), by_author(&src).to_string()));
+            s.doc.sources.push(src);
+            added = true;
+        }
+        if added {
+            s.touch();
+        }
+        Ok(())
+    }
 }
 
 fn citation(s: &mut Session, v: &Value) -> CmdResult {
@@ -1280,6 +1359,92 @@ mod tests {
         }
         assert!(s.run("references.citationStyle", &json!({"style": "Vancouver"})).unwrap_err().to_string().contains("Turabian"));
         assert_eq!(s.bib_style, "Turabian", "an unknown style keeps the current one");
+    }
+
+    /// #2640: Manage Sources › Import reads a Word bibliography file (`b:Sources`: Word's own
+    /// `Sources.xml`) into the document. An untagged source gets a tag like a new one; a tag
+    /// already here is left alone; the whole import is one undo step; and a file that isn't
+    /// `b:Sources` is an error, not a silent success.
+    #[test]
+    fn import_sources_reads_a_word_bibliography_file() {
+        let dir = std::env::temp_dir().join(format!("wc-import-sources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Sources.xml");
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<b:Sources xmlns:b="http://schemas.openxmlformats.org/officeDocument/2006/bibliography"
+           xmlns="http://schemas.openxmlformats.org/officeDocument/2006/bibliography"
+           SelectedStyle="\APA.XSL" StyleName="APA">
+  <b:Source><b:Tag>Riv21</b:Tag><b:SourceType>Book</b:SourceType>
+    <b:Author><b:Author><b:NameList><b:Person><b:Last>Rivera</b:Last><b:First>Alex</b:First></b:Person></b:NameList></b:Author></b:Author>
+    <b:Title>Shared Spaces</b:Title><b:Year>2021</b:Year><b:City>Portland</b:City><b:Publisher>Harbor Books</b:Publisher>
+  </b:Source>
+  <b:Source><b:SourceType>Book</b:SourceType></b:Source>
+  <b:Source><b:SourceType>JournalArticle</b:SourceType>
+    <b:Author><b:Author><b:NameList><b:Person><b:Last>Okafor</b:Last><b:First>Ngozi</b:First></b:Person></b:NameList></b:Author></b:Author>
+    <b:Title>Kilns and Clay</b:Title><b:JournalName>Studio Quarterly</b:JournalName><b:Year>2019</b:Year>
+  </b:Source>
+</b:Sources>"#;
+        std::fs::write(&path, xml).unwrap();
+        let path = path.to_string_lossy().to_string();
+
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("references.sources", &json!({"import": path})).unwrap();
+        assert_eq!(s.doc.sources.len(), 2, "the source with no content is dropped");
+        assert_eq!(s.doc.sources[0].tag, "Riv21");
+        assert_eq!((s.doc.sources[0].author.as_str(), s.doc.sources[0].title.as_str()), ("Rivera, Alex", "Shared Spaces"));
+        assert_eq!(
+            (s.doc.sources[1].tag.as_str(), s.doc.sources[1].kind.as_str()),
+            ("Oka19", "article"),
+            "an untagged source gets a tag like a new one"
+        );
+        assert!(s.dirty, "the document is marked edited");
+
+        // The import is one undo step, and importing again adds nothing.
+        s.run("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.sources.is_empty(), "one undo takes the whole import back");
+        s.run("references.sources", &json!({"import": path})).unwrap();
+        s.doc.sources[0].title = "Shared Spaces, revised".into();
+        s.run("references.sources", &json!({"import": path})).unwrap();
+        assert_eq!(s.doc.sources.len(), 2, "a tag already here is not added again");
+        assert_eq!(s.doc.sources[0].title, "Shared Spaces, revised", "an import never overwrites an edited source");
+        assert_eq!(s.doc.sources[1].tag, "Oka19", "the untagged source keeps the tag it was given");
+
+        // Anything that isn't b:Sources is refused.
+        let bad = dir.join("not-sources.xml");
+        std::fs::write(&bad, "<html><body>no</body></html>").unwrap();
+        let e = s.run("references.sources", &json!({"import": bad.to_string_lossy()})).unwrap_err();
+        assert!(e.to_string().contains("not a Word document"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2640: untagged sources that share a tag stem get the tag, then `1`, `2`… in import order,
+    /// and a second import adds none of them (the untagged one matches by title).
+    #[test]
+    fn an_import_tags_each_untagged_source_once() {
+        let dir = std::env::temp_dir().join(format!("wc-import-tags-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Sources.xml");
+        std::fs::write(
+            &path,
+            r#"<b:Sources xmlns:b="http://schemas.openxmlformats.org/officeDocument/2006/bibliography">
+  <b:Source><b:SourceType>Book</b:SourceType><b:Title>First Work</b:Title><b:Year>2021</b:Year>
+    <b:Author><b:Author><b:NameList><b:Person><b:Last>Rivera</b:Last><b:First>Alex</b:First></b:Person></b:NameList></b:Author></b:Author></b:Source>
+  <b:Source><b:SourceType>Book</b:SourceType><b:Title>Second Work</b:Title><b:Year>2021</b:Year>
+    <b:Author><b:Author><b:NameList><b:Person><b:Last>Rivera</b:Last><b:First>Alex</b:First></b:Person></b:NameList></b:Author></b:Author></b:Source>
+  <b:Source><b:SourceType>Book</b:SourceType><b:Title>Third Work</b:Title></b:Source>
+</b:Sources>"#,
+        )
+        .unwrap();
+        let path = path.to_string_lossy().to_string();
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("references.sources", &json!({"import": path})).unwrap();
+        let tags: Vec<_> = s.doc.sources.iter().map(|x| x.tag.as_str()).collect();
+        assert_eq!(tags, ["Riv21", "Riv211", "Src"], "{tags:?}");
+        s.run("references.sources", &json!({"import": path})).unwrap();
+        assert_eq!(s.doc.sources.len(), 3, "the tags are here and the untagged one matches by title");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

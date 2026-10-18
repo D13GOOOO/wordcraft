@@ -106,11 +106,9 @@ pub fn specs() -> Vec<CommandSpec> {
             .key(super::mac_or("Ctrl+Shift+T", "Alt+Shift+T")),
         CommandSpec::new("insert.pageField", "Insert Page Field", "Insert › Text › Quick Parts", |s, _| field(s, &json!({"instr": "PAGE"})))
             .key(super::mac_or("Ctrl+Shift+P", "Alt+Shift+P")),
-        CommandSpec::new("insert.dropCap", "Drop Cap", "Insert › Text", |s, v| {
-            let lines = p::u64(v, "lines").unwrap_or(3).min(10) as u8;
-            super::para::fmt(s, &|p| p.drop_cap = Some(lines))
-        })
-        .params(r#"{"lines"?: n (0 = none)}"#),
+        CommandSpec::new("insert.dropCap", "Drop Cap", "Insert › Text", drop_cap)
+            .params(r#"{"position"?: "none"|"dropped"|"margin" (default dropped), "lines"?: 1..10 (default 3; 0 = none), "distance"?: pt from the text (0..1584, default 0), "font"?: family (omit for the text's font)}"#)
+            .when(drop_cap_off),
         CommandSpec::new("insert.horizontalLine", "Horizontal Line", "Home › Paragraph › Borders", |s, _| {
             super::para::fmt(s, &|p| {
                 p.borders = Some(wordcraft_doc::props::Borders { bottom: Some(wordcraft_doc::props::Border::single(1.5)), ..Default::default() })
@@ -348,8 +346,11 @@ fn shape(s: &mut Session, v: &Value) -> CmdResult {
     if super::canvas::add_member(s, obj.clone())?.is_some() {
         return sel_result(s);
     }
+    // Word draws a new shape beside what is selected and never deletes it: the shape just
+    // inserted (which is selected) stays, and so does selected text (#2019). It goes after the
+    // selection and becomes the selection. (A picture does replace the selection, as in Word.)
     let props = s.typing_props();
-    let at = delete_selection(s)?;
+    let (_, at) = s.sel.ordered();
     let end = s.doc.insert_object(&at, obj, &props)?;
     s.sel = Selection { anchor: at, focus: end };
     sel_result(s)
@@ -886,10 +887,27 @@ fn symbol(s: &mut Session, v: &Value) -> CmdResult {
         return Err(CmdError::Params("font: a family name".into()));
     }
     let base = s.typing_props();
-    let mut props = base.clone();
-    props.font = Some(font.to_string());
-    s.pending = Some(props);
-    let r = type_text(s, c);
+    // A symbol font's character remembers it as its own font (`w:sym`), so changing the text's
+    // font later keeps the symbol; other fonts are ordinary run formatting. `w:sym` holds a 16-bit
+    // code, so a character beyond the Basic Multilingual Plane stays ordinary text in that font.
+    // Each character decides for itself, so a mixed string keeps its symbols and its text apart.
+    let font_is_symbol = wordcraft_doc::symbol_fonts::is_symbol_font(font);
+    let mut r = Ok(());
+    let mut buf = [0u8; 4];
+    for ch in c.chars() {
+        let mut props = base.clone();
+        let private_use = ('\u{F020}'..='\u{F0FF}').contains(&ch);
+        if u32::from(ch) <= 0xFFFF && (font_is_symbol || private_use) {
+            props.sym_font = Some(font.to_string());
+        } else {
+            props.font = Some(font.to_string());
+        }
+        s.pending = Some(props);
+        r = type_text(s, ch.encode_utf8(&mut buf));
+        if r.is_err() {
+            break;
+        }
+    }
     // Typing on after the symbol goes on in the text's own font.
     s.pending = Some(base);
     r?;
@@ -1157,6 +1175,27 @@ mod tests {
 
     /// Insert › Symbol with a font: only the symbol takes it, the caret's font carries on after.
     #[test]
+    fn a_mixed_symbol_string_keeps_symbols_and_text_apart() {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("a"));
+        s.run("caret.docEnd", &json!({})).unwrap();
+        s.run("insert.symbol", &json!({"char": "\u{F041}A", "font": "My Custom Font"})).unwrap();
+        let p = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+        assert_eq!(p.props_of_char(1).sym_font.as_deref(), Some("My Custom Font"), "the private-use glyph");
+        assert_eq!(p.props_of_char(4).sym_font, None, "the plain letter");
+        assert_eq!(p.props_of_char(4).font.as_deref(), Some("My Custom Font"));
+    }
+
+    #[test]
+    fn an_astral_symbol_stays_text_in_its_font() {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("a"));
+        s.run("caret.docEnd", &json!({})).unwrap();
+        s.run("insert.symbol", &json!({"char": "\u{1F600}", "font": "Wingdings"})).unwrap();
+        let p = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+        assert_eq!(p.props_of_char(1).sym_font, None, "w:sym can't hold it");
+        assert_eq!(p.props_of_char(1).font.as_deref(), Some("Wingdings"));
+    }
+
+    #[test]
     fn symbol_takes_its_own_font() {
         let mut s = Session::new(wordcraft_doc::Document::from_text("ab"));
         s.run("caret.docEnd", &json!({})).unwrap();
@@ -1181,5 +1220,72 @@ mod tests {
         assert_eq!(date_picture(r#"DATE \@ "MMMM d, yyyy" \* MERGEFORMAT"#).as_deref(), Some("MMMM d, yyyy"));
         assert_eq!(date_picture(r#"TIME \@ HH:mm"#).as_deref(), Some("HH:mm"));
         assert_eq!(date_picture("DATE"), None);
+    }
+}
+
+/// Why Insert › Drop Cap is off at the caret, as in Word: in a table cell, in an empty paragraph
+/// and in one that starts with a space.
+fn drop_cap_off(s: &Session) -> Option<&'static str> {
+    if s.sel.focus.path.cell().is_some() {
+        return Some("drop caps can't go in a table");
+    }
+    let first = s.doc.para_at(&s.sel.focus).and_then(|p| p.text.chars().next());
+    match first {
+        None => Some("the paragraph is empty"),
+        Some(c) if c.is_whitespace() => Some("the paragraph starts with a space"),
+        Some(_) => None,
+    }
+}
+
+/// Insert › Drop Cap and Drop Cap Options: none, or the letter dropped into the text or hung in
+/// the margin, `lines` tall, `distance` points from the text, in `font` (unset: the text's).
+/// None takes all of it away, the letter's font with it.
+fn drop_cap(s: &mut Session, v: &Value) -> CmdResult {
+    let lines = v.get("lines").and_then(Value::as_f64).filter(|l| l.is_finite());
+    let none = p::str(v, "position") == Some("none") || lines == Some(0.0);
+    let margin = p::str(v, "position") == Some("margin");
+    let lines = lines.map_or(3.0, |l| l.round().clamp(1.0, 10.0)) as u8;
+    let distance = p::f32(v, "distance").map_or(0.0, |d| d.clamp(0.0, wordcraft_doc::resolve::MAX_DROP_CAP_DISTANCE));
+    // A family name, not a paragraph of text.
+    let font = p::str(v, "font").map(str::trim).filter(|f| !f.is_empty()).map(|f| f.chars().take(64).collect::<String>());
+    super::para::fmt(s, &|p| {
+        p.drop_cap = (!none).then_some(lines);
+        p.drop_cap_margin = (!none && margin).then_some(true);
+        p.drop_cap_distance = (!none && distance > 0.0).then_some(distance);
+        p.drop_cap_font = font.clone().filter(|_| !none);
+    })
+}
+
+/// Insert › Drop Cap at the caret: the menu's highlight and the Drop Cap dialog's values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropCapState {
+    /// `none`, `dropped` or `margin`.
+    pub position: &'static str,
+    /// Lines to drop (3 when there is no drop cap).
+    pub lines: u8,
+    /// Distance from the text, points.
+    pub distance: f32,
+    /// The letter's own font, if it has one.
+    pub font: Option<String>,
+    /// The font of the paragraph's first character.
+    pub text_font: String,
+}
+
+pub fn drop_cap_state(s: &Session) -> DropCapState {
+    let para = s.doc.para_at(&s.sel.focus);
+    let props = para.map(|p| p.props.clone()).unwrap_or_default();
+    let rp = s.doc.styles.resolve_para(&props);
+    let first = para.map(|p| p.props_at(0).clone()).unwrap_or_default();
+    let text_font = s.doc.styles.resolve_char_in(props.style.as_deref(), None, &first).font;
+    DropCapState {
+        position: match (rp.drop_cap, rp.drop_cap_margin) {
+            (0, _) => "none",
+            (_, true) => "margin",
+            _ => "dropped",
+        },
+        lines: if rp.drop_cap == 0 { 3 } else { rp.drop_cap },
+        distance: if rp.drop_cap == 0 { 0.0 } else { rp.drop_cap_distance },
+        font: rp.drop_cap_font.filter(|_| rp.drop_cap > 0),
+        text_font,
     }
 }

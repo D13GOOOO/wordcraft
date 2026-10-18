@@ -836,6 +836,8 @@
 	Space before/after:	段落前/後間距：
 	Spacing	間距
 	Spacing (pt):	間距（點）：
+	Kerning for fonts:	字型的字距調整：
+	Points and above	點及以上
 	Speech	語音
 	Spelling & Grammar	拼字及文法
 	Spelling &\nGrammar	拼字及文法
@@ -1550,6 +1552,8 @@
 	Customize Ribbon	自訂功能區
 	Add to Quick Access Toolbar	新增至快速存取工具列
 	Remove from Quick Access Toolbar	從快速存取工具列移除
+	Hide Quick Access Toolbar	隱藏快速存取工具列
+	Show Quick Access Toolbar	顯示快速存取工具列
 	Customize the Ribbon…	自訂功能區…
 	Customize Quick Access Toolbar…	自訂快速存取工具列…
 	More Commands…	其他命令…
@@ -2137,6 +2141,10 @@
 	Contains	包含
 	Does not contain	不包含
 	{count} of {total} recipients will be merged.	將合併 {total} 位收件者中的 {count} 位。
+	Find in list:	在清單中尋找：
+	Any field	任意欄位
+	Matches: {count}	相符項目：{count}
+	Show only records that will be merged	僅顯示將要合併的記錄
 	Take the last match on the page	取本頁最後一個相符項目
 	Show its list number	顯示其清單編號
 	Show its number relative to this field	顯示相對於此欄位的編號
@@ -2264,3 +2272,20 @@
 	{added}; {count} couldn't be read: {names}	{added}；{count} 個無法讀取：{names}
 	{names} and {n} more	{names} 等另外 {n} 個
 	{added}; {n} skipped (limit {max})	{added}；已略過 {n} 個（上限 {max}）
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	下沉
+	In margin	懸掛
+	Drop Cap Options…	首字放大選項…
+	Lines to drop:	放大行數：
+	Distance from text:	與本文距離：
+	Distance from text	與本文距離
+
+# Picture Format › Size: the Size dialog, sizes typed in any unit (#2573)
+	Lock aspect ratio	鎖定長寬比
+	Relative to original picture size	相對於原始圖片大小
+	Original size	原始大小
+	{width} × {height} pixels	{width} × {height} 像素
+	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	可用任何單位輸入大小，例如 5 cm 或 300 px。另一邊隨之調整，圖片保持原有比例。
+
+	Import…	匯入…

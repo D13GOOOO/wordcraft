@@ -20,8 +20,8 @@ use crate::WordApp;
 /// A file dialog the app asks the host to show ([`Services::file_dialog`](crate::Services::file_dialog)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileDialogRequest {
-    /// Pick a file to open; `purpose` says what for (`document`, `picture`, `recipients`, `font`), as for
-    /// `pick_open`.
+    /// Pick a file to open; `purpose` says what for (`document`, `picture`, `recipients`, `font`,
+    /// `sources`), as for `pick_open`.
     Open { purpose: String },
     /// Pick one or more files (Add Font…); the answer lists every one picked.
     OpenMany { purpose: String },
@@ -47,6 +47,7 @@ pub fn open_filters(purpose: &str) -> &'static [(&'static str, &'static [&'stati
     match purpose {
         "picture" => &[("Pictures", PICTURES)],
         "font" => &[("Fonts", wordcraft_fonts::FONT_FILE_EXTS)],
+        "sources" => &[("Word sources", &["xml"]), ("All files", &["*"])],
         "recipients" => &[("Recipient lists", wordcraft_engine::cmd::mailings::RECIPIENT_EXTENSIONS), ("All files", &["*"])],
         _ => &[("Documents", DOCUMENTS), ("Word document", &["docx"]), ("All files", &["*"])],
     }
@@ -68,6 +69,10 @@ pub(crate) enum AfterPick {
     Recipients,
     /// Add every picked font file (#582, #1789).
     Font,
+    /// Import the picked Word bibliography file (`b:Sources`: Word's `Sources.xml`) into the
+    /// document through Manage Sources (#2640).
+    #[cfg(not(target_arch = "wasm32"))]
+    Sources,
     /// Hand the picked path to the open dialog (`WordApp::dialog_pick`): Templates and Add-ins,
     /// Organizer (#377).
     ForDialog,
@@ -252,6 +257,22 @@ impl WordApp {
             AfterPick::Font => {
                 let Some(path) = picked else { return Ok(json!({"cancelled": true})) };
                 self.add_fonts(vec![path])
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            AfterPick::Sources => {
+                let Some(path) = picked else { return Ok(json!({"cancelled": true})) };
+                let before = self.session.doc.sources.len();
+                let r = self.run("references.sources", json!({"import": path}));
+                if r.is_ok() {
+                    let added = self.session.doc.sources.len().saturating_sub(before);
+                    let msg = match added {
+                        0 => tl!("No new sources in that file").to_string(),
+                        1 => tl!("Imported 1 source").to_string(),
+                        n => crate::i18n::fmt(tl!("Imported {n} sources"), &[("n", &n.to_string())]),
+                    };
+                    self.status(msg);
+                }
+                r
             }
             AfterPick::ForDialog => {
                 let picked = picked.filter(|p| !p.is_empty());
@@ -833,6 +854,33 @@ mod tests {
         answer(&shown, None);
         assert_eq!(a.poll_file_dialog().unwrap().unwrap(), json!({"cancelled": true}));
         assert_eq!(a.session.merge.rows.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #2640 (desktop): Manage Sources › Import… hands the picked Word bibliography file
+    /// (`Sources.xml`, `b:Sources`) to `references.sources`, and the status says how many
+    /// sources joined the document. Cancelling imports nothing, and importing the same file
+    /// twice adds nothing the second time.
+    #[test]
+    fn an_imported_sources_file_adds_its_sources() {
+        let dir = scratch("sources");
+        let xml = dir.join("Sources.xml");
+        std::fs::write(
+            &xml,
+            r#"<b:Sources xmlns:b="http://schemas.openxmlformats.org/officeDocument/2006/bibliography">
+  <b:Source><b:Tag>Riv21</b:Tag><b:SourceType>Book</b:SourceType><b:Title>Shared Spaces</b:Title><b:Year>2021</b:Year></b:Source>
+</b:Sources>"#,
+        )
+        .unwrap();
+        let (mut a, _) = async_app();
+        a.finish_pick(AfterPick::Sources, Some(xml.to_string_lossy().to_string())).unwrap();
+        assert_eq!(a.session.doc.sources.len(), 1);
+        assert_eq!(a.session.doc.sources[0].tag, "Riv21");
+        assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("Imported 1 source")), "{:?}", a.status_msg);
+        assert_eq!(a.finish_pick(AfterPick::Sources, None).unwrap(), json!({"cancelled": true}));
+        a.finish_pick(AfterPick::Sources, Some(xml.to_string_lossy().to_string())).unwrap();
+        assert_eq!(a.session.doc.sources.len(), 1, "the tag is already here");
+        assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m == "No new sources in that file"), "{:?}", a.status_msg);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
