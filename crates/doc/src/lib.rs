@@ -1291,20 +1291,25 @@ impl Document {
         max.saturating_add(1).max(1)
     }
 
-    /// The highest stacking order ([`para::Float::z`]) of any floating object in any story.
-    pub fn top_z(&self) -> Option<u32> {
-        let mut top = None;
+    /// The stacking orders ([`para::Float::z`]) the floating objects of every story have, and how
+    /// many floating objects have none (objects made here).
+    pub fn stacking_orders(&self) -> (std::collections::BTreeSet<u32>, usize) {
+        let (mut orders, mut unset) = (std::collections::BTreeSet::new(), 0usize);
         for blocks in std::iter::once(&self.body).chain(self.parts.values().map(|p| &p.blocks)) {
             for b in blocks {
                 edit::each_para(b, 0, &mut |p| {
-                    for o in &p.objects {
-                        let z = o.frame().and_then(|(_, _, f)| f.z);
-                        top = top.max(z);
+                    for (_, _, f) in p.objects.iter().filter_map(InlineObject::frame).filter(|(_, _, f)| f.wrap != para::Wrap::Inline) {
+                        match f.z {
+                            Some(z) => {
+                                orders.insert(z);
+                            }
+                            None => unset = unset.saturating_add(1),
+                        }
                     }
                 });
             }
         }
-        top
+        (orders, unset)
     }
 
     /// Change every inline object in every story (paragraphs inside tables too), copying only

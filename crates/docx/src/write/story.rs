@@ -1186,7 +1186,7 @@ impl Writer<'_> {
             let (dt, db) = (emu(float.dist_top.clamp(0.0, 1584.0)), emu(float.dist_bottom.clamp(0.0, 1584.0)));
             // A stacking order read from a file is kept; objects made here go above those.
             let z = match float.z {
-                Some(z) => z,
+                Some(z) => self.zmap.get(&z).copied().unwrap_or(z),
                 None => {
                     self.z = self.z.saturating_add(1);
                     self.z

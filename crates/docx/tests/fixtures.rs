@@ -2128,6 +2128,34 @@ fn floating_objects_keep_their_stacking_order() {
     assert_eq!(stacking(&back), [Some(251662337), Some(251662336), Some(251661312)]);
 }
 
+/// #2638: a file whose stacking orders reach `u32::MAX` leaves no room above them for an object
+/// made here. The stored orders are then numbered again, in their order, so the new object still
+/// goes over all of them and no two objects share an order (it was written as `u32::MAX` too).
+#[test]
+fn stacking_orders_at_the_top_of_the_range_are_numbered_again() {
+    let shape = |name: &str, z: u32| {
+        anchored_wsp(name, 127000, 127000, r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>"#, "", "<wps:cNvSpPr/>")
+            .replace(r#"relativeHeight="1""#, &format!(r#"relativeHeight="{z}""#))
+    };
+    let body = format!("<w:p>{}{}</w:p>", shape("Top", u32::MAX), shape("Low", 7));
+    let mut d = read_body(&body);
+    let stacking = |d: &Document| paras(d)[0].objects.iter().map(|o| o.frame().and_then(|(_, _, f)| f.z)).collect::<Vec<_>>();
+    assert_eq!(stacking(&d), [Some(u32::MAX), Some(7)]);
+    let mut made = paras(&d)[0].objects[0].clone();
+    if let InlineObject::Shape { float, .. } = &mut made {
+        float.z = None;
+    }
+    let Some(Block::Para(p)) = d.body.first_mut().map(std::sync::Arc::make_mut) else { panic!("a paragraph") };
+    p.insert_object(0, made, &Default::default()).unwrap();
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&d).unwrap()).unwrap();
+    let z: Vec<u32> = stacking(&back).into_iter().map(|z| z.expect("every anchor has an order")).collect();
+    assert!(z[0] > z[1] && z[1] > z[2], "new over Top over Low, all different: {z:?}");
+    // With room above, the stored orders are written as they are.
+    let room = read_body(&format!("<w:p>{}</w:p>", shape("Top", u32::MAX - 5)));
+    let back = wordcraft_docx::read(&wordcraft_docx::write(&room).unwrap()).unwrap();
+    assert_eq!(stacking(&back), [Some(u32::MAX - 5)]);
+}
+
 /// #611: diagrams drawn with Word's shapes were mostly missing. Connectors and boxes take their
 /// outline and fill from the theme through their style references, or name preset and scheme
 /// colours; all of these are read, with line widths and arrowheads.
