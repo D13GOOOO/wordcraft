@@ -142,15 +142,24 @@ fn hit_object<'a>(app: &'a WordApp, hit: &ObjectHit) -> Option<&'a InlineObject>
 /// canvas draws it, its own turn. `None` when it isn't drawn, or the canvas is turned (its
 /// members aren't picked on their own yet).
 fn member_hit(app: &WordApp, canvas: &ObjectHit, index: usize) -> Option<ObjectHit> {
+    let (o, r) = (pickable_canvas(app, canvas)?, canvas.rect);
+    let (_, frame) = o.member_rects(r.x, r.y, r.w, r.h).into_iter().find(|(i, _)| *i == index)?;
+    member_with_frame(app, canvas, o, index, frame)
+}
+
+/// The canvas object of hit `canvas` when its members can be picked: a canvas, hit as a whole,
+/// not turned.
+fn pickable_canvas<'a>(app: &'a WordApp, canvas: &ObjectHit) -> Option<&'a InlineObject> {
     let pos = canvas.pos();
-    let o = app.session.doc.para_at(&pos).and_then(|p| p.object_at(pos.off))?;
-    let InlineObject::Group { children, canvas: Some(_), .. } = o else { return None };
-    if canvas.member.is_some() || !canvas.spin.is_identity() || !children.get(index).is_some_and(wordcraft_engine::cmd::canvas::pickable) {
-        return None;
-    }
-    let r = canvas.rect;
-    let (_, [x, y, w, h]) = o.member_rects(r.x, r.y, r.w, r.h).into_iter().find(|(i, _)| *i == index)?;
-    let member = children.get(index)?;
+    let o = app.session.doc.para_at(&pos).and_then(|p| p.object_at(pos.off)).filter(|o| o.is_canvas())?;
+    (canvas.member.is_none() && canvas.spin.is_identity()).then_some(o)
+}
+
+/// [`member_hit`] for member `index` of canvas `o`, whose frame on the page (`[x, y, w, h]`) is
+/// already worked out.
+fn member_with_frame(app: &WordApp, canvas: &ObjectHit, o: &InlineObject, index: usize, [x, y, w, h]: [f32; 4]) -> Option<ObjectHit> {
+    let InlineObject::Group { children, .. } = o else { return None };
+    let member = children.get(index).filter(|c| wordcraft_engine::cmd::canvas::pickable(c))?;
     let text_box = match &member.obj {
         InlineObject::Shape { story: Some(id), .. } if app.session.doc.parts.get(id).is_some_and(|p| p.kind == PartKind::TextBox) => Some(*id),
         _ => None,
@@ -168,16 +177,18 @@ fn member_hit(app: &WordApp, canvas: &ObjectHit, index: usize) -> Option<ObjectH
 
 /// The member of the canvas hit `canvas` under the page point (x, y), topmost first; a text box
 /// member is grabbed anywhere on it too (inside, [`in_text`] tells its text from its border).
+/// The members' frames are worked out once for all of them.
 fn member_at(app: &WordApp, canvas: &ObjectHit, x: f32, y: f32, edge: f32) -> Option<ObjectHit> {
-    let pos = canvas.pos();
-    let o = app.session.doc.para_at(&pos).and_then(|p| p.object_at(pos.off)).filter(|o| o.is_canvas())?;
-    let r = canvas.rect;
+    let (o, r) = (pickable_canvas(app, canvas)?, canvas.rect);
+    // Members are drawn clipped to the canvas: only what shows is grabbed.
+    if !r.contains(wordcraft_geom::Point::new(x, y)) {
+        return None;
+    }
     o.member_rects(r.x, r.y, r.w, r.h)
         .into_iter()
         .rev()
-        .filter_map(|(i, _)| member_hit(app, canvas, i))
-        // Members are drawn clipped to the canvas: only what shows is grabbed.
-        .find(|m| r.contains(wordcraft_geom::Point::new(x, y)) && m.rect.expand(edge).contains(m.unspin(x, y)))
+        .filter_map(|(i, frame)| member_with_frame(app, canvas, o, i, frame))
+        .find(|m| m.rect.expand(edge).contains(m.unspin(x, y)))
 }
 
 /// Whether the page point (x, y) is in a text box member's text rather than on its border.
