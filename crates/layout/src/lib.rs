@@ -1193,7 +1193,12 @@ fn layout_box(
     // Word has no frames in a text box: a framed paragraph there (its style's frame, usually)
     // runs with the box's text (#2357).
     let frames = !matches!(story, StoryRef::Part(id) if ctx.doc.parts.get(&id).is_some_and(|p| p.kind == wordcraft_doc::PartKind::TextBox));
+    // The last paragraph of the text frame placed last: the ones up to it are in that frame.
+    let mut frame_end = 0;
     for (i, b) in blocks.iter().enumerate() {
+        if i < frame_end {
+            continue;
+        }
         last_top = y;
         let mut path = prefix.to_vec();
         path.push(i as u32);
@@ -1204,18 +1209,37 @@ fn layout_box(
                 let mut pl = ctx.para_labelled(p, width, table, &[], label.clone());
                 // A text frame (a footer's page number in a frame, say) is placed apart, like a
                 // floating object, and the text after it wraps around it; it takes no room in
-                // the flow.
+                // the flow. The paragraphs right after it with the same frame share it, one under
+                // the other (ECMA-376 §17.3.1.11).
                 if let Some(fr) = pl.rp.frame.clone().filter(|_| frames) {
-                    let fw = fr.w.unwrap_or_else(|| natural_width(&pl)).clamp(1.0, 1584.0);
-                    let pf = if (fw - width).abs() > 0.01 { ctx.para_labelled(p, fw, table, &[], label) } else { pl };
+                    let mut run = vec![(p, pl, label)];
+                    for b in blocks.iter().skip(i + 1) {
+                        let Block::Para(q) = &**b else { break };
+                        if ctx.doc.styles.resolve_para(&q.props).frame.as_ref() != Some(&fr) {
+                            break;
+                        }
+                        let label = ctx.next_label(q);
+                        run.push((q, ctx.para_labelled(q, width, table, &[], label.clone()), label));
+                    }
+                    frame_end = i + run.len();
+                    let fw = fr.w.unwrap_or_else(|| run.iter().map(|(_, pl, _)| natural_width(pl)).fold(1.0, f32::max)).clamp(1.0, 1584.0);
+                    let pfs: Vec<_> = run
+                        .into_iter()
+                        .map(|(q, pl, label)| if (fw - width).abs() > 0.01 { ctx.para_labelled(q, fw, table, &[], label) } else { pl })
+                        .collect();
+                    let (tops, text_h) = frame_stack(ctx.doc.settings.sum_paragraph_spacing, &pfs);
                     let h = match fr.h {
                         Some(h) if fr.h_exact => h,
-                        Some(h) => h.max(pf.height),
-                        None => pf.height,
+                        Some(h) => h.max(text_h),
+                        None => text_h,
                     };
                     let float = frame_float(&fr);
                     let r = float_rect(frame, (0.0, width), y, fw, h, &float);
-                    push_para(&mut items, story, &path, &pf, 0, pf.lines.len(), r.x, r.y, fw);
+                    for (k, (pf, top)) in pfs.iter().zip(tops).enumerate() {
+                        path.pop();
+                        path.push((i + k) as u32);
+                        push_para(&mut items, story, &path, pf, 0, pf.lines.len(), r.x, r.y + top, fw);
+                    }
                     excl.extend(wrap_area(r, &float, None));
                     float_tables.push(r);
                     continue;
@@ -1349,6 +1373,25 @@ fn layout_box(
     let floats_bottom = float_tables.iter().map(|r| r.bottom()).fold(0.0, f32::max);
     ctx.hide_deleted = outer_hide;
     BoxLayout { items, height: y.max(0.0), floats_bottom, last_top: last_top.max(0.0), table_areas, page_table_wraps }
+}
+
+/// The paragraphs of one text frame stacked one under the other: the top of each in the frame and
+/// the height of their text (the space between two collapses to the larger one unless the
+/// document adds them up).
+fn frame_stack(sum_spacing: bool, pls: &[Arc<ParaLayout>]) -> (Vec<f32>, f32) {
+    let (mut y, mut prev_after) = (0.0f32, 0.0f32);
+    let tops = pls
+        .iter()
+        .enumerate()
+        .map(|(k, pl)| {
+            y += if k == 0 || sum_spacing { pl.rp.space_before } else { (pl.rp.space_before - prev_after).max(0.0) };
+            let top = y;
+            y += pl.height + pl.rp.space_after;
+            prev_after = pl.rp.space_after;
+            top
+        })
+        .collect();
+    (tops, y)
 }
 
 /// The width a text frame without one takes: its widest line, with the paragraph's indents.
@@ -3444,24 +3487,33 @@ fn place_framed_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block: 
     }
     .clamp(1.0, 1584.0);
     // Where this paragraph starts in the frame, and the height of the frame's text.
-    let (mut y, mut offset, mut prev_after) = (0.0f32, 0.0f32, 0.0f32);
-    for (k, pl) in measure(ctx, fw).iter().enumerate() {
-        let before = if k == 0 || doc.settings.sum_paragraph_spacing { pl.rp.space_before } else { (pl.rp.space_before - prev_after).max(0.0) };
-        y += before;
-        if first + k == block {
-            offset = y;
-        }
-        y += pl.height + pl.rp.space_after;
-        prev_after = pl.rp.space_after;
-    }
+    let (tops, y) = frame_stack(doc.settings.sum_paragraph_spacing, &measure(ctx, fw));
+    let offset = tops.get(block - first).copied().unwrap_or(0.0);
     let h = match fr.h {
         Some(h) if fr.h_exact => h,
         Some(h) => h.max(y),
         None => y,
     };
     let float = frame_float(&fr);
-    let page = PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror };
-    let r = float_rect(Some(page), (col_x, col_w), pb.y, fw, h, &float);
+    let mut page = PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror };
+    let mut r = float_rect(Some(page), (col_x, col_w), pb.y, fw, h, &float);
+    // Like a floating table (#534), a frame that doesn't fit below the text before it moves to the
+    // next page with its paragraphs: one placed relative to the paragraph when it would run off
+    // the page, one placed on the page or margin (at the foot of the text area, say) when it would
+    // also cover the text already on the page.
+    if block == first && !pb.at_top() {
+        let moves = if float.v_rel == Anchor::Paragraph {
+            r.bottom() > pb.bottom + 0.01
+        } else {
+            let covers_text = pb.page().is_some_and(|page| page.items.iter().any(|item| placed_intersects(item, &r)));
+            covers_text && pb.y + h > pb.bottom + 0.01
+        };
+        if moves {
+            pb.advance(block, body_top);
+            page = PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror };
+            r = float_rect(Some(page), (pb.col_x(), pb.col_w()), pb.y, fw, h, &float);
+        }
+    }
     // The frame's first paragraph makes the text around keep clear of the whole frame.
     if block == first
         && let Some(area) = wrap_area(r, &float, None)
