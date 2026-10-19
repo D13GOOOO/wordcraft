@@ -1292,10 +1292,15 @@ impl Document {
     }
 
     /// The stacking orders ([`para::Float::z`]) the floating objects of every story have, and how
-    /// many floating objects have none (objects made here).
+    /// many floating objects have none (objects made here). Every story saved with the document
+    /// counts: the body, the parts and the note separators (the glossary is a document of its own).
     pub fn stacking_orders(&self) -> (std::collections::BTreeSet<u32>, usize) {
         let (mut orders, mut unset) = (std::collections::BTreeSet::new(), 0usize);
-        for blocks in std::iter::once(&self.body).chain(self.parts.values().map(|p| &p.blocks)) {
+        let separators = [&self.footnote_separators, &self.endnote_separators]
+            .into_iter()
+            .flat_map(|s| [&s.separator, &s.continuation_separator, &s.continuation_notice])
+            .flatten();
+        for blocks in std::iter::once(&self.body).chain(self.parts.values().map(|p| &p.blocks)).chain(separators) {
             for b in blocks {
                 edit::each_para(b, 0, &mut |p| {
                     for (_, _, f) in p.objects.iter().filter_map(InlineObject::frame).filter(|(_, _, f)| f.wrap != para::Wrap::Inline) {
