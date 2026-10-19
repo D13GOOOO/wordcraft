@@ -1214,8 +1214,9 @@ mod tests {
     fn script_parse_resolves_paths_against_the_base() {
         let s = script::parse(r#"{"file":"in.docx","commands":[{"command":"edit.undo"}],"save":["/abs/o.pdf","o.docx"]}"#, Some(Path::new("/base")))
             .unwrap();
-        assert_eq!(s.file.as_deref(), Some("/base/in.docx"));
-        assert_eq!(s.save, vec!["/abs/o.pdf".to_string(), "/base/o.docx".to_string()]);
+        let joined = |name: &str| Path::new("/base").join(name).to_string_lossy().into_owned();
+        assert_eq!(s.file, Some(joined("in.docx")));
+        assert_eq!(s.save, vec!["/abs/o.pdf".to_string(), joined("o.docx")]);
         let s = script::parse(r#"{"commands":["caret.docEnd"],"save":["o.docx"]}"#, None).unwrap();
         assert_eq!(s.save, vec!["o.docx".to_string()]);
         assert_eq!(s.commands.len(), 1);
