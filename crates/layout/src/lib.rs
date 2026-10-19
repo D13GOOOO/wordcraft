@@ -3219,6 +3219,8 @@ fn place_objects(
 ) -> (Vec<Placed>, Vec<Placed>) {
     // Each object's items behind and in front of the text, with its stacking order if floating.
     let mut placed: Vec<(Option<u64>, Vec<Placed>, Vec<Placed>)> = Vec::new();
+    // The same for the objects a header or footer cell places on the page (see `Ctx::pin`).
+    let mut pin_placed: Vec<(Option<u64>, Vec<Placed>, Vec<Placed>)> = Vec::new();
     let Some(fl) = pl.lines.get(l0) else { return (Vec::new(), Vec::new()) };
     // Objects left out of the layout (hidden, or deleted in the final text) aren't placed.
     let left_out = left_out_objects(ctx.doc, p, at.table_chr, ctx.opts.show_hidden, ctx.hide_deleted);
@@ -3305,12 +3307,19 @@ fn place_objects(
                 if let Some(pin) = ctx.pin.as_mut()
                     && pin.seen.insert((path.to_vec(), c.start))
                 {
-                    pin.behind.extend(b);
-                    pin.front.extend(f);
+                    pin_placed.push((floating.then(|| float.stack()), b, f));
                 }
             }
             placed.push((floating.then(|| float.stack()), behind, front));
         }
+    }
+    // Put on the page in their stacking order too.
+    if !pin_placed.is_empty()
+        && let Some(pin) = ctx.pin.as_mut()
+    {
+        let (behind, front) = stack_objects(pin_placed);
+        pin.behind.extend(behind);
+        pin.front.extend(front);
     }
     stack_objects(placed)
 }

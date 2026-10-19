@@ -4113,6 +4113,30 @@ fn automatic_text_in_a_styled_text_box_takes_the_box_s_colour() {
     assert_eq!(glyph_colors(None), (Some(Rgb::BLACK), Some(Rgb::BLACK), Some(Rgb(0, 0x80, 0))));
 }
 
+/// #2638: floats a header cell places on the page are drawn in their stacking order too, not in
+/// their order in the cell's text.
+#[test]
+fn header_cell_floats_on_the_page_keep_their_stacking_order() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = Document::from_text("Body");
+    let float =
+        |z: u32| Float { wrap: Wrap::BehindText, h_rel: Anchor::Margin, v_rel: Anchor::Margin, outside_cell: true, z: Some(z), ..Default::default() };
+    let mut t = Table::new(1, 1, 468.0);
+    let mut cp = wordcraft_doc::Paragraph::with_text("Cell", Default::default());
+    // First in the text but higher in the stack: drawn last, over the other.
+    cp.insert_object(0, rect_shape(200.0, 50.0, float(10)), &Default::default()).unwrap();
+    cp.insert_object(0, rect_shape(100.0, 50.0, float(20)), &Default::default()).unwrap();
+    t.rows[0].cells[0].blocks = vec![wordcraft_doc::para_block(cp)];
+    let id = d.add_part(
+        wordcraft_doc::PartKind::Header,
+        vec![std::sync::Arc::new(wordcraft_doc::Block::Table(t)), wordcraft_doc::para_block(Default::default())],
+    );
+    d.last_section.headers.default = Some(id);
+    let l = lay(&d);
+    let widths: Vec<f32> = shapes(&l.pages[0].header).iter().map(|r| r.w.round()).collect();
+    assert_eq!(widths, [200.0, 100.0], "the lower one first");
+}
+
 /// Issue #1775: a picture watermark anchored in a header that starts with a table sits in a cell;
 /// placed on the page (`o:allowincell="f"`, `layoutInCell="0"`), it's centred on the margins
 /// behind the body text on every page, not drawn in the header's cell. One laid out in the cell
