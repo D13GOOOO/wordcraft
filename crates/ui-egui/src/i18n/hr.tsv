@@ -1998,6 +1998,7 @@ template	Letter	Pismo
 	Show/Hide ¶	Prikaži/sakrij ¶
 	Show\nComments	Prikaži\nkomentare
 	Showing the first {count} items.	Prikazuje se prvih {count} stavki.
+	No items to show.	Nema stavki za prikaz.
 	Shows a tree: each item below the item it belongs to.	Prikazuje stablo: svaka stavka nalazi se ispod stavke kojoj pripada.
 	Shows items around a central idea: the first item is the centre.	Prikazuje stavke oko središnje ideje: prva stavka je središte.
 	Shows items of equal weight as blocks in rows.	Prikazuje stavke jednake težine kao blokove u retcima.

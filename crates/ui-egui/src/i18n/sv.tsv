@@ -1785,6 +1785,7 @@
 	{name} already exists. Choose Save again to replace it.	{name} finns redan. Välj Spara igen för att ersätta den.
 	This folder can't be read: {error}	Den här mappen kan inte läsas: {error}
 	Showing the first {count} items.	Visar de första {count} objekten.
+	No items to show.	Inga objekt att visa.
 	File name:	Filnamn:
 	Browse in WordCraft…	Bläddra i WordCraft…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Öppna en fil med WordCrafts egen filbläddrare när systemets fildialogruta inte visas.

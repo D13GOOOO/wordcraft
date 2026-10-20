@@ -2197,6 +2197,7 @@ preview	Title	Örnek
 	{name} already exists. Choose Save again to replace it.	{name} zaten var. Değiştirmek için Kaydet'i yeniden seçin.
 	This folder can't be read: {error}	Bu klasör okunamıyor: {error}
 	Showing the first {count} items.	İlk {count} öğe gösteriliyor.
+	No items to show.	Gösterilecek öğe yok.
 	File name:	Dosya adı:
 	Browse in WordCraft…	WordCraft'ta Gözat…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Sistemin dosya iletişim kutusu açılmadığında dosyayı WordCraft'ın kendi dosya tarayıcısıyla açın.

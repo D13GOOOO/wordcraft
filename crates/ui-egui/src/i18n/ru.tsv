@@ -2198,6 +2198,7 @@ preview	Title	Пример
 	{name} already exists. Choose Save again to replace it.	{name} уже существует. Чтобы заменить его, снова выберите «Сохранить».
 	This folder can't be read: {error}	Не удаётся прочитать папку: {error}
 	Showing the first {count} items.	Показаны первые элементы: {count}.
+	No items to show.	Нет элементов для показа.
 	File name:	Имя файла:
 	Browse in WordCraft…	Обзор в WordCraft…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Открыть файл во встроенном обозревателе WordCraft, если системное диалоговое окно выбора файлов не появляется.
