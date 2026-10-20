@@ -803,7 +803,7 @@ impl<'r> Builder<'r> {
                 }
             }
             if let (Some((o, _)), Some(li)) = (list_level, li_at) {
-                p.list = Some(ListInfo { ordered: o, level: lists.saturating_sub(1).min(8) as u8 });
+                p.list = Some(ListInfo { ordered: o, level: lists.saturating_sub(1).min(8) as u8, start: 1 });
                 self.para_cont = self.stack.get(li).is_some_and(|e| e.used);
                 if let Some(e) = self.stack.get_mut(li) {
                     e.used = true;
@@ -1474,9 +1474,9 @@ fn align_css(a: Option<Align>) -> Option<&'static str> {
     }
 }
 
-fn text_html(t: &str) -> String {
+fn text_html(t: &str, at_start: bool) -> String {
     let mut o = String::new();
-    let mut prev_space = false;
+    let mut prev_space = at_start;
     for c in t.chars() {
         match c {
             '\n' => {
@@ -1547,8 +1547,9 @@ pub fn inlines_html(inlines: &[Inline]) -> String {
                     open.push_str(&format!("<span style=\"{}\">", css.join(";")));
                     close.push("</span>");
                 }
+                let at_start = o.is_empty();
                 o.push_str(&open);
-                o.push_str(&text_html(t));
+                o.push_str(&text_html(t, at_start));
                 for c in close.iter().rev() {
                     o.push_str(c);
                 }
@@ -2035,5 +2036,14 @@ mod tests {
             b => panic!("expected para, got {b:?}"),
         };
         assert_eq!(p.text(), "World");
+    }
+
+    #[test]
+    fn leading_space_survives_round_trip() {
+        let doc = Document::from_text(" lead");
+        let html = export(&doc);
+        assert!(!html.contains("<p> lead"), "{html}");
+        let back = import(&html);
+        assert_eq!(back.plain_text(Default::default()).replace('\u{a0}', " "), " lead");
     }
 }

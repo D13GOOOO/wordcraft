@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 
 use crate::file_dialogs::{AfterPick, FileDialogRequest, open_filters};
-use crate::theme::{APP_COLOR, Tokens, regular};
+use crate::theme::{Tokens, regular};
 use crate::{WordApp, icons};
 
 /// At most this many entries are listed; a bigger folder shows the first ones and says so.
@@ -360,11 +360,21 @@ fn body(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens) -> Option<Option<PathBuf>>
     let mut clicked: Option<Entry> = None;
     egui::Frame::NONE.fill(t.input).stroke(egui::Stroke::new(1.0, t.input_border)).inner_margin(2.0).show(ui, |ui| {
         let entries: &[Entry] = b.listing.as_ref().map(|l| l.entries.as_slice()).unwrap_or(&[]);
+        // An unreadable folder has its own message below; the hint is for a listing that came back empty.
+        let listed = b.listing.is_ok();
         egui::ScrollArea::vertical().max_height(300.0).min_scrolled_height(300.0).auto_shrink([false, false]).show_rows(
             ui,
             ROW,
             entries.len(),
             |ui, range| {
+                if listed && entries.is_empty() {
+                    // #3037: an empty folder (or a type filter that matches nothing) says so
+                    // instead of showing a blank box.
+                    ui.add_space(140.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(tl!("No items to show.")).small().color(t.text_dim));
+                    });
+                }
                 for e in entries.get(range).unwrap_or(&[]) {
                     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
                     if b.selected.as_ref() == Some(&e.path) {
@@ -442,11 +452,8 @@ fn body(ui: &mut Ui, b: &mut FileBrowser, t: &Tokens) -> Option<Option<PathBuf>>
     let enter = !location_done && ui.input(|i| i.key_pressed(egui::Key::Enter));
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (ok, cancelb) = crate::dialogs::ok_cancel_responses(
-                ui,
-                |ui| ui.add(egui::Button::new(egui::RichText::new(tl!(b.ok_label())).color(egui::Color32::WHITE)).fill(APP_COLOR)),
-                tl!("Cancel"),
-            );
+            let (ok, cancelb) =
+                crate::dialogs::ok_cancel_responses(ui, |ui| ui.add(crate::widgets::primary_button(ui, tl!(b.ok_label()))), tl!("Cancel"));
             cancel |= cancelb.clicked();
             pick |= ok.clicked() || enter;
         });
@@ -559,6 +566,50 @@ mod tests {
         assert!(!a.session.dirty);
         let saved = wordcraft_engine::io::open_path(&dir.join("novel.docx")).unwrap();
         assert!(saved.plain_text(wordcraft_doc::StoryRef::Body).contains("Saved without a portal"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #3037: an empty folder (or a type filter that matches nothing) says so instead of a blank
+    /// box; a matching file replaces the hint.
+    #[test]
+    fn an_empty_folder_says_there_are_no_items() {
+        let dir = scratch("empty_state");
+        let mut a = WordApp::new(Session::new(wordcraft_doc::Document::new()), Services::default());
+        let mut b = FileBrowser::new(FileDialogRequest::Open { purpose: "document".into() }, AfterPick::OpenDocument, dir.clone(), false);
+        b.navigate(dir.clone());
+        assert!(matches!(&b.listing, Ok(l) if l.entries.is_empty()), "the folder starts empty");
+        a.file_browser.open = Some(Box::new(b));
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            a,
+        );
+        let texts = |h: &egui_kittest::Harness<'static, WordApp>| -> Vec<String> {
+            h.output()
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect()
+        };
+        for _ in 0..4 {
+            h.step();
+        }
+        assert!(texts(&h).iter().any(|t| t.contains("No items to show.")), "empty-state hint shown");
+        std::fs::write(dir.join("chapter.docx"), b"x").unwrap();
+        if let Some(b) = &mut h.state_mut().file_browser.open {
+            b.navigate(dir.clone());
+        }
+        for _ in 0..2 {
+            h.step();
+        }
+        assert!(texts(&h).iter().any(|t| t.contains("chapter.docx")), "the file is listed");
+        assert!(!texts(&h).iter().any(|t| t.contains("No items to show.")), "the hint is gone");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
