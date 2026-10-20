@@ -12,7 +12,7 @@ use wordcraft_engine::Password;
 use wordcraft_engine::cmd::tools::AutoCorrectPrefs;
 
 use crate::WordApp;
-use crate::theme::semibold;
+use crate::theme::{Tokens, semibold};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "form", rename_all = "camelCase")]
@@ -447,6 +447,10 @@ fn autocorrect_tab(app: &mut WordApp, ui: &mut Ui, f: &mut AutoCorrectForm) {
     let typed = f.from.trim().to_lowercase();
     let mut picked: Option<(String, String)> = None;
     egui::ScrollArea::vertical().id_salt("ac_list").max_height(170.0).auto_shrink([false, true]).show(ui, |ui| {
+        if !list.iter().any(|(a, _, _)| typed.is_empty() || a.to_lowercase().starts_with(&typed)) {
+            // #3036: the filter matches nothing — say so instead of showing an empty box.
+            ui.label(egui::RichText::new(tl!("(none)")).small().color(Tokens::get(ui.ctx()).text_dim));
+        }
         egui::Grid::new("ac_list_grid").num_columns(2).spacing(vec2(8.0, 1.0)).striped(true).show(ui, |ui| {
             for (a, b, _) in list.iter().filter(|(a, _, _)| typed.is_empty() || a.to_lowercase().starts_with(&typed)).take(500) {
                 let selected = f.from == *a;
@@ -844,5 +848,46 @@ mod tests {
         assert_eq!(p["caseChanges"], false);
         assert_eq!(p["showIn"], "new");
         assert!(p.get("original").is_none());
+    }
+
+    /// #3036: the Replace list says so when the filter matches nothing instead of going blank.
+    #[test]
+    fn the_autocorrect_list_says_when_the_filter_matches_nothing() {
+        let mut app = app("");
+        app.session.prefs.autocorrect.entries.push(("brb".to_string(), "be right back".to_string()));
+        app.run("tools.autocorrect", json!({})).unwrap();
+        let texts = |h: &egui_kittest::Harness<'static, WordApp>| -> Vec<String> {
+            h.output()
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        assert!(!texts(&h).iter().any(|t| t.contains("(none)")), "entries show, no hint");
+        match &mut h.state_mut().dialog {
+            Some(crate::dialogs::Dialog::Review(d)) => match &mut **d {
+                ReviewDialog::AutoCorrect(f) => f.from = "zzz".to_string(),
+                _ => panic!("the AutoCorrect form is open"),
+            },
+            _ => panic!("the AutoCorrect dialog is open"),
+        }
+        for _ in 0..2 {
+            h.step();
+        }
+        assert!(texts(&h).iter().any(|t| t.contains("(none)")), "no matches: the hint shows");
     }
 }

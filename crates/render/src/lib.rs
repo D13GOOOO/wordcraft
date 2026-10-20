@@ -739,7 +739,10 @@ fn draw(ctx: &mut RenderContext, doc: &Document, it: &Draw, view: Affine, visibl
             ctx.set_transform(view);
             ctx.set_paint(color(opts.ink_text(*c, *text_bg), *alpha));
             let w = *width as f64;
-            let mut st = kurbo::Stroke::new(w);
+            // Flat ends, like the PDF export and Word: a round cap sticks half the width out past
+            // every end, blobbing over the neighbouring border at a table's corners (#2892). Wavy
+            // underlines keep round ends, as the PDF draws them.
+            let mut st = kurbo::Stroke::new(w).with_caps(kurbo::Cap::Butt);
             match stroke {
                 Stroke::Dotted => st = st.with_dashes(0.0, [w, w * 2.0]),
                 Stroke::Dashed => st = st.with_dashes(0.0, [w * 4.0, w * 2.0]),
@@ -763,7 +766,7 @@ fn draw(ctx: &mut RenderContext, doc: &Document, it: &Draw, view: Affine, visibl
                 let (dx, dy) = (x1 - x0, y1 - y0);
                 let len = (dx * dx + dy * dy).sqrt().max(1e-3);
                 let (nx, ny) = (-dy / len * w * 0.9, dx / len * w * 0.9);
-                ctx.set_stroke(kurbo::Stroke::new(w * 0.6));
+                ctx.set_stroke(kurbo::Stroke::new(w * 0.6).with_caps(kurbo::Cap::Butt));
                 line(ctx, nx, ny);
                 line(ctx, -nx, -ny);
                 return;
@@ -1529,6 +1532,26 @@ mod tests {
         assert!(opts.display.dim_header);
         let img = render_page(&d, &l.pages[0], 1.0, &opts);
         assert!(!img.to_png().is_empty());
+    }
+
+    /// #2892: a rule is stroked with flat ends, as the PDF export and Word draw them. Round caps
+    /// used to stick half the width out past every end — a blob over the neighbouring border at
+    /// each corner of a table with thick borders, while the exported PDF had square corners.
+    #[test]
+    fn a_thick_rule_ends_flat_not_round() {
+        let d = Document::new();
+        let rule = |stroke| Draw::Line { x0: 10.0, y0: 10.0, x1: 30.0, y1: 10.0, width: 8.0, color: Rgb::BLACK, stroke, alpha: 1.0, text_bg: None };
+        let shot = |stroke| render_items(&d, &[rule(stroke)], 0.0, 0.0, 40.0, 20.0, 1.0, &RenderOptions::default());
+        let ink = |img: &Rendered, x: u32, y: u32| img.pixel(x, y)[3] > 128;
+        // An 8 pt rule from x=10 to x=30 covers y 6..14, and nothing beyond either end.
+        let img = shot(Stroke::Solid);
+        assert!(ink(&img, 15, 10), "the rule itself is drawn");
+        assert!(!ink(&img, 6, 10) && !ink(&img, 33, 10), "no round cap past x=10 or x=30");
+        // The double style's two strands end flat as well: its upper strand is centred on y=2.8
+        // with a 4.8 pt width, so x=31 lies in the half-disc a round cap would add.
+        let img = shot(Stroke::Double);
+        assert!(ink(&img, 15, 3), "the double rule's upper strand is drawn");
+        assert!(!ink(&img, 31, 3), "the upper strand ends at x=30");
     }
 
     #[test]

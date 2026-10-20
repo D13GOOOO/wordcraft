@@ -112,6 +112,8 @@ pub struct ListInfo {
     pub ordered: bool,
     /// 0-based nesting level (0..=8).
     pub level: u8,
+    /// Number of the first item of an ordered list (1 unless the source says otherwise).
+    pub start: u32,
 }
 
 /// Paragraph spacing and indents (points) that a source states on the paragraph itself (RTF);
@@ -587,13 +589,25 @@ impl<'a> Builder<'a> {
                 *k = Some(li.ordered);
             }
         }
+        let mut starts: [Option<u32>; 9] = [None; 9];
+        for li in group {
+            if let Some(s) = starts.get_mut(li.level.min(8) as usize)
+                && s.is_none()
+            {
+                *s = Some(li.start);
+            }
+        }
         // Levels nobody used follow the first level's kind.
         let first = group.first().map(|l| l.ordered).unwrap_or(false);
         let levels: Vec<Level> = (0..9)
             .map(|i| {
                 let ordered = kinds.get(i).copied().flatten().unwrap_or(first);
                 let src = if ordered { &num_levels } else { &bul_levels };
-                src.get(i).cloned().unwrap_or_default()
+                let mut level = src.get(i).cloned().unwrap_or_default();
+                if ordered && let Some(s) = starts.get(i).copied().flatten() {
+                    level.start = s;
+                }
+                level
             })
             .collect();
         let numbering = &mut self.doc.numbering;
@@ -851,7 +865,7 @@ fn props_kind(doc: &Document, props: &ParaProps, blank: bool) -> (Kind, Option<L
     };
     let list = rp.numbering.and_then(|n| {
         let lv = doc.numbering.level(n.num, n.level)?;
-        Some(ListInfo { ordered: !matches!(lv.format, NumFormat::Bullet | NumFormat::None), level: n.level.min(8) })
+        Some(ListInfo { ordered: !matches!(lv.format, NumFormat::Bullet | NumFormat::None), level: n.level.min(8), start: lv.start })
     });
     (kind, list)
 }
@@ -1249,6 +1263,9 @@ impl ListCounter {
         }
         let n = match self.counts.get_mut(lv) {
             Some(c) => {
+                if *c == 0 {
+                    *c = li.start.saturating_sub(1);
+                }
                 *c = c.saturating_add(1);
                 *c
             }
@@ -1361,12 +1378,12 @@ mod tests {
     #[test]
     fn list_labels() {
         let mut c = ListCounter::default();
-        let o = |level| ListInfo { ordered: true, level };
+        let o = |level| ListInfo { ordered: true, level, start: 1 };
         assert_eq!(c.label(o(0)), "1.");
         assert_eq!(c.label(o(1)), "a.");
         assert_eq!(c.label(o(1)), "b.");
         assert_eq!(c.label(o(0)), "2.");
-        assert_eq!(c.label(ListInfo { ordered: false, level: 0 }), "•");
+        assert_eq!(c.label(ListInfo { ordered: false, level: 0, start: 1 }), "•");
     }
 
     #[test]

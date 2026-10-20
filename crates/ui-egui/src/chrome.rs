@@ -174,7 +174,7 @@ fn undo_list(ui: &mut Ui, app: &mut WordApp) {
         ui.vertical_centered(|ui| ui.label(egui::RichText::new(undo_list_footer(n)).font(regular(12.0)).color(t.text)));
     }
     if let Some(i) = clicked {
-        let _ = app.run("edit.undoTo", json!({"count": i + 1}));
+        crate::widgets::run_from_ribbon(app, "edit.undoTo", json!({"count": i + 1}));
         ui.close();
     }
 }
@@ -817,5 +817,26 @@ mod tests {
             assert!(drawn(&h, id), "{id} is back");
         }
         assert!(h.ctx.read_response(qat_menu_button_id()).is_some());
+    }
+
+    /// #3040: clicking a row in the Undo list hands the keyboard back to the document.
+    #[test]
+    fn undo_list_row_returns_focus_to_the_document() {
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        a.run("text.insert", json!({"text": "Hello"})).unwrap();
+        assert_eq!(a.session.undo_history().len(), 1);
+
+        let (ctx, mut n) = (ctx(), 0);
+        frame(&ctx, &mut n, vec![], &mut a);
+        let arrow = ctx.read_response(undo_list_button_id()).unwrap();
+        let popup = egui::Popup::default_response_id(&arrow);
+        click(&ctx, &mut n, arrow.rect.center(), &mut a);
+        assert!(egui::Popup::is_id_open(&ctx, popup), "the arrow opens the Undo list");
+        frame(&ctx, &mut n, vec![], &mut a);
+        let row = ctx.read_response(undo_list_row_id(0)).unwrap();
+        a.canvas.want_focus = false;
+        click(&ctx, &mut n, row.rect.center(), &mut a);
+        assert!(a.canvas.want_focus, "the row click returns focus to the document");
+        assert!(a.session.undo_history().is_empty(), "the step was undone");
     }
 }

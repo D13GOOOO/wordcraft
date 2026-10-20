@@ -148,6 +148,11 @@ pub struct CanvasState {
     pub balloon_rects: Vec<(u32, Rect)>,
     /// A paste event arrived since the last Mod+V release (see `keys::canvas_events`).
     pub(crate) pasted: bool,
+    /// A V (or Paste key) press reached the canvas since its last release. egui-winit keeps Mod+V
+    /// presses, so a release without one was Mod+V even when Mod went up first.
+    pub(crate) v_pressed: bool,
+    /// The modifiers last held with Mod, for a Mod+V whose Mod is released before V.
+    pub(crate) paste_mods: Option<egui::Modifiers>,
     /// Draw Table or Eraser is on (`table_pen`): presses draw instead of moving the caret.
     pub table_tool: Option<crate::table_pen::TableTool>,
     /// The Draw Table stroke (or eraser press) in progress.
@@ -258,6 +263,8 @@ impl Default for CanvasState {
             mini_anchor: None,
             mini_dismissed: None,
             pasted: false,
+            v_pressed: false,
+            paste_mods: None,
             swallow_text: false,
             ime_join_text: None,
             ime_reset: false,

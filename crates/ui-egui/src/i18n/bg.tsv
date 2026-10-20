@@ -2412,6 +2412,7 @@
 	{name} already exists. Choose Save again to replace it.	{name} вече съществува. Изберете „Запазване“ отново, за да го замените.
 	This folder can't be read: {error}	Тази папка не може да бъде прочетена: {error}
 	Showing the first {count} items.	Показани са първите {count} елемента.
+	No items to show.	Няма елементи за показване.
 	File name:	Име на файла:
 	Browse in WordCraft…	Разглеждане в WordCraft…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Отваряне на файл чрез собствения браузър на WordCraft, когато системният диалогов прозорец за файлове не се появява.

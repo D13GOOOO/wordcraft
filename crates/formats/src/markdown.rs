@@ -460,7 +460,7 @@ fn parse_list(lines: &[String], mut i: usize, depth: usize, level: u8, out: &mut
         while item.len() > 1 && item.last().is_some_and(|x| x.is_empty()) {
             item.pop();
         }
-        let li = ListInfo { ordered: first.ordered, level: level.min(8) };
+        let li = ListInfo { ordered: first.ordered, level: level.min(8), start: first.start };
         let inner = if depth >= MAX_NEST {
             let mut p = Para::default();
             p.push_text(&item.join(" "), &Fmt::default());
@@ -1355,7 +1355,10 @@ fn write_blocks(blocks: &[FBlock], out: &mut Vec<String>) {
                             prev_top_ordered = li.ordered;
                         }
                         let n = counters.get_mut(lv).map(|c| {
-                            *c += 1;
+                            if *c == 0 {
+                                *c = li.start.saturating_sub(1);
+                            }
+                            *c = c.saturating_add(1);
                             *c
                         });
                         for d in counters.iter_mut().skip(lv + 1) {
@@ -1704,6 +1707,14 @@ mod tests {
     }
 
     #[test]
+    fn ordered_list_keeps_start_number() {
+        let txt = |md: &str| String::from_utf8_lossy(&crate::txt::export(&import(md))).into_owned();
+        assert_eq!(txt("5. a\n6. b"), "5.\ta\r\n6.\tb");
+        assert_eq!(txt("3. a\n- b\n4. c"), "3.\ta\r\n•\tb\r\n4.\tc");
+        assert_eq!(export(&import("5. a\n6. b")).trim_end(), "5. a\n6. b");
+    }
+
+    #[test]
     fn lines_after_line_break_stay_in_paragraph() {
         use wordcraft_doc::{CharProps, Document, Paragraph, StoryRef, para_block};
         let cases = ["Shopping\n- milk\n# not a heading", "a\n1. x", "a\n2) x", "a\n+ x", "a\n---", "a\n***", "a\n==", "a\n--", "a\n> q"];
@@ -1720,10 +1731,10 @@ mod tests {
     fn lines_after_line_break_stay_in_list_item_and_quote() {
         let cases = ["a\n- x", "a\n# h", "a\n1. x", "a\n--", "a\n---", "a\n==", "a\n> q"];
         let shapes: [(Kind, Option<ListInfo>); 5] = [
-            (Kind::Normal, Some(ListInfo { ordered: false, level: 0 })),
-            (Kind::Normal, Some(ListInfo { ordered: true, level: 0 })),
-            (Kind::Normal, Some(ListInfo { ordered: false, level: 1 })),
-            (Kind::Normal, Some(ListInfo { ordered: true, level: 1 })),
+            (Kind::Normal, Some(ListInfo { ordered: false, level: 0, start: 1 })),
+            (Kind::Normal, Some(ListInfo { ordered: true, level: 0, start: 1 })),
+            (Kind::Normal, Some(ListInfo { ordered: false, level: 1, start: 1 })),
+            (Kind::Normal, Some(ListInfo { ordered: true, level: 1, start: 1 })),
             (Kind::Quote, None),
         ];
         for s in cases {
@@ -1731,7 +1742,7 @@ mod tests {
                 let mut blocks = Vec::new();
                 if let Some(li) = list.filter(|l| l.level > 0) {
                     let mut parent = Para::new(Kind::Normal);
-                    parent.list = Some(ListInfo { ordered: li.ordered, level: 0 });
+                    parent.list = Some(ListInfo { ordered: li.ordered, level: 0, start: 1 });
                     parent.push_text("top", &Fmt::default());
                     blocks.push(FBlock::Para(parent));
                 }

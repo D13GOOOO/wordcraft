@@ -2325,6 +2325,7 @@ preview	Title	Ukázka
 	{name} already exists. Choose Save again to replace it.	Položka {name} již existuje. Dalším zvolením Uložit ji nahradíte.
 	This folder can't be read: {error}	Tuto složku nelze přečíst: {error}
 	Showing the first {count} items.	Zobrazuje se prvních {count} položek.
+	No items to show.	Žádné položky k zobrazení.
 	File name:	Název souboru:
 	Browse in WordCraft…	Procházet ve WordCraftu…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Otevřít soubor pomocí vlastního prohlížeče souborů WordCraftu, když se systémový dialog pro práci se soubory nezobrazí.

@@ -262,6 +262,7 @@ impl Reader<'_> {
         let Some(content) = e.child("w:sdtContent") else { return };
         let mut ctl = super::sdt::sdt_pr(e.child("w:sdtPr"), true);
         ctl.end_pr_xml = super::sdt::sdt_end_pr(e.child("w:sdtEndPr"));
+        ctl.run_props = e.child("w:sdtPr").and_then(|pr| pr.child("w:rPr")).map(|r| self.pc.rpr(r));
         let mut inner = Blocks::new();
         self.read_blocks(sc, content, rels, &mut inner, depth + 1);
         // A table of contents' control belongs to the TOC: the writer puts it back around the
@@ -523,6 +524,7 @@ impl Reader<'_> {
                 let Some(c) = k.child("w:sdtContent") else { return };
                 let mut ctl = super::sdt::sdt_pr(k.child("w:sdtPr"), false);
                 ctl.end_pr_xml = super::sdt::sdt_end_pr(k.child("w:sdtEndPr"));
+                ctl.run_props = k.child("w:sdtPr").and_then(|pr| pr.child("w:rPr")).map(|r| self.pc.rpr(r));
                 // The markers take the formatting of the content's first run (typing at the
                 // start of the content continues it).
                 let props = c.find("w:rPr").map(|p| self.run_props(p, ctx)).unwrap_or_else(|| self.run_props_none(ctx));

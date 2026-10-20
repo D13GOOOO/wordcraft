@@ -2400,6 +2400,7 @@
 	{name} already exists. Choose Save again to replace it.	{name} đã tồn tại. Chọn Lưu lần nữa để thay thế.
 	This folder can't be read: {error}	Không thể đọc thư mục này: {error}
 	Showing the first {count} items.	Đang hiển thị {count} mục đầu tiên.
+	No items to show.	Không có mục nào để hiển thị.
 	File name:	Tên tệp:
 	Browse in WordCraft…	Duyệt trong WordCraft…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Mở tệp bằng trình duyệt tệp của WordCraft khi hộp thoại tệp của hệ thống không xuất hiện.

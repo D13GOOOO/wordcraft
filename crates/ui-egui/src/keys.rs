@@ -200,6 +200,20 @@ fn is_paste_release(key: Key, modifiers: egui::Modifiers) -> bool {
     (modifiers.command || key == Key::Paste) && !modifiers.alt && !modifiers.shift
 }
 
+/// The modifiers a V release stands for: its own, or, when Mod went up before V and no V press
+/// came (egui-winit keeps Mod+V presses), those held with Mod.
+fn paste_release_modifiers(released: Modifiers, press_seen: bool, held: Option<Modifiers>) -> Modifiers {
+    if released.command || press_seen { released } else { held.unwrap_or(released) }
+}
+
+/// Whether `key` is a Shift, Ctrl, Alt or Super key, whose own presses don't end a Mod+V.
+fn is_modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::ShiftLeft | Key::ShiftRight | Key::ControlLeft | Key::ControlRight | Key::AltLeft | Key::AltRight | Key::SuperLeft | Key::SuperRight
+    )
+}
+
 /// Whether releasing `key` with `modifiers` is Mod+Alt+V (Paste Special).
 fn is_paste_special_release(key: Key, modifiers: egui::Modifiers) -> bool {
     key == Key::V && modifiers.command && modifiers.alt && !modifiers.shift
@@ -241,7 +255,26 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
     let alt_codes = alt_codes_supported(ctx);
     // `DeleteSurrounding` and the text replacing what it erased arrive in the same frame.
     app.canvas.ime_join_text = None;
+    // Mod held since an earlier frame (its ModifiersChanged went by then).
+    let held = ctx.input(|i| i.modifiers);
+    if held.command {
+        app.canvas.paste_mods = Some(held);
+    }
     for e in events {
+        // Which presses reached the canvas, and the modifiers held with Mod, in event order: Mod
+        // can go down and up within one frame, leaving the frame's modifiers without it.
+        match &e {
+            egui::Event::ModifiersChanged(m) if m.command => app.canvas.paste_mods = Some(*m),
+            egui::Event::Key { key: Key::V | Key::Paste, pressed: true, .. } => app.canvas.v_pressed = true,
+            egui::Event::Key { key, pressed: true, modifiers, .. } if !is_modifier_key(*key) => {
+                app.canvas.paste_mods = modifiers.command.then_some(*modifiers);
+            }
+            egui::Event::WindowFocused(_) => {
+                app.canvas.v_pressed = false;
+                app.canvas.paste_mods = None;
+            }
+            _ => {}
+        }
         // An Alt shortcut (Alt+Shift+D, Alt+F7…) may also send its key's text; it isn't typed.
         match &e {
             egui::Event::Key { pressed: true, .. } => {
@@ -273,8 +306,11 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
         }
         // Desktop: Mod+V with no text on the clipboard sends no paste event, only the key's
         // release; paste the clipboard's picture then (#45). A paste event before the release
-        // means it was text. (The web reads pasted pictures itself.)
+        // means it was text. (The web reads pasted pictures itself.) Mod released before V still
+        // pastes: a release with no V press seen was Mod+V.
         if let egui::Event::Key { key: key @ (Key::V | Key::Paste), pressed: false, modifiers, .. } = &e {
+            let press_seen = std::mem::take(&mut app.canvas.v_pressed);
+            let modifiers = &paste_release_modifiers(*modifiers, press_seen, app.canvas.paste_mods.take());
             let paste_keys = is_paste_release(*key, *modifiers);
             let pasted = std::mem::take(&mut app.canvas.pasted);
             if !pasted && paste_keys && app.session.math.is_none() && app.services.clipboard_picture.is_some() {
@@ -709,6 +745,99 @@ mod tests {
         assert!(!is_paste_release(Key::V, m(false, false, false)), "a plain V");
         assert!(is_paste_special_release(Key::V, m(true, false, true)), "Mod+Alt+V opens Paste Special");
         assert!(!is_paste_special_release(Key::V, m(true, true, true)) && !is_paste_special_release(Key::V, m(true, false, false)));
+    }
+
+    /// An empty document whose clipboard holds a 4 × 4 picture.
+    fn picture_app() -> WordApp {
+        use crate::paste_picture::ClipboardPicture;
+        let services = crate::Services {
+            clipboard_picture: Some(Box::new(|| Some(ClipboardPicture::Pixels { width: 4, height: 4, rgba: vec![200; 4 * 4 * 4] }))),
+            ..Default::default()
+        };
+        WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), services)
+    }
+
+    /// How many pictures the document holds (the Selection Pane's list).
+    fn pictures(a: &mut WordApp) -> usize {
+        a.session.run("arrange.selectionPane", &json!({})).unwrap().as_array().map(|x| x.len()).unwrap_or(0)
+    }
+
+    /// One canvas frame with `modifiers` held, then `events`.
+    fn mods_frame(ctx: &egui::Context, a: &mut WordApp, modifiers: Modifiers, events: Vec<egui::Event>) {
+        let events = std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect();
+        ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| canvas_events(a, ui.ctx())).drop_without_applying_deltas();
+    }
+
+    /// A press or release of `key` with `modifiers`.
+    fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers }
+    }
+
+    /// Left Ctrl+V with one hand often lets Ctrl up a moment before V. egui-winit keeps the
+    /// Mod+V press, so the canvas sees only Ctrl's release, then V's without Mod: still a paste.
+    #[test]
+    fn mod_v_released_mod_first_pastes_the_clipboard_picture() {
+        let ctx = egui::Context::default();
+        let mut a = picture_app();
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        mods_frame(&ctx, &mut a, ctrl, vec![key_event(Key::ControlLeft, true, ctrl)]);
+        // The Mod+V press: egui-winit sends no event for it.
+        mods_frame(&ctx, &mut a, ctrl, vec![]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::ControlLeft, false, Modifiers::NONE)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // A plain V afterwards (its press arrives) isn't a paste.
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, true, Modifiers::NONE)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // Nor is Ctrl+B, Ctrl up, then a V release whose press never came (focus moved in).
+        mods_frame(&ctx, &mut a, ctrl, vec![key_event(Key::B, true, ctrl)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::ControlLeft, false, Modifiers::NONE), egui::Event::WindowFocused(true)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // Mod+Shift+V released Mod first stays Paste Formatting, not a picture paste.
+        let ctrl_shift = Modifiers { shift: true, ..ctrl };
+        mods_frame(&ctx, &mut a, ctrl_shift, vec![]);
+        mods_frame(&ctx, &mut a, Modifiers::SHIFT, vec![key_event(Key::ControlLeft, false, Modifiers::SHIFT)]);
+        mods_frame(&ctx, &mut a, Modifiers::SHIFT, vec![key_event(Key::V, false, Modifiers::SHIFT)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // Released V first, as before, still pastes.
+        let mut a = picture_app();
+        mods_frame(&ctx, &mut a, ctrl, vec![]);
+        mods_frame(&ctx, &mut a, ctrl, vec![key_event(Key::V, false, ctrl)]);
+        assert_eq!(pictures(&mut a), 1);
+    }
+
+    /// Ctrl down, the kept Mod+V press, Ctrl up and V up can all arrive in one frame: the frame's
+    /// modifiers no longer have Mod, but the ModifiersChanged events in between did.
+    #[test]
+    fn mod_v_within_one_frame_pastes_the_clipboard_picture() {
+        let ctx = egui::Context::default();
+        let mut a = picture_app();
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        let events = vec![
+            egui::Event::ModifiersChanged(ctrl),
+            key_event(Key::ControlLeft, true, ctrl),
+            egui::Event::ModifiersChanged(Modifiers::NONE),
+            key_event(Key::ControlLeft, false, Modifiers::NONE),
+            key_event(Key::V, false, Modifiers::NONE),
+        ];
+        ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| canvas_events(&mut a, ui.ctx())).drop_without_applying_deltas();
+        assert_eq!(pictures(&mut a), 1);
+    }
+
+    /// A V release keeps its own modifiers unless Mod went up first and no V press arrived.
+    #[test]
+    fn paste_release_modifiers_fall_back_to_those_held_with_mod() {
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        assert_eq!(paste_release_modifiers(ctrl, false, None), ctrl, "Mod still down");
+        assert_eq!(paste_release_modifiers(Modifiers::NONE, false, Some(ctrl)), ctrl, "Mod up first, press kept by egui-winit");
+        assert_eq!(paste_release_modifiers(Modifiers::NONE, true, Some(ctrl)), Modifiers::NONE, "a plain V's press arrived");
+        assert_eq!(paste_release_modifiers(Modifiers::NONE, false, None), Modifiers::NONE);
     }
 
     #[test]
