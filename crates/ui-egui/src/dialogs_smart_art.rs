@@ -98,7 +98,7 @@ pub fn preview(p: &Painter, r: Rect, layout: SmartArtLayout, colors: SmartArtCol
                 } else {
                     vec![at(0.5 - hw(y0), y0), at(0.5 + hw(y0), y0), at(0.5 + hw(y1), y1), at(0.5 - hw(y1), y1)]
                 };
-                p.add(egui::Shape::convex_polygon(pts, col(k), Stroke::new(1.0, Color32::WHITE)));
+                p.add(egui::Shape::convex_polygon(pts, col(k), Stroke::new(1.0, line)));
             }
         }
         SmartArtLayout::Radial => {

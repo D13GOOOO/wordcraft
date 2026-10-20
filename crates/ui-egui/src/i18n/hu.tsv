@@ -2318,6 +2318,7 @@
 	{name} already exists. Choose Save again to replace it.	Már létezik: {name}. A felülírásához válaszd újra a Mentést.
 	This folder can't be read: {error}	Ez a mappa nem olvasható: {error}
 	Showing the first {count} items.	Az első {count} elem látható.
+	No items to show.	Nincs megjeleníthető elem.
 	File name:	Fájlnév:
 	Browse in WordCraft…	Tallózás a WordCraftban…
 	Open a file with WordCraft's own browser when the system file dialog doesn't appear.	Fájl megnyitása a WordCraft saját tallózójával, ha a rendszer fájlpárbeszédablaka nem jelenik meg.

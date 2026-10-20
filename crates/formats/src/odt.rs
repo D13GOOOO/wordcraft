@@ -348,7 +348,8 @@ impl Writer {
     fn plain_inlines(&mut self, inl: &[Inline], out: &mut String) {
         let mut prev_space = true;
         let inl = model::equations_as_text(inl);
-        for i in inl.iter() {
+        let last = inl.len().saturating_sub(1);
+        for (idx, i) in inl.iter().enumerate() {
             match i {
                 Inline::Text(t, f) => {
                     let mut body = String::new();
@@ -389,7 +390,8 @@ impl Writer {
                         }
                     }
                     if spaces > 0 {
-                        flush(&mut body, &mut spaces, prev_space);
+                        // The reader drops a literal space at the end of a paragraph.
+                        flush(&mut body, &mut spaces, prev_space || idx == last);
                         prev_space = true;
                     }
                     // A script, `file:`, UNC or other non-web target is written as plain text, as
@@ -1609,7 +1611,7 @@ impl Body<'_> {
         {
             let style = self.lists.iter().rev().find_map(|l| l.0.clone());
             let ordered = style.and_then(|s| self.styles.lists.get(&s)).and_then(|v| v.get(lv.min(9)).copied()).unwrap_or(false);
-            p.list = Some(ListInfo { ordered, level: lv.min(8) as u8 });
+            p.list = Some(ListInfo { ordered, level: lv.min(8) as u8, start: 1 });
             self.para_cont = self.item_used.last().copied().unwrap_or(false);
             if let Some(u) = self.item_used.last_mut() {
                 *u = true;
@@ -3359,5 +3361,10 @@ mod tests {
         let d = Document::from_text("    indented code  ");
         let back = import(&export(&d).unwrap()).unwrap();
         assert_eq!(back.plain_text(wordcraft_doc::StoryRef::Body).trim_end_matches('\n'), "    indented code  ");
+        for t in ["trail ", "trail  "] {
+            let d = Document::from_text(t);
+            let back = import(&export(&d).unwrap()).unwrap();
+            assert_eq!(back.plain_text(wordcraft_doc::StoryRef::Body).trim_end_matches('\n'), t);
+        }
     }
 }

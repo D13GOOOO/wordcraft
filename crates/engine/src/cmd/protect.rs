@@ -189,6 +189,19 @@ fn remove_exceptions(s: &mut Session, all: bool) -> Result<(), CmdError> {
     Ok(())
 }
 
+/// The Developer tab's commands that insert a content control.
+const CONTROL_INSERTS: [&str; 9] = [
+    "developer.richText",
+    "developer.plainText",
+    "developer.picture",
+    "developer.buildingBlock",
+    "developer.checkBox",
+    "developer.comboBox",
+    "developer.dropDown",
+    "developer.datePicker",
+    "developer.repeatingSection",
+];
+
 /// Commands always allowed in a protected document: protection itself, file commands, undo.
 fn always_allowed(id: &str) -> bool {
     id == "review.restrict" || id.starts_with("file.") || id == "edit.undo" || id == "edit.redo"
@@ -205,9 +218,24 @@ pub(crate) fn check_before(s: &Session, id: &str, params: &Value) -> Result<bool
     // Word blocks content-control property edits until Stop Protection: changing a control's
     // lock flags would reshape what forms mode lets through. The param's presence is the
     // trigger — absent, the command keeps the current lock (as `check_formatting` inspects
-    // params); other properties (title, tag, placeholder…) are unaffected.
+    // params). In other modes, other properties (title, tag, placeholder…) stay editable; forms
+    // mode refuses every property change (below).
     if id == "developer.properties" && (params.get("lockEdit").is_some() || params.get("lockDelete").is_some()) {
         return Err(CmdError::Disabled(format!("{id}: stop protection before changing a content control's locks")));
+    }
+    // Observed in Word for Mac: with Filling in forms enforced, the Developer tab's control
+    // buttons and Properties are greyed out and a field's shortcut menu offers no Remove Content
+    // Control. The form's fields stay as they are; only their content is filled in.
+    if mode == "forms" {
+        if id == "developer.removeControl" {
+            return Err(CmdError::Disabled(format!("{id}: stop protection before removing a content control")));
+        }
+        if id == "developer.properties" {
+            return Err(CmdError::Disabled(format!("{id}: stop protection before changing a content control's properties")));
+        }
+        if CONTROL_INSERTS.contains(&id) {
+            return Err(CmdError::Disabled(format!("{id}: stop protection before inserting a content control")));
+        }
     }
     if s.doc.settings.protect_formatting {
         check_formatting(s, id, params)?;
@@ -708,6 +736,36 @@ mod tests {
         assert_eq!(s.doc.plain_text(StoryRef::Body), before);
     }
 
+    /// While Filling in forms is enforced, Word offers no Remove Content Control and greys out the
+    /// Developer tab's control buttons and Properties. WordCraft removed a fillable control (its
+    /// content left as plain text), inserted new controls inside one, and renamed one.
+    #[test]
+    fn forms_mode_keeps_its_controls() {
+        let mut s = Session::new(Document::from_text("Name: Fill name."));
+        select(&mut s, "Fill name.");
+        s.run("developer.richText", &json!({"tag": "name"})).unwrap();
+        s.run("review.restrict", &json!({"mode": "forms"})).unwrap();
+        let before = s.doc.clone();
+        assert!(s.run("developer.removeControl", &json!({"control": "name"})).is_err(), "by tag");
+        select(&mut s, "Fill");
+        let e = s.run("developer.removeControl", &json!({})).unwrap_err().to_string();
+        assert!(e.contains("stop protection"), "at the caret: {e}");
+        assert_eq!(s.doc, before);
+        // No new control inside the field, and no property changes.
+        for insert in CONTROL_INSERTS {
+            assert!(s.run(insert, &json!({})).is_err(), "{insert}");
+        }
+        assert!(s.run("developer.properties", &json!({"control": "name", "tag": "other"})).is_err(), "tag");
+        assert_eq!(s.doc, before);
+        // Filling it is still allowed.
+        s.run("text.insert", &json!({"text": "Ada"})).unwrap();
+        assert_eq!(s.doc.control_ranges(StoryRef::Body).len(), 1);
+        // Once protection stops, the control can go.
+        s.run("review.restrict", &json!({"stop": true})).unwrap();
+        s.run("developer.removeControl", &json!({"control": "name"})).unwrap();
+        assert!(s.doc.control_ranges(StoryRef::Body).is_empty());
+    }
+
     #[test]
     fn forms_mode_without_fillable_controls_stays_locked() {
         let mut s = Session::new(Document::from_text("No controls here."));
@@ -747,7 +805,8 @@ mod tests {
     /// Word blocks content-control property edits until Stop Protection: while any restriction
     /// is enforced, `developer.properties` refuses to change a control's lock flags — the
     /// presence of `lockEdit`/`lockDelete` is the trigger, whatever their value (absent, they
-    /// keep the current lock). Other properties (title, tag…) stay editable.
+    /// keep the current lock). Under Filling in forms every property is refused (Word greys
+    /// Properties out); under the other modes the title and tag stay editable.
     #[test]
     fn lock_property_changes_are_refused_under_protection() {
         let mut s = Session::new(Document::from_text("Fill [pick] now."));
@@ -758,10 +817,9 @@ mod tests {
         assert!(s.run("developer.properties", &json!({"control": "free", "lockEdit": true})).is_err(), "lockEdit: true");
         assert!(s.run("developer.properties", &json!({"control": "free", "lockDelete": true})).is_err(), "lockDelete: true");
         assert!(s.run("developer.properties", &json!({"control": "free", "lockEdit": false})).is_err(), "lockEdit: false");
-        // Other properties still work, and the control stays fillable.
-        s.run("developer.properties", &json!({"control": "free", "title": "Renamed"})).unwrap();
-        let titled = s.doc.control_ranges(StoryRef::Body).iter().find(|r| r.control.tag == "free").map(|r| r.control.title.clone());
-        assert_eq!(titled, Some("Renamed".into()));
+        // Under forms protection the other properties are refused too.
+        assert!(s.run("developer.properties", &json!({"control": "free", "title": "Renamed"})).is_err(), "title");
+        assert_eq!(s.doc.fillable_controls(), 1);
         // Any enforced mode refuses it too: read only, even with an exception that allows edits.
         s.run("review.restrict", &json!({"stop": true})).unwrap();
         select(&mut s, "now");
