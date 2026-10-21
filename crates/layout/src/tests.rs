@@ -4011,6 +4011,44 @@ fn an_object_with_no_stacking_order_goes_over_the_highest_stored_one() {
     assert_eq!(drawn, [10.0, 20.0], "the one with no order is drawn last, on top");
 }
 
+/// #2638: the stacking order holds across paragraphs: overlapping shapes anchored in different
+/// paragraphs of a page draw the higher over the lower, in front of the text and behind it,
+/// whichever paragraph comes first.
+#[test]
+fn floats_in_different_paragraphs_stack_in_their_order() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    for wrap in [Wrap::InFrontOfText, Wrap::BehindText] {
+        let mut d = Document::from_text("First\nSecond\nThird");
+        let at = |x: f32, z: u32| Float { wrap, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z: Some(z), ..Default::default() };
+        // Paragraph 1 holds the highest, paragraph 2 the lowest, paragraph 3 the one in between.
+        d.insert_object(&Pos::body(0, 0), rect_shape(100.0, 50.0, at(10.0, 30)), &Default::default()).unwrap();
+        d.insert_object(&Pos::body(1, 0), rect_shape(100.0, 50.0, at(20.0, 10)), &Default::default()).unwrap();
+        d.insert_object(&Pos::body(2, 0), rect_shape(100.0, 50.0, at(30.0, 20)), &Default::default()).unwrap();
+        let l = lay(&d);
+        let items = &l.pages[0].items;
+        let drawn: Vec<f32> = shapes(items).iter().map(|r| r.x).collect();
+        assert_eq!(drawn, [20.0, 30.0, 10.0], "{wrap:?}: lowest first, whatever the paragraph");
+        // Each object's area goes with it, so the topmost is the one hit.
+        let areas: Vec<f32> = items.iter().filter_map(|it| if let Placed::Object { rect, .. } = it { Some(rect.x) } else { None }).collect();
+        assert_eq!(areas, [20.0, 30.0, 10.0], "{wrap:?}: the areas in the same order");
+        let lines = items.iter().filter(|it| matches!(it, Placed::Lines { story: StoryRef::Body, .. })).count();
+        assert_eq!(lines, 3, "{wrap:?}: the text is all there");
+    }
+}
+
+/// Equal stacking orders on one page keep the text order, across paragraphs too.
+#[test]
+fn equal_stacking_orders_keep_the_text_order_across_paragraphs() {
+    use wordcraft_doc::para::{Anchor, Float, Wrap};
+    let mut d = Document::from_text("First\nSecond");
+    let at = |x: f32| Float { wrap: Wrap::BehindText, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z: Some(7), ..Default::default() };
+    d.insert_object(&Pos::body(0, 0), rect_shape(100.0, 50.0, at(10.0)), &Default::default()).unwrap();
+    d.insert_object(&Pos::body(1, 0), rect_shape(100.0, 50.0, at(20.0)), &Default::default()).unwrap();
+    let l = lay(&d);
+    let drawn: Vec<f32> = shapes(&l.pages[0].items).iter().map(|r| r.x).collect();
+    assert_eq!(drawn, [10.0, 20.0]);
+}
+
 #[test]
 fn top_and_bottom_float_pushes_its_own_first_line_down() {
     use wordcraft_doc::para::{Anchor, Float, Wrap};
