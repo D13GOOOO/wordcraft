@@ -2206,7 +2206,7 @@ fn floating_objects_keep_their_stacking_order() {
     };
     let body = format!("<w:p>{}{}</w:p>", shape("Canopy", 251662336), shape("Trunk", 251661312));
     let mut d = read_body(&body);
-    let stacking = |d: &Document| paras(d)[0].objects.iter().map(|o| o.frame().and_then(|(_, _, f)| f.z)).collect::<Vec<_>>();
+    let stacking = |d: &Document| paras(d)[0].objects.iter().map(|o| o.frame().map(|(_, _, f)| f.z)).collect::<Vec<_>>();
     assert_eq!(stacking(&d), [Some(251662336), Some(251661312)]);
     let mut made = paras(&d)[0].objects[0].clone();
     if let InlineObject::Shape { float, .. } = &mut made {
@@ -2232,7 +2232,7 @@ fn stacking_orders_at_the_top_of_the_range_are_numbered_again() {
     };
     let body = format!("<w:p>{}{}</w:p>", shape("Top", u32::MAX), shape("Low", 7));
     let mut d = read_body(&body);
-    let stacking = |d: &Document| paras(d)[0].objects.iter().map(|o| o.frame().and_then(|(_, _, f)| f.z)).collect::<Vec<_>>();
+    let stacking = |d: &Document| paras(d)[0].objects.iter().map(|o| o.frame().map(|(_, _, f)| f.z)).collect::<Vec<_>>();
     assert_eq!(stacking(&d), [Some(u32::MAX), Some(7)]);
     let mut made = paras(&d)[0].objects[0].clone();
     if let InlineObject::Shape { float, .. } = &mut made {

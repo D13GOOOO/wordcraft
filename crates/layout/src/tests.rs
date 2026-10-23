@@ -4903,11 +4903,11 @@ fn floats_align_within_their_reference_area() {
 fn floating_objects_are_drawn_in_their_stacking_order() {
     use wordcraft_doc::para::{Anchor, Float, Wrap};
     let mut d = Document::from_text("Two trees.");
-    let at = |x: f32, z: Option<u32>, wrap: Wrap| Float { wrap, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z, ..Default::default() };
+    let at = |x: f32, z: u32, wrap: Wrap| Float { wrap, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z, ..Default::default() };
     // Inserted at the start, so the text order is the reverse: 50, 40, 30, 20, 10.
-    for f in [at(10.0, Some(1), Wrap::InFrontOfText), at(20.0, Some(2), Wrap::InFrontOfText), at(30.0, None, Wrap::InFrontOfText)]
+    for f in [at(10.0, 1, Wrap::InFrontOfText), at(20.0, 2, Wrap::InFrontOfText), at(30.0, 0, Wrap::InFrontOfText)]
         .into_iter()
-        .chain([at(40.0, Some(5), Wrap::BehindText), at(50.0, Some(6), Wrap::BehindText)])
+        .chain([at(40.0, 5, Wrap::BehindText), at(50.0, 6, Wrap::BehindText)])
     {
         d.insert_object(&Pos::body(0, 0), rect_shape(100.0, 50.0, f), &Default::default()).unwrap();
     }
@@ -4922,10 +4922,9 @@ fn floating_objects_are_drawn_in_their_stacking_order() {
 fn an_object_with_no_stacking_order_goes_over_the_highest_stored_one() {
     use wordcraft_doc::para::{Anchor, Float, Wrap};
     let mut d = Document::from_text("Two trees.");
-    let at =
-        |x: f32, z: Option<u32>| Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z, ..Default::default() };
+    let at = |x: f32, z: u32| Float { wrap: Wrap::InFrontOfText, h_rel: Anchor::Page, v_rel: Anchor::Page, x, y: 100.0, z, ..Default::default() };
     // Inserted at the start, so the text order is the reverse: 20, 10.
-    for f in [at(10.0, Some(u32::MAX)), at(20.0, None)] {
+    for f in [at(10.0, u32::MAX), at(20.0, 0)] {
         d.insert_object(&Pos::body(0, 0), rect_shape(100.0, 50.0, f), &Default::default()).unwrap();
     }
     let l = lay(&d);
@@ -5119,8 +5118,7 @@ fn automatic_text_in_a_styled_text_box_takes_the_box_s_colour() {
 fn header_cell_floats_on_the_page_keep_their_stacking_order() {
     use wordcraft_doc::para::{Anchor, Float, Wrap};
     let mut d = Document::from_text("Body");
-    let float =
-        |z: u32| Float { wrap: Wrap::BehindText, h_rel: Anchor::Margin, v_rel: Anchor::Margin, outside_cell: true, z, ..Default::default() };
+    let float = |z: u32| Float { wrap: Wrap::BehindText, h_rel: Anchor::Margin, v_rel: Anchor::Margin, outside_cell: true, z, ..Default::default() };
     let mut t = Table::new(1, 1, 468.0);
     let mut cp = wordcraft_doc::Paragraph::with_text("Cell", Default::default());
     // First in the text but higher in the stack: drawn last, over the other.
