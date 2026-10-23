@@ -82,6 +82,7 @@
 	Click level to modify:	Zu ändernde Ebene anklicken:
 	Color only	Nur Farbe
 	Compress punctuation at the start of a line	Satzzeichen am Zeilenanfang komprimieren
+	Continue from previous section	Fortlaufend vom vorherigen Abschnitt
 	Dark page (white text on black)	Dunkle Seite (weißer Text auf Schwarz)
 	Drag a rectangle to draw a table, or a line across cells to split them. Esc stops.	Ziehen Sie ein Rechteck, um eine Tabelle zu zeichnen, oder eine Linie über Zellen, um sie zu teilen. Esc beendet.
 	Draw Table	Tabelle zeichnen
@@ -113,6 +114,8 @@
 	Number style for this level:	Nummernstil für diese Ebene:
 	Only for the selected text	Nur für den ausgewählten Text
 	Outside border	Äußere Rahmenlinie
+	Page Number Format	Format der Seitenzahlen
+	Page numbering	Seitenzahlen
 	Reopen	Erneut öffnen
 	Restart list after:	Liste neu starten nach:
 	Right border	Rechte Rahmenlinie
@@ -322,6 +325,8 @@
 	Edit\nRecipient List	Empfängerliste\nbearbeiten
 	Edited	Bearbeitet
 	Editing	Bearbeitung
+	Editing endnote	Endnote bearbeiten
+	Editing footnote	Fußnote bearbeiten
 	Editing header/footer	Kopf-/Fußzeile bearbeiten
 	Editing — edit the document directly	Bearbeitung — das Dokument direkt bearbeiten
 	Editor	Editor
@@ -358,6 +363,9 @@
 	First line:	Erste Zeile:
 	Fixed Column Width	Feste Spaltenbreite
 	Focus	Fokus
+	Full Screen View	Vollbildansicht
+	Show the ribbon	Menüband anzeigen
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Alte Menütasten: Alt, {keys}. Weitertippen oder mit Esc abbrechen.
 	Font	Schriftart
 	Font Color	Schriftfarbe
 	Font color:	Schriftfarbe:
@@ -1295,6 +1303,9 @@
 	{cols}×{rows} Table	{cols}×{rows}-Tabelle
 	AaBbYyZz	AaBbYyZz
 	pt	pt
+	cm	cm
+	mm	mm
+	pi	pi
 	Document1	Document1
 	Username	Benutzername
 	Display name	Anzeigename
@@ -2022,6 +2033,12 @@
 	Do not check spelling or grammar	Rechtschreibung und Grammatik nicht prüfen
 	Dutch	Niederländisch
 	English (United Kingdom)	Englisch (Vereinigtes Königreich)
+	English (Australia)	Englisch (Australien)
+	English (Canada)	Englisch (Kanada)
+	English (India)	Englisch (Indien)
+	English (Ireland)	Englisch (Irland)
+	English (New Zealand)	Englisch (Neuseeland)
+	English (South Africa)	Englisch (Südafrika)
 	Envelope size:	Umschlaggröße:
 	Estonian	Estnisch
 	Finnish	Finnisch
@@ -2215,6 +2232,7 @@
 	Submitting print job…	Druckauftrag wird gesendet…
 	Print job submitted.	Druckauftrag gesendet.
 	Print job submitted: {receipt}	Druckauftrag gesendet: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Druckauftrag gesendet: {count} Blatt an den Spooler übergeben
 	Print failed: the printing worker stopped.	Drucken fehlgeschlagen: Der Druckvorgang wurde angehalten.
 	Print settings	Druckeinstellungen
 	Submit print job	Druckauftrag senden
@@ -2248,6 +2266,9 @@
 # Reading Mode column widths (#1040)
 	Narrow	Schmal
 	Medium	Mittel
+	Dot-dot-dash	Punkt-Punkt-Strich
+	More Underlines…	Weitere Unterstreichungen…
+	Underline Color	Unterstreichungsfarbe
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Zellen vor dem Teilen verbinden
 	Table size	Tabellengröße
@@ -2287,3 +2308,108 @@
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Geben Sie eine Größe in einer beliebigen Einheit ein, z. B. 5 cm oder 300 px. Die andere Seite passt sich an, sodass das Bild seine Proportionen behält.
 
 	Import…	Importieren…
+
+# Personal templates (#2852)
+	Personal	Persönlich
+	Personal Templates	Persönliche Vorlagen
+	Templates you save in your templates folder show up here.	Vorlagen, die Sie in Ihrem Vorlagenordner speichern, werden hier angezeigt.
+	Save as Word Template…	Als Word-Vorlage speichern…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Speichert eine .dotx-Vorlage in Ihrem Vorlagenordner. Sie erscheint unter Datei › Neu bei Persönlich.
+	File locations	Dateispeicherorte
+	User templates:	Benutzervorlagen:
+	Not set	Nicht festgelegt
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Datei › Neu zeigt die .dotx- und .dotm-Vorlagen von hier unter Persönlich; Als Word-Vorlage speichern beginnt hier.
+	Format Shape Pane	Bereich „Form formatieren“
+	Format Shape	Form formatieren
+	Format Shape…	Form formatieren…
+	No fill	Keine Füllung
+	Solid fill	Einfarbige Füllung
+	Gradient fill	Farbverlauf
+	Preset gradients	Vordefinierte Farbverläufe
+	Radial	Radial
+	Rectangular	Rechteckig
+	Path	Pfad
+	Direction	Richtung
+	Angle	Winkel
+	Gradient stops	Farbverlaufsstopps
+	Add gradient stop	Farbverlaufsstopp hinzufügen
+	Remove gradient stop	Farbverlaufsstopp entfernen
+	Rotate with shape	Mit Form drehen
+	Gradient	Farbverlauf
+	No Gradient	Kein Farbverlauf
+	Light Variations	Helle Varianten
+	Dark Variations	Dunkle Varianten
+	More Gradients…	Weitere Farbverläufe…
+	Select a shape, text box or drawing canvas to format its fill.	Wählen Sie eine Form, ein Textfeld oder einen Zeichenbereich aus, um die Füllung zu formatieren.
+	Linear Right	Linear rechts
+	Linear Diagonal - Top Left to Bottom Right	Linear diagonal – oben links nach unten rechts
+	Linear Down	Linear nach unten
+	Linear Diagonal - Top Right to Bottom Left	Linear diagonal – oben rechts nach unten links
+	Linear Left	Linear links
+	Linear Diagonal - Bottom Right to Top Left	Linear diagonal – unten rechts nach oben links
+	Linear Up	Linear nach oben
+	Linear Diagonal - Bottom Left to Top Right	Linear diagonal – unten links nach oben rechts
+	From Top Left Corner	Aus Ecke oben links
+	From Top Right Corner	Aus Ecke oben rechts
+	From Bottom Left Corner	Aus Ecke unten links
+	From Bottom Right Corner	Aus Ecke unten rechts
+	From Center	Aus der Mitte
+	Soft	Weich
+	Lit from Top	Von oben beleuchtet
+	Deep	Tief
+	Lit from Bottom	Von unten beleuchtet
+	Center Glow	Leuchten aus der Mitte
+# File › Home greeting
+	Good morning	Guten Morgen
+	Good afternoon	Guten Tag
+	Good evening	Guten Abend
+	More tabs	Weitere Registerkarten
+# #3013: Insert Table of Figures
+	Include label and number	Bezeichnung und Nummer einbeziehen
+	First Record	Erster Datensatz
+	Last Record	Letzter Datensatz
+	Go to Record	Gehe zu Datensatz
+	Edit Individual Documents…	Einzelne Dokumente bearbeiten…
+	Print Documents…	Dokumente drucken…
+	Print Documents	Dokumente drucken
+	Current record	Aktueller Datensatz
+	From:	Von:
+	To:	Bis:
+	Enter a number.	Bitte eine Zahl eingeben.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	die Gruppierung einer Zeichenfläche kann nicht aufgehoben werden
+	a drawing canvas can't go inside a text box	eine Zeichenfläche kann nicht in ein Textfeld eingefügt werden
+	charts and diagrams can't be moved or resized yet	Diagramme und SmartArt können noch nicht verschoben oder in der Größe geändert werden
+	no equation at the caret	keine Formel an der Einfügemarke
+	not editing an equation	es wird keine Formel bearbeitet
+	nothing is selected	nichts ist markiert
+	only in Outline view	nur in der Gliederungsansicht
+	select a SmartArt graphic first	markieren Sie zuerst eine SmartArt-Grafik
+	select a chart first	markieren Sie zuerst ein Diagramm
+	select a connector first	markieren Sie zuerst eine Verbindung
+	select a drawing canvas first	markieren Sie zuerst eine Zeichenfläche
+	select a floating picture or shape first	markieren Sie zuerst ein frei positioniertes Bild oder eine Form
+	select a group first	markieren Sie zuerst eine Gruppe
+	select a picture first	markieren Sie zuerst ein Bild
+	select a picture or shape first	markieren Sie zuerst ein Bild oder eine Form
+	select a shape first	markieren Sie zuerst eine Form
+	select a text box first	markieren Sie zuerst ein Textfeld
+	select a text box linked to another first	markieren Sie zuerst ein mit einem anderen verknüpftes Textfeld
+	select recipients first	wählen Sie zuerst Empfänger aus
+	select two or more pictures or shapes first (Shift+click)	markieren Sie zuerst zwei oder mehr Bilder oder Formen (Umschalt+Klick)
+	text boxes can't go inside a text box	Textfelder können nicht in ein Textfeld eingefügt werden
+	the Clipboard pane is empty	der Zwischenablage-Bereich ist leer
+	the cursor isn't in a table	die Einfügemarke befindet sich nicht in einer Tabelle
+	there is nothing to undo	es gibt nichts rückgängig zu machen
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	diese SmartArt-Grafik wurde in einem anderen Programm erstellt: WordCraft zeigt sie an, kann sie aber nicht bearbeiten
+	this chart was made in another program: WordCraft shows it but can't edit it	dieses Diagramm wurde in einem anderen Programm erstellt: WordCraft zeigt es an, kann es aber nicht bearbeiten
+	this text box is already linked: break the link first	dieses Textfeld ist bereits verknüpft: heben Sie zuerst die Verknüpfung auf
+	leave the equation first	zuerst die Formel verlassen
+	the Spike is empty	die Sammlung ist leer
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	eine Gruppe mit Word-Freihandtinte lässt sich noch nicht aufheben
+	drop caps can't go in a table	ein Initial passt nicht in eine Tabelle
+	the document is protected	das Dokument ist geschützt
+	the paragraph is empty	der Absatz ist leer
+	the paragraph starts with a space	der Absatz beginnt mit einem Leerzeichen
+	Open a document first	Zuerst ein Dokument öffnen

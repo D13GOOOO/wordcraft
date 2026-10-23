@@ -77,12 +77,17 @@ pub enum WrapText {
 impl WrapText {
     /// From the OOXML value (`bothSides`, `left`, `right`, `largest`).
     pub fn from_ooxml(v: &str) -> Option<WrapText> {
-        match v {
-            "bothSides" => Some(WrapText::BothSides),
-            "left" => Some(WrapText::Left),
-            "right" => Some(WrapText::Right),
-            "largest" => Some(WrapText::Largest),
-            _ => None,
+        let v = v.trim();
+        if v.eq_ignore_ascii_case("bothSides") || v.eq_ignore_ascii_case("both") {
+            Some(WrapText::BothSides)
+        } else if v.eq_ignore_ascii_case("left") {
+            Some(WrapText::Left)
+        } else if v.eq_ignore_ascii_case("right") {
+            Some(WrapText::Right)
+        } else if v.eq_ignore_ascii_case("largest") {
+            Some(WrapText::Largest)
+        } else {
+            None
         }
     }
 
@@ -216,15 +221,16 @@ pub struct Float {
     /// laid out, as Word for Windows does (Word for Mac draws hidden VML shapes).
     #[serde(skip_serializing_if = "is_false")]
     pub hidden: bool,
-    /// Stacking order among the floating objects of its layer (`wp:anchor/@relativeHeight`):
-    /// a higher one is drawn over a lower one, whatever their order in the text, as Word does.
-    /// `None` (objects made here) stacks above every object that has one, in text order.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub z: Option<u32>,
     /// Anchored in a table cell but placed on the page, not in the cell (`wp:anchor/@layoutInCell`
     /// off, any VML shape in a header or footer): a picture watermark in a header that starts with a table.
     #[serde(skip_serializing_if = "is_false")]
     pub outside_cell: bool,
+    /// Stacking order among the floating objects of its layer (`wp:anchor/@relativeHeight`):
+    /// a higher one is drawn over a lower one, whatever their order in the text, as Word does.
+    /// 0 = none (objects inserted here, or from other formats): stacks above every object that
+    /// has one, in text order.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub z: u32,
 }
 
 /// Longest alternative text kept (characters): hostile files and commands are capped.
@@ -264,12 +270,15 @@ fn is_zero(v: &f32) -> bool {
 fn is_false(v: &bool) -> bool {
     !*v
 }
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
 
 impl Float {
-    /// Where it stacks among the floating objects of its layer: see [`Float::z`]. `None` is
+    /// Where it stacks among the floating objects of its layer: see [`Float::z`]. None (0) is
     /// past every stored order, `u32::MAX` included.
     pub fn stack(&self) -> u64 {
-        self.z.map_or(u64::from(u32::MAX) + 1, u64::from)
+        if self.z > 0 { u64::from(self.z) } else { u64::from(u32::MAX) + 1 }
     }
     /// The rotation and flips, the angle normalised to `0..360` (a NaN angle is no rotation).
     pub fn spin(&self) -> wordcraft_geom::Spin {
@@ -450,8 +459,9 @@ pub enum InlineObject {
         /// Crop (left, top, right, bottom) fractions 0..1.
         #[serde(default)]
         crop: [f32; 4],
-        /// The OLE object (embedded or linked file) this picture shows, as read from a file:
-        /// saving writes the object back, not only its picture. See [`crate::graphic::Embedded`].
+        /// The OLE object (embedded or linked file) or Word signature line this picture shows, as
+        /// read from a file: saving writes the object back, not only its picture. See
+        /// [`crate::graphic::Embedded`].
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ole: Option<std::sync::Arc<crate::graphic::Embedded>>,
     },
@@ -469,7 +479,7 @@ pub enum InlineObject {
         kind: ShapeKind,
         w: f32,
         h: f32,
-        fill: Option<crate::props::Rgb>,
+        fill: Option<crate::fill::Fill>,
         stroke: Option<crate::props::Rgb>,
         #[serde(default)]
         stroke_width: f32,
@@ -651,10 +661,10 @@ pub struct GroupChild {
 pub const MAX_GROUP_CHILDREN: usize = 1000;
 
 /// The background fill and outline of a Drawing Canvas (an [`InlineObject::Group`] with `canvas`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CanvasStyle {
-    pub fill: Option<crate::props::Rgb>,
+    pub fill: Option<crate::fill::Fill>,
     pub stroke: Option<crate::props::Rgb>,
     /// Outline width, points.
     pub stroke_width: f32,

@@ -1,6 +1,6 @@
 # Swedish interface
 
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Swedish interface catalog and regression checks) · **Target:** WordCraft 0.6.1
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-23 · **Change:** trivial (the interface audit lists missing Swedish entries instead of failing; previously minor (Swedish interface catalog and regression checks)) · **Target:** WordCraft 0.6.1
 
 Choose **File › Options › Interface language › Svenska**, or follow a Swedish system display
 language (`sv-SE`, `sv_SE.UTF-8`, and `sv-FI` for Swedish in Finland). The catalog code is `sv`;
@@ -84,8 +84,8 @@ document content, every key of the reference catalog, no catalog errors, the sea
 (`infoga tabell`), page and count wording, English fallback, and the glyphs `ÅÄÖåäöÉé` plus every
 other accented letter the catalog uses in the bundled Inter (Regular, Medium, SemiBold) and
 JetBrains Mono. The shared catalog checks (validation, every tab and command translated) include
-Swedish automatically, and the on-demand interface audit (`untranslated_interface_text`) checks
-Swedish alongside Russian, Hungarian, Turkish and Bulgarian.
+Swedish automatically, and the interface audit (`untranslated_interface_text`) lists Swedish
+strings it looked up that the catalog lacks.
 
 Spelling, grammar and hyphenation stay English-only: this is an interface translation, not
 Swedish proofing.
@@ -94,4 +94,5 @@ Swedish proofing.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | trivial | The interface audit lists Swedish strings the catalog lacks; a missing entry doesn't fail the audit |
 | 2026-10-13 | minor | Swedish catalog (2,504 entries), conventions, terminology, known compromises and regression checks |

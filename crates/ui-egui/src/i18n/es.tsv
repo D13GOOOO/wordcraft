@@ -84,6 +84,7 @@
 	Check spelling as you type	Revisar la ortografía mientras escribes
 	Click to switch back to inserting	Haz clic para volver a insertar
 	Color only	Solo color
+	Continue from previous section	Continuar desde la sección anterior
 	Custom dictionary	Diccionario personalizado
 	Define New Multilevel List	Definir nueva lista multinivel
 	Define New Multilevel List…	Definir nueva lista multinivel…
@@ -128,6 +129,8 @@
 	Outside border	Borde exterior
 	Overtype	Sobrescribir
 	Overtype (typing replaces the characters after the caret)	Sobrescribir (lo que escribes reemplaza los caracteres tras el cursor)
+	Page Number Format	Formato del número de página
+	Page numbering	Numeración de páginas
 	Show alignment guides when moving pictures and shapes	Mostrar guías de alineación al mover imágenes y formas
 	Moved objects snap to the page's edges and centre, the margins and other objects. Hold Alt to move freely.	Los objetos que mueves se ajustan a los bordes y el centro de la página, a los márgenes y a otros objetos. Mantén pulsada Alt para moverlos libremente.
 	Page display	Visualización de página
@@ -374,6 +377,8 @@
 	Edit\nRecipient List	Editar lista de\ndestinatarios
 	Edited	Editado
 	Editing	Edición
+	Editing endnote	Editando nota final
+	Editing footnote	Editando nota al pie
 	Editing header/footer	Editando encabezado y pie de página
 	Editing — edit the document directly	Edición — edita el documento directamente
 	Editor	Editor
@@ -413,6 +418,9 @@
 	First line:	Primera línea:
 	Fixed Column Width	Ancho de columna fijo
 	Focus	Modo concentración
+	Full Screen View	Vista de pantalla completa
+	Show the ribbon	Mostrar la cinta
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Teclas de menú antiguas: Alt, {keys}. Siga escribiendo o pulse Esc para cancelar.
 	Font	Fuente
 	Font Color	Color de fuente
 	Font Dialog	Cuadro de diálogo Fuente
@@ -1413,6 +1421,9 @@
 	{cols}×{rows} Table	Tabla de {cols}×{rows}
 	AaBbYyZz	AaBbYyZz ÑñÁá
 	pt	pt
+	cm	cm
+	mm	mm
+	pi	pi
 	Document1	Documento1
 	Username	Nombre de usuario
 	Display name	Nombre visible
@@ -1790,6 +1801,12 @@
 	Reading Line Spacing	Interlineado de lectura
 	Reading Text Size	Tamaño del texto de lectura
 	English (United Kingdom)	Inglés (Reino Unido)
+	English (Australia)	Inglés (Australia)
+	English (Canada)	Inglés (Canadá)
+	English (India)	Inglés (India)
+	English (Ireland)	Inglés (Irlanda)
+	English (New Zealand)	Inglés (Nueva Zelanda)
+	English (South Africa)	Inglés (Sudáfrica)
 	Polish	Polaco
 	Do Not Check Spelling or Grammar	No revisar la ortografía ni la gramática
 
@@ -2582,6 +2599,7 @@ preview	Title	Título
 	Submitting print job…	Enviando trabajo de impresión…
 	Print job submitted.	Trabajo de impresión enviado.
 	Print job submitted: {receipt}	Trabajo de impresión enviado: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Trabajo de impresión enviado: {count} hoja(s) en cola de impresión
 	Print failed: the printing worker stopped.	La impresión falló: el proceso de impresión se detuvo.
 	Print settings	Configuración de impresión
 	Submit print job	Enviar trabajo de impresión
@@ -2615,6 +2633,9 @@ preview	Title	Título
 # Reading Mode column widths (#1040)
 	Narrow	Estrecha
 	Medium	Media
+	Dot-dot-dash	Punto, punto y raya
+	More Underlines…	Más subrayados…
+	Underline Color	Color de subrayado
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Combinar celdas antes de dividir
 	Table size	Tamaño de la tabla
@@ -2654,3 +2675,104 @@ preview	Title	Título
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Escribe un tamaño en cualquier unidad, como 5 cm o 300 px. El otro lado se ajusta, así que la imagen conserva sus proporciones.
 
 	Import…	Importar…
+
+# Personal templates (#2852)
+	Personal	Personal
+	Personal Templates	Plantillas personales
+	Templates you save in your templates folder show up here.	Las plantillas que guarde en su carpeta de plantillas aparecen aquí.
+	Save as Word Template…	Guardar como plantilla de Word…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Guarda una plantilla .dotx en su carpeta de plantillas. Aparece en Archivo › Nuevo, en Personal.
+	File locations	Ubicación de archivos
+	User templates:	Plantillas de usuario:
+	Not set	Sin definir
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Archivo › Nuevo muestra aquí las plantillas .dotx y .dotm en Personal; Guardar como plantilla de Word empieza aquí.
+	Format Shape Pane	Panel Formato de forma
+	Format Shape	Formato de forma
+	Format Shape…	Formato de forma…
+	No fill	Sin relleno
+	Solid fill	Relleno sólido
+	Gradient fill	Relleno degradado
+	Preset gradients	Degradados predefinidos
+	Radial	Radial
+	Rectangular	Rectangular
+	Path	Trazado
+	Direction	Dirección
+	Angle	Ángulo
+	Gradient stops	Puntos de degradado
+	Add gradient stop	Agregar punto de degradado
+	Remove gradient stop	Quitar punto de degradado
+	Rotate with shape	Girar con la forma
+	Gradient	Degradado
+	No Gradient	Sin degradado
+	Light Variations	Variaciones claras
+	Dark Variations	Variaciones oscuras
+	More Gradients…	Más degradados…
+	Select a shape, text box or drawing canvas to format its fill.	Seleccione una forma, un cuadro de texto o un lienzo de dibujo para dar formato a su relleno.
+	Linear Right	Lineal hacia la derecha
+	Linear Diagonal - Top Left to Bottom Right	Lineal diagonal: de superior izquierda a inferior derecha
+	Linear Down	Lineal hacia abajo
+	Linear Diagonal - Top Right to Bottom Left	Lineal diagonal: de superior derecha a inferior izquierda
+	Linear Left	Lineal hacia la izquierda
+	Linear Diagonal - Bottom Right to Top Left	Lineal diagonal: de inferior derecha a superior izquierda
+	Linear Up	Lineal hacia arriba
+	Linear Diagonal - Bottom Left to Top Right	Lineal diagonal: de inferior izquierda a superior derecha
+	From Top Left Corner	Desde la esquina superior izquierda
+	From Top Right Corner	Desde la esquina superior derecha
+	From Bottom Left Corner	Desde la esquina inferior izquierda
+	From Bottom Right Corner	Desde la esquina inferior derecha
+	From Center	Desde el centro
+	Soft	Suave
+	Lit from Top	Iluminado desde arriba
+	Deep	Profundo
+	Lit from Bottom	Iluminado desde abajo
+	Center Glow	Brillo central
+	More tabs	Más pestañas
+# #3013: Insert Table of Figures
+	Include label and number	Incluir rótulo y número
+	First Record	Primer registro
+	Last Record	Último registro
+	Go to Record	Ir al registro
+	Edit Individual Documents…	Editar documentos individuales…
+	Print Documents…	Imprimir documentos…
+	Print Documents	Imprimir documentos
+	Current record	Registro actual
+	From:	Desde:
+	To:	Hasta:
+	Enter a number.	Introduce un número.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	un lienzo de dibujo no se puede desagrupar
+	a drawing canvas can't go inside a text box	un lienzo de dibujo no puede ir dentro de un cuadro de texto
+	charts and diagrams can't be moved or resized yet	los gráficos y diagramas aún no se pueden mover ni cambiar de tamaño
+	no equation at the caret	no hay ninguna ecuación en el cursor
+	not editing an equation	no se está editando ninguna ecuación
+	nothing is selected	no hay nada seleccionado
+	only in Outline view	solo en la vista Esquema
+	select a SmartArt graphic first	seleccione primero un gráfico SmartArt
+	select a chart first	seleccione primero un gráfico
+	select a connector first	seleccione primero un conector
+	select a drawing canvas first	seleccione primero un lienzo de dibujo
+	select a floating picture or shape first	seleccione primero una imagen o forma flotante
+	select a group first	seleccione primero un grupo
+	select a picture first	seleccione primero una imagen
+	select a picture or shape first	seleccione primero una imagen o forma
+	select a shape first	seleccione primero una forma
+	select a text box first	seleccione primero un cuadro de texto
+	select a text box linked to another first	seleccione primero un cuadro de texto vinculado a otro
+	select recipients first	seleccione primero los destinatarios
+	select two or more pictures or shapes first (Shift+click)	seleccione primero dos o más imágenes o formas (Mayús+clic)
+	text boxes can't go inside a text box	los cuadros de texto no pueden ir dentro de un cuadro de texto
+	the Clipboard pane is empty	el panel Portapapeles está vacío
+	the cursor isn't in a table	el cursor no está en una tabla
+	there is nothing to undo	no hay nada que deshacer
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	este SmartArt se creó en otro programa: WordCraft lo muestra pero no puede editarlo
+	this chart was made in another program: WordCraft shows it but can't edit it	este gráfico se creó en otro programa: WordCraft lo muestra pero no puede editarlo
+	this text box is already linked: break the link first	este cuadro de texto ya está vinculado: quite primero el vínculo
+	leave the equation first	salga primero de la ecuación
+	the Spike is empty	el acumulador está vacío
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	un grupo con tinta de Word aún no se puede desagrupar
+	drop caps can't go in a table	no se puede poner una letra capital en una tabla
+	the document is protected	el documento está protegido
+	the paragraph is empty	el párrafo está vacío
+	the paragraph starts with a space	el párrafo empieza con un espacio
+	Open a document first	Abra primero un documento

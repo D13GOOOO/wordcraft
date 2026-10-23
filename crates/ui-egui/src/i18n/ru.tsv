@@ -85,8 +85,11 @@
 	Book Title	Название книги
 	Bookmark	Закладка
 	Bookmark name:	Имя закладки:
+	Continue from previous section	Продолжить из предыдущего раздела
 	Delete Bookmark	Удалить закладку
 	Hidden bookmarks	Скрытые закладки
+	Page Number Format	Формат номеров страниц
+	Page numbering	Нумерация страниц
 	Sort by:	Сортировать по:
 	Border Painter	Кисть границ
 	Border\nPainter	Кисть\nграниц
@@ -236,6 +239,8 @@
 	Edit\nRecipient List	Изменить список\nполучателей
 	Edited	Изменено
 	Editing	Редактирование
+	Editing endnote	Редактирование концевой сноски
+	Editing footnote	Редактирование сноски
 	Editing header/footer	Редактирование колонтитула
 	Editing — edit the document directly	Редактирование — правка документа напрямую
 	Editor	Редактор
@@ -278,6 +283,9 @@
 	First line:	Первая строка:
 	Fixed Column Width	Фиксированная ширина столбцов
 	Focus	Фокус
+	Full Screen View	Полноэкранный режим
+	Show the ribbon	Показать ленту
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Старые клавиши меню: Alt, {keys}. Продолжайте ввод или нажмите Esc для отмены.
 	Font	Шрифт
 	Font Color	Цвет шрифта
 	Font color:	Цвет шрифта:
@@ -703,6 +711,7 @@
 	Spelling & Grammar	Орфография и грамматика
 	Spelling &\nGrammar	Орфография\nи грамматика
 	Spelling Suggestions	Варианты написания
+	Possible spelling mistake	Возможная орфографическая ошибка
 	Split	Разделить
 	Split Cells	Разделить ячейки
 	Split Table	Разделить таблицу
@@ -1135,6 +1144,9 @@ preview	Title	Пример
 	Version	Версия
 	% of all commits	% всех коммитов
 	pt	пт
+	cm	см
+	mm	мм
+	pi	пик
 	Save the document to turn on AutoSave	Сохраните документ, чтобы включить автосохранение
 	Contributors	Участники
 	Models	Модели
@@ -2184,6 +2196,12 @@ preview	Title	Пример
 	Reading Text Size	Размер текста в режиме чтения
 	Do Not Check Spelling or Grammar	Не проверять орфографию и грамматику
 	English (United Kingdom)	Английский (Великобритания)
+	English (Australia)	Английский (Австралия)
+	English (Canada)	Английский (Канада)
+	English (India)	Английский (Индия)
+	English (Ireland)	Английский (Ирландия)
+	English (New Zealand)	Английский (Новая Зеландия)
+	English (South Africa)	Английский (Южная Африка)
 	Polish	Польский
 
 # Built-in file browser (#576).
@@ -2607,6 +2625,7 @@ preview	Title	Пример
 	Submitting print job…	Отправка задания на печать…
 	Print job submitted.	Задание на печать отправлено.
 	Print job submitted: {receipt}	Задание на печать отправлено: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Задание печати отправлено: в очередь передано листов: {count}
 	Print failed: the printing worker stopped.	Печать не удалась: процесс печати остановлен.
 	Print settings	Параметры печати
 	Submit print job	Отправить задание на печать
@@ -2647,6 +2666,9 @@ preview	Title	Пример
 # Reading Mode column widths (#1040)
 	Narrow	Узкая
 	Medium	Средняя
+	Dot-dot-dash	Штрихпунктирный с двумя точками
+	More Underlines…	Другие подчёркивания…
+	Underline Color	Цвет подчёркивания
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Объединить ячейки перед разбиением
 	Table size	Размер таблицы
@@ -2697,3 +2719,96 @@ preview	Title	Пример
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Введите размер в любых единицах, например 5 cm или 300 px. Другая сторона изменится вместе с ней, и рисунок сохранит пропорции.
 
 	Import…	Импорт…
+
+# Personal templates (#2852)
+	Personal	Личные
+	Personal Templates	Личные шаблоны
+	Templates you save in your templates folder show up here.	Здесь появляются шаблоны, сохранённые в папку шаблонов.
+	Save as Word Template…	Сохранить как шаблон Word…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Сохраняет шаблон .dotx в папку шаблонов. Он появится в разделе Файл › Создать, в группе «Личные».
+	File locations	Расположение файлов
+	User templates:	Шаблоны пользователя:
+	Not set	Не задано
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Файл › Создать показывает отсюда шаблоны .dotx и .dotm в группе «Личные»; «Сохранить как шаблон Word» начинает здесь.
+	Format Shape Pane	Область «Формат фигуры»
+	Format Shape	Формат фигуры
+	Format Shape…	Формат фигуры…
+	No fill	Нет заливки
+	Solid fill	Сплошная заливка
+	Gradient fill	Градиентная заливка
+	Preset gradients	Готовые градиенты
+	Radial	Радиальный
+	Rectangular	Прямоугольный
+	Path	Контур
+	Direction	Направление
+	Angle	Угол
+	Gradient stops	Точки градиента
+	Add gradient stop	Добавить точку градиента
+	Remove gradient stop	Удалить точку градиента
+	Rotate with shape	Вращать вместе с фигурой
+	Gradient	Градиент
+	No Gradient	Без градиента
+	Light Variations	Светлые варианты
+	Dark Variations	Тёмные варианты
+	More Gradients…	Другие градиенты…
+	Select a shape, text box or drawing canvas to format its fill.	Выберите фигуру, надпись или полотно, чтобы настроить заливку.
+	Linear Right	Линейный вправо
+	Linear Diagonal - Top Left to Bottom Right	Линейный по диагонали — слева сверху → справа снизу
+	Linear Down	Линейный вниз
+	Linear Diagonal - Top Right to Bottom Left	Линейный по диагонали — справа сверху → слева снизу
+	Linear Left	Линейный влево
+	Linear Diagonal - Bottom Right to Top Left	Линейный по диагонали — справа снизу → слева сверху
+	Linear Up	Линейный вверх
+	Linear Diagonal - Bottom Left to Top Right	Линейный по диагонали — слева снизу → справа сверху
+	From Top Left Corner	Из угла слева сверху
+	From Top Right Corner	Из угла справа сверху
+	From Bottom Left Corner	Из угла слева снизу
+	From Bottom Right Corner	Из угла справа снизу
+	From Center	Из центра
+	Soft	Мягкий
+	Lit from Top	Освещение сверху
+	Deep	Глубокий
+	Lit from Bottom	Освещение снизу
+	Center Glow	Свечение из центра
+	More tabs	Другие вкладки
+# #3013: Insert Table of Figures
+	Include label and number	Включить подпись и номер
+	First Record	Первая запись
+	Last Record	Последняя запись
+	Go to Record	Перейти к записи
+	Edit Individual Documents…	Изменить отдельные документы…
+	Print Documents…	Печать документов…
+	Print Documents	Печать документов
+	Current record	Текущая запись
+	From:	С:
+	To:	По:
+	Enter a number.	Введите число.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	полотно для рисования нельзя разгруппировать
+	a drawing canvas can't go inside a text box	полотно для рисования нельзя поместить в текстовое поле
+	charts and diagrams can't be moved or resized yet	диаграммы и схемы пока нельзя перемещать или менять их размер
+	no equation at the caret	у курсора нет уравнения
+	not editing an equation	уравнение не редактируется
+	only in Outline view	только в режиме структуры
+	select a SmartArt graphic first	сначала выделите рисунок SmartArt
+	select a chart first	сначала выделите диаграмму
+	select a connector first	сначала выделите соединительную линию
+	select a drawing canvas first	сначала выделите полотно для рисования
+	select a floating picture or shape first	сначала выделите плавающий рисунок или фигуру
+	select a group first	сначала выделите группу
+	select a picture first	сначала выделите рисунок
+	select a shape first	сначала выделите фигуру
+	select a text box first	сначала выделите текстовое поле
+	select a text box linked to another first	сначала выделите текстовое поле, связанное с другим
+	the Clipboard pane is empty	область «Буфер обмена» пуста
+	there is nothing to undo	нечего отменять
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	этот SmartArt создан в другой программе: WordCraft показывает его, но не может изменить
+	this chart was made in another program: WordCraft shows it but can't edit it	эта диаграмма создана в другой программе: WordCraft показывает её, но не может изменить
+	this text box is already linked: break the link first	это текстовое поле уже связано: сначала разорвите связь
+	leave the equation first	сначала выйдите из уравнения
+	the Spike is empty	копилка пуста
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	группу с рукописным вводом Word пока нельзя разгруппировать
+	drop caps can't go in a table	буквицу нельзя поместить в таблицу
+	the document is protected	документ защищён
+	Open a document first	Сначала откройте документ

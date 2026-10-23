@@ -196,3 +196,54 @@ fn hidden_drawings_stay_hidden() {
     assert_eq!((marked("wp:docPr"), marked("wps:cNvPr")), (3, 1), "{xml}");
     assert_eq!(hidden(&wordcraft_docx::read(&saved).unwrap()), want);
 }
+
+#[test]
+fn picture_in_box_keeps_its_frame() {
+    use wordcraft_doc::{Paragraph, Pos, StoryRef};
+
+    let mut d = Document::from_text("Anchor");
+    let body = TextBody { anchor: VAlign::Center, inset: Some([0; 4]), ..Default::default() };
+    let outer = text_box(&mut d, "Label", body);
+    let id = outer.text_box().unwrap();
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(10, 4, image::Rgba([20, 40, 60, 255])).write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+    let media = d.add_media(bytes.into_inner(), "png");
+    let image = InlineObject::Image {
+        media: media.clone(),
+        w: 90.0,
+        h: 36.0,
+        alt: "Synthetic marker".into(),
+        float: Default::default(),
+        crop: [0.0; 4],
+        ole: None,
+    };
+    let mut p = Paragraph::new();
+    p.insert_object(0, image, &Default::default()).unwrap();
+    d.parts.get_mut(&id).unwrap().blocks.push(para_block(p));
+    d.insert_object(&Pos::body(0, 0), outer, &Default::default()).unwrap();
+
+    let read = wordcraft_docx::read(&wordcraft_docx::write(&d).unwrap()).unwrap();
+    let ids = boxes(&read);
+    assert_eq!(ids.len(), 1, "a nested picture must not replace its text box");
+    let id = ids[0];
+    assert_eq!(read.parts[&id].body, body);
+    assert!(read.plain_text(StoryRef::Part(id)).starts_with("Label"));
+    let p = read.para(StoryRef::Part(id), &wordcraft_doc::Path::top(1)).unwrap();
+    assert!(matches!(&p.objects[0], InlineObject::Image { w, h, alt, .. }
+        if *w == 90.0 && *h == 36.0 && alt == "Synthetic marker"));
+    let p = read.para(StoryRef::Body, &wordcraft_doc::Path::top(0)).unwrap();
+    assert!(matches!(&p.objects[0], InlineObject::Shape { w, h, .. } if *w == 144.0 && *h == 72.0));
+}
+
+#[test]
+fn story_shared_by_many_shapes_is_written_once() {
+    let mut d = Document::from_text("x");
+    let text = "abcdefghij".repeat(5_000);
+    let o = text_box(&mut d, &text, TextBody::default());
+    for _ in 0..500 {
+        d.insert_object(&wordcraft_doc::Pos::body(0, 0), o.clone(), &Default::default()).unwrap();
+    }
+    let xml = document_xml(&wordcraft_docx::write(&d).unwrap());
+    assert!(xml.len() < 2_000_000, "document.xml is {} bytes", xml.len());
+    assert_eq!(xml.matches(text.as_str()).count(), 1);
+}

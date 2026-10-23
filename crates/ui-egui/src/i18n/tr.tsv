@@ -84,8 +84,11 @@
 	Book Title	Kitap Başlığı
 	Bookmark	Yer İşareti
 	Bookmark name:	Yer işareti adı:
+	Continue from previous section	Önceki bölümden devam et
 	Delete Bookmark	Yer İşaretini Sil
 	Hidden bookmarks	Gizli yer işaretleri
+	Page Number Format	Sayfa numarası biçimi
+	Page numbering	Sayfa numaralandırma
 	Sort by:	Sıralama ölçütü:
 	Border Painter	Kenarlık Fırçası
 	Border\nPainter	Kenarlık\nFırçası
@@ -232,6 +235,8 @@
 	Edit\nRecipient List	Alıcı Listesini\nDüzenle
 	Edited	Düzenlendi
 	Editing	Düzenleme
+	Editing endnote	Sonnot düzenleniyor
+	Editing footnote	Dipnot düzenleniyor
 	Editing header/footer	Üstbilgi/altbilgi düzenleniyor
 	Editing — edit the document directly	Düzenleme — belgeyi doğrudan düzenleyin
 	Editor	Düzenleyici
@@ -274,6 +279,9 @@
 	First line:	İlk satır:
 	Fixed Column Width	Sabit Sütun Genişliği
 	Focus	Odak
+	Full Screen View	Tam Ekran Görünümü
+	Show the ribbon	Şeridi göster
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Eski menü tuşları: Alt, {keys}. Yazmaya devam edin ya da iptal etmek için Esc tuşuna basın.
 	Font	Yazı Tipi
 	Font Color	Yazı Tipi Rengi
 	Font color:	Yazı tipi rengi:
@@ -708,6 +716,7 @@
 	Spelling & Grammar	Yazım ve Dilbilgisi
 	Spelling &\nGrammar	Yazım ve\nDilbilgisi
 	Spelling Suggestions	Yazım Önerileri
+	Possible spelling mistake	Olası yazım hatası
 	Split	Böl
 	Split Cells	Hücreleri Böl
 	Split Table	Tabloyu Böl
@@ -1135,6 +1144,9 @@ preview	Title	Örnek
 	Version	Sürüm
 	% of all commits	Commit payı (%)
 	pt	pt
+	cm	cm
+	mm	mm
+	pi	pi
 	Save the document to turn on AutoSave	Otomatik Kaydet'i açmak için belgeyi kaydedin
 	Models	Modeller
 	Good evening	İyi akşamlar
@@ -1735,6 +1747,12 @@ preview	Title	Örnek
 	Go Back	Geri Git
 	Do Not Check Spelling or Grammar	Yazım veya dilbilgisini denetleme
 	English (United Kingdom)	İngilizce (Birleşik Krallık)
+	English (Australia)	İngilizce (Avustralya)
+	English (Canada)	İngilizce (Kanada)
+	English (India)	İngilizce (Hindistan)
+	English (Ireland)	İngilizce (İrlanda)
+	English (New Zealand)	İngilizce (Yeni Zelanda)
+	English (South Africa)	İngilizce (Güney Afrika)
 	Polish	Lehçe
 	Insert Date Field	Tarih Alanı Ekle
 	Insert Page Field	Sayfa Alanı Ekle
@@ -2606,6 +2624,7 @@ preview	Title	Örnek
 	Submitting print job…	Yazdırma işi gönderiliyor…
 	Print job submitted.	Yazdırma işi gönderildi.
 	Print job submitted: {receipt}	Yazdırma işi gönderildi: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Yazdırma işi gönderildi: {count} sayfa kuyruğa alındı
 	Print failed: the printing worker stopped.	Yazdırma başarısız oldu: yazdırma işlemi durdu.
 	Print settings	Yazdırma ayarları
 	Submit print job	Yazdırma işini gönder
@@ -2646,6 +2665,9 @@ preview	Title	Örnek
 # Reading Mode column widths (#1040)
 	Narrow	Dar
 	Medium	Orta
+	Dot-dot-dash	Nokta-nokta-çizgi
+	More Underlines…	Diğer Alt Çizgiler…
+	Underline Color	Alt Çizgi Rengi
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Bölmeden önce hücreleri birleştir
 	Table size	Tablo boyutu
@@ -2696,3 +2718,96 @@ preview	Title	Örnek
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Herhangi bir birimde bir boyut yazın, örneğin 5 cm veya 300 px. Diğer kenar da buna uyar, böylece resim oranlarını korur.
 
 	Import…	İçe aktar…
+
+# Personal templates (#2852)
+	Personal	Kişisel
+	Personal Templates	Kişisel şablonlar
+	Templates you save in your templates folder show up here.	Şablon klasörünüze kaydettiğiniz şablonlar burada görünür.
+	Save as Word Template…	Word şablonu olarak kaydet…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Şablon klasörünüze bir .dotx şablonu kaydeder. Dosya › Yeni altında Kişisel bölümünde görünür.
+	File locations	Dosya konumları
+	User templates:	Kullanıcı şablonları:
+	Not set	Ayarlanmadı
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Dosya › Yeni, buradaki .dotx ve .dotm şablonlarını Kişisel altında listeler; Word şablonu olarak kaydet buradan başlar.
+	Format Shape Pane	Şekli Biçimlendir bölmesi
+	Format Shape	Şekli Biçimlendir
+	Format Shape…	Şekli Biçimlendir…
+	No fill	Dolgu yok
+	Solid fill	Düz dolgu
+	Gradient fill	Degrade dolgu
+	Preset gradients	Hazır degradeler
+	Radial	Dairesel
+	Rectangular	Dikdörtgen
+	Path	Yol
+	Direction	Yön
+	Angle	Açı
+	Gradient stops	Degrade durakları
+	Add gradient stop	Degrade durağı ekle
+	Remove gradient stop	Degrade durağını kaldır
+	Rotate with shape	Şekille birlikte döndür
+	Gradient	Degrade
+	No Gradient	Degrade yok
+	Light Variations	Açık çeşitler
+	Dark Variations	Koyu çeşitler
+	More Gradients…	Diğer degradeler…
+	Select a shape, text box or drawing canvas to format its fill.	Dolgusunu biçimlendirmek için bir şekil, metin kutusu veya çizim tuvali seçin.
+	Linear Right	Doğrusal sağa
+	Linear Diagonal - Top Left to Bottom Right	Doğrusal çapraz – sol üst köşeden sağ alt köşeye
+	Linear Down	Doğrusal aşağı
+	Linear Diagonal - Top Right to Bottom Left	Doğrusal çapraz – sağ üst köşeden sol alt köşeye
+	Linear Left	Doğrusal sola
+	Linear Diagonal - Bottom Right to Top Left	Doğrusal çapraz – sağ alt köşeden sol üst köşeye
+	Linear Up	Doğrusal yukarı
+	Linear Diagonal - Bottom Left to Top Right	Doğrusal çapraz – sol alt köşeden sağ üst köşeye
+	From Top Left Corner	sol üst köşeden
+	From Top Right Corner	sağ üst köşeden
+	From Bottom Left Corner	sol alt köşeden
+	From Bottom Right Corner	sağ alt köşeden
+	From Center	Merkezden
+	Soft	Yumuşak
+	Lit from Top	Üstten aydınlatılmış
+	Deep	Koyu
+	Lit from Bottom	Alttan aydınlatılmış
+	Center Glow	Merkez parıltısı
+	More tabs	Diğer sekmeler
+# #3013: Insert Table of Figures
+	Include label and number	Etiketi ve numarayı ekle
+	First Record	İlk Kayıt
+	Last Record	Son Kayıt
+	Go to Record	Kayda Git
+	Edit Individual Documents…	Belgeleri Ayrı Ayrı Düzenle…
+	Print Documents…	Belgeleri Yazdır…
+	Print Documents	Belgeleri Yazdır
+	Current record	Geçerli kayıt
+	From:	Başlangıç:
+	To:	Bitiş:
+	Enter a number.	Bir sayı girin.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	çizim tuvalinin grubu çözülemez
+	a drawing canvas can't go inside a text box	çizim tuvali bir metin kutusunun içine konamaz
+	charts and diagrams can't be moved or resized yet	grafikler ve diyagramlar henüz taşınamaz veya yeniden boyutlandırılamaz
+	no equation at the caret	imleçte denklem yok
+	not editing an equation	düzenlenen bir denklem yok
+	only in Outline view	yalnızca Ana Hat görünümünde
+	select a SmartArt graphic first	önce bir SmartArt grafiği seçin
+	select a chart first	önce bir grafik seçin
+	select a connector first	önce bir bağlayıcı seçin
+	select a drawing canvas first	önce bir çizim tuvali seçin
+	select a floating picture or shape first	önce kayan bir resim veya şekil seçin
+	select a group first	önce bir grup seçin
+	select a picture first	önce bir resim seçin
+	select a shape first	önce bir şekil seçin
+	select a text box first	önce bir metin kutusu seçin
+	select a text box linked to another first	önce başka bir kutuya bağlı bir metin kutusu seçin
+	the Clipboard pane is empty	Pano bölmesi boş
+	there is nothing to undo	geri alınacak bir şey yok
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	bu SmartArt başka bir programda oluşturuldu: WordCraft onu gösterir ancak düzenleyemez
+	this chart was made in another program: WordCraft shows it but can't edit it	bu grafik başka bir programda oluşturuldu: WordCraft onu gösterir ancak düzenleyemez
+	this text box is already linked: break the link first	bu metin kutusu zaten bağlı: önce bağlantıyı kesin
+	leave the equation first	önce denklemden çıkın
+	the Spike is empty	biriktirici boş
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	Word mürekkebi içeren bir grubun grubu henüz çözülemez
+	drop caps can't go in a table	tabloya büyük başlangıç harfi konamaz
+	the document is protected	belge korumalı
+	Open a document first	Önce bir belge açın
