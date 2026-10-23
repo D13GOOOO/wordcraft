@@ -41,7 +41,22 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("view.hideWhiteSpace", "Hide White Space", "View › Show", |s, v| toggle(s, v, |x| &mut x.hide_white_space))
             .params(r#"{"value"?: bool}"#)
             .pure(),
-        CommandSpec::new("view.focus", "Focus", "View › Immersive", |s, v| toggle(s, v, |x| &mut x.focus_mode)).pure(),
+        // Focus and Full Screen View (#1678) fill the screen; turning one on turns the other off.
+        // Full Screen View has no key of its own: Customize Keyboard binds one.
+        CommandSpec::new("view.focus", "Focus", "View › Immersive", |s, v| {
+            let r = toggle(s, v, |x| &mut x.focus_mode);
+            s.view.full_screen_view &= !s.view.focus_mode;
+            r
+        })
+        .params(r#"{"value"?: bool}"#)
+        .pure(),
+        CommandSpec::new("view.fullScreenView", "Full Screen View", "View › Immersive", |s, v| {
+            let r = toggle(s, v, |x| &mut x.full_screen_view);
+            s.view.focus_mode &= !s.view.full_screen_view;
+            r
+        })
+        .params(r#"{"value"?: bool}"#)
+        .pure(),
         CommandSpec::new("view.ruler", "Ruler", "View › Show", |s, v| toggle(s, v, |x| &mut x.ruler)).pure(),
         // The drawing grid over the page (screen only; never printed or exported).
         CommandSpec::new("view.gridlines", "Gridlines", "View › Show", |s, v| toggle(s, v, |x| &mut x.gridlines))
@@ -76,12 +91,12 @@ pub fn specs() -> Vec<CommandSpec> {
         // light and dark, as the manual switch did.
         CommandSpec::new("view.interfaceTheme", "Interface Theme", "View › Dark Mode", |s, v| match v.get("value") {
             None => {
-                s.ui_requests.push(json!({"toggle": "interfaceTheme"}));
+                s.push_ui_request(json!({"toggle": "interfaceTheme"}));
                 Ok(json!({"value": "toggle"}))
             }
             Some(Value::String(name)) => match name.as_str() {
                 "light" | "dark" | "system" => {
-                    s.ui_requests.push(json!({"interfaceTheme": name}));
+                    s.push_ui_request(json!({"interfaceTheme": name}));
                     Ok(json!({"value": name}))
                 }
                 _ => Err(CmdError::Params("interface theme: light|dark|system".into())),
@@ -100,13 +115,18 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("view.altTextPane", "Alt Text Pane", "Review › Accessibility", |s, v| toggle(s, v, |x| &mut x.alt_text_pane))
             .params(r#"{"value"?: bool}"#)
             .pure(),
+        CommandSpec::new("view.formatShapePane", "Format Shape Pane", "Shape Format › Shape Styles", |s, v| {
+            toggle(s, v, |x| &mut x.format_shape_pane)
+        })
+        .params(r#"{"value"?: bool}"#)
+        .pure(),
         CommandSpec::new("view.newWindow", "New Window", "View › Window", |s, _| {
-            s.ui_requests.push(json!({"open": "newWindow"}));
+            s.push_ui_request(json!({"open": "newWindow"}));
             sel_result(s)
         })
         .pure(),
         CommandSpec::new("view.split", "Split", "View › Window", |s, _| {
-            s.ui_requests.push(json!({"toggle": "split"}));
+            s.push_ui_request(json!({"toggle": "split"}));
             sel_result(s)
         })
         .key("Mod+Alt+S")
@@ -121,8 +141,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .pure(),
         CommandSpec::new("view.state", "View State", "View", |s, _| serde_json::to_value(&s.view).map_err(|e| CmdError::Failed(e.to_string())))
             .pure(),
-        // Word › File › Options › Advanced › Numeral: how digits look on screen (display
-        // only; the document text keeps the typed codepoints).
+        // Word › File › Options › Advanced › Numeral: how digits look on screen, in print, PDFs
+        // and page images (display only; the document text keeps the typed codepoints).
         CommandSpec::new("view.numeral", "Numerals", "File › Options › Advanced", |s, v| match v.get("value") {
             None => Ok(json!({"value": s.view.numeral})),
             Some(Value::String(name)) => {
@@ -236,7 +256,7 @@ fn zoom(s: &mut Session, v: &Value) -> CmdResult {
             s.view.multi_page = false;
         }
         None => {
-            s.ui_requests.push(json!({"open": "zoom"}));
+            s.push_ui_request(json!({"open": "zoom"}));
         }
     }
     Ok(json!({"zoom": s.view.zoom, "fit": s.view.fit}))

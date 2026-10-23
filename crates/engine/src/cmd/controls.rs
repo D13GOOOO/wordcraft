@@ -112,9 +112,11 @@ fn symbol_param(v: &Value, k: &str) -> Option<char> {
 /// A date `YYYY-MM-DD` (a full ISO date-time is fine too): (year, month, day), checked.
 pub fn parse_date(t: &str) -> Option<(i64, u32, u32)> {
     let t = t.trim();
-    let y: i64 = t.get(0..4)?.parse().ok()?;
-    let m: u32 = t.get(5..7)?.parse().ok()?;
-    let d: u32 = t.get(8..10)?.parse().ok()?;
+    // Digits only: `str::parse` would also accept a leading '+'.
+    let field = |r: std::ops::Range<usize>| t.get(r).filter(|s| s.bytes().all(|b| b.is_ascii_digit()));
+    let y: i64 = field(0..4)?.parse().ok()?;
+    let m: u32 = field(5..7)?.parse().ok()?;
+    let d: u32 = field(8..10)?.parse().ok()?;
     if t.get(4..5) != Some("-") || t.get(7..8) != Some("-") || !(1..=9999).contains(&y) || !(1..=12).contains(&m) || d == 0 || d > days_in_month(y, m)
     {
         return None;
@@ -123,23 +125,33 @@ pub fn parse_date(t: &str) -> Option<(i64, u32, u32)> {
 }
 
 pub fn days_in_month(y: i64, m: u32) -> u32 {
-    match m {
-        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
+    // The length of a month is the day before the first of the next month. Month lengths repeat
+    // every 400 years, so the year within its Gregorian cycle (`rem_euclid(400)`) is enough and
+    // always fits chrono, for any `y`. An invalid month keeps the old 31-day default.
+    let y = y.rem_euclid(400);
+    let first = |y: i64, m: u32| i32::try_from(y).ok().and_then(|y| chrono::NaiveDate::from_ymd_opt(y, m, 1));
+    match (first(y, m), if m == 12 { first(y + 1, 1) } else { first(y, m + 1) }) {
+        (Some(a), Some(b)) => u32::try_from((b - a).num_days()).unwrap_or(31),
         _ => 31,
     }
 }
 
-/// Days since 1970-01-01 for a date (inverse of [`super::civil_from_days`]).
+/// Days since 1970-01-01 for a date (inverse of [`super::civil_from_days`]), exact for any year.
+///
+/// The Gregorian calendar repeats every 400 years (146_097 days): chrono converts the year
+/// within its cycle and whole cycles are added back as days (an i128 so the extremes can't
+/// overflow). 1970-01-01 is `num_days_from_ce` 719_163; the result matches the proleptic
+/// Gregorian count the old hand-rolled code gave.
 pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = i64::from((m + 9) % 12);
-    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    let (cycles, year) = (i128::from(y.div_euclid(400)), y.rem_euclid(400));
+    i32::try_from(year)
+        .ok()
+        .and_then(|year| chrono::NaiveDate::from_ymd_opt(year, m, d))
+        .and_then(|date| {
+            let days = i128::from(chrono::Datelike::num_days_from_ce(&date)) - 719_163 + cycles * 146_097;
+            i64::try_from(days).ok()
+        })
+        .unwrap_or(0)
 }
 
 /// The built-in name of the placeholder style. Its id is localized: German Word writes
@@ -749,6 +761,31 @@ mod tests {
         assert_eq!(format_date_value("M/d/yyyy", 1970, 1, 1), "1/1/1970");
         assert_eq!(days_from_civil(1970, 1, 1), 0);
         assert_eq!(super::super::civil_from_days(days_from_civil(2000, 3, 1)), (2000, 3, 1));
+    }
+
+    #[test]
+    fn parse_date_rejects_signs_and_non_digits() {
+        for bad in ["2024-+1-+5", "+123-01-01", "2024-01-+5", "2024-+1-05", "-024-01-01"] {
+            assert_eq!(parse_date(bad), None, "{bad}");
+        }
+        assert_eq!(parse_date("2024-01-05"), Some((2024, 1, 5)));
+        assert_eq!(parse_date("2024-01-05T10:00:00"), Some((2024, 1, 5)));
+    }
+
+    #[test]
+    fn days_from_civil_and_days_in_month_exact_beyond_chronos_range() {
+        // Past `NaiveDate`'s ±262143 the 400-year cycles carry the result; values from the
+        // pre-chrono formula, both directions, both sides of the epoch.
+        for (y, m, d, days) in
+            [(262_144i64, 1u32, 1u32, 95_026_602i64), (273_022, 10, 18, 99_000_000), (-262_145, 3, 1, -96_465_964), (-271_821, 4, 21, -99_999_999)]
+        {
+            assert_eq!(days_from_civil(y, m, d), days, "{y}-{m}-{d}");
+            assert_eq!(super::super::civil_from_days(days), (y, m, d), "{days}");
+        }
+        assert_eq!(days_in_month(272_952, 2), 29, "272952 is a leap year");
+        assert_eq!(days_in_month(-269_153, 2), 28);
+        // The extremes must not overflow or panic (i128 intermediates / `rem_euclid`).
+        let _ = (days_from_civil(i64::MAX, 12, 31), days_from_civil(i64::MIN, 1, 1), days_in_month(i64::MAX, 2), days_in_month(i64::MIN, 2));
     }
 }
 
