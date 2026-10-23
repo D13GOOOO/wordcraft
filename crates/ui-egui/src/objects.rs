@@ -292,7 +292,12 @@ pub fn pointer(app: &mut WordApp, ui: &Ui, resp: &egui::Response, pages: &[Rect]
                 if d.drag.grab == Grab::Move && d.drag.moved && !d.object.floating() {
                     // An inline one lands in the text: the insertion cursor follows the pointer.
                     d.drop_at = drop_point(app, layout, pages, scale, at, &d);
-                } else if d.drag.grab == Grab::Move && d.drag.moved && d.object.member.is_none() && app.ui.alignment_guides && !ui.input(|i| i.modifiers.alt) {
+                } else if d.drag.grab == Grab::Move
+                    && d.drag.moved
+                    && d.object.member.is_none()
+                    && app.ui.alignment_guides
+                    && !ui.input(|i| i.modifiers.alt)
+                {
                     snap_move(layout, &mut d, scale);
                 }
             }
@@ -439,6 +444,7 @@ fn press_member(app: &mut WordApp, layout: &DocLayout, pages: &[Rect], scale: f3
         guides: Vec::new(),
         preview: None,
         copy: false,
+        drop_at: None,
     });
     true
 }

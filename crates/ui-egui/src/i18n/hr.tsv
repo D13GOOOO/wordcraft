@@ -2811,6 +2811,7 @@ preview	Title	Naslov
 	the Spike is empty	skupljač je prazan
 # More reasons a ribbon control is off (#2678)
 	a group holding Word ink can't be ungrouped yet	skupina s Wordovom tintom još se ne može razgrupirati
+	a shape inside a drawing canvas is placed by the canvas	oblik unutar platna za crtanje postavlja platno
 	drop caps can't go in a table	početno slovo ne može ići u tablicu
 	the document is protected	dokument je zaštićen
 	Open a document first	Prvo otvorite dokument

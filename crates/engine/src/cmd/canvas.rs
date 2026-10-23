@@ -521,10 +521,10 @@ mod tests {
         s.doc.body.first().and_then(|b| b.as_para()).and_then(|p| p.objects.first()).cloned().unwrap()
     }
 
-    fn member_fill(o: &InlineObject, i: usize) -> Option<wordcraft_doc::props::Rgb> {
+    fn member_fill(o: &InlineObject, i: usize) -> Option<wordcraft_doc::fill::Fill> {
         let InlineObject::Group { children, .. } = o else { panic!("{o:?}") };
         match &children[i].obj {
-            InlineObject::Shape { fill, .. } => *fill,
+            InlineObject::Shape { fill, .. } => fill.clone(),
             o => panic!("{o:?}"),
         }
     }
@@ -551,9 +551,9 @@ mod tests {
         let other = member_fill(&canvas(&s), 0);
         s.run("shape.fill", &json!({"color": "FF0000"})).unwrap();
         let c = canvas(&s);
-        assert_eq!(member_fill(&c, 1), wordcraft_doc::props::Rgb::parse("FF0000"));
+        assert_eq!(member_fill(&c, 1), wordcraft_doc::props::Rgb::parse("FF0000").map(wordcraft_doc::fill::Fill::solid));
         assert_eq!(member_fill(&c, 0), other);
-        assert_eq!(c.canvas_style().and_then(|st| st.fill), None);
+        assert_eq!(c.canvas_style().and_then(|st| st.fill.clone()), None);
         assert!(selected_member(&s).is_some(), "still picked after a change");
 
         // Dragging its frame: the page point becomes its place in the canvas.

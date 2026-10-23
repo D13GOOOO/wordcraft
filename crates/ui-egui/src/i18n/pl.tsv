@@ -2832,6 +2832,7 @@ preview	Title	Tytuł
 	the Spike is empty	zbieracz jest pusty
 # More reasons a ribbon control is off (#2678)
 	a group holding Word ink can't be ungrouped yet	grupy z atramentem programu Word nie można jeszcze rozgrupować
+	a shape inside a drawing canvas is placed by the canvas	kształt wewnątrz kanwy rysunku jest umieszczany przez kanwę
 	drop caps can't go in a table	inicjału nie można umieścić w tabeli
 	the document is protected	dokument jest chroniony
 	Open a document first	Najpierw otwórz dokument

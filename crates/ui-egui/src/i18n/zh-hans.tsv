@@ -2422,6 +2422,7 @@
 	the Spike is empty	图文场为空
 # More reasons a ribbon control is off (#2678)
 	a group holding Word ink can't be ungrouped yet	包含 Word 墨迹的组暂时无法取消组合
+	a shape inside a drawing canvas is placed by the canvas	绘图画布中的形状由画布定位
 	drop caps can't go in a table	首字下沉不能放在表格中
 	the document is protected	文档受保护
 	the paragraph is empty	段落为空
