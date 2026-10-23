@@ -447,6 +447,15 @@ pub enum Dialog {
         edit: bool,
         message: String,
     },
+    /// Mailings › Finish & Merge › Edit Individual Documents… or Print Documents… (`print`):
+    /// which records to merge (0 all, 1 the previewed one, 2 the From and To range).
+    MergeRecords {
+        print: bool,
+        choice: u8,
+        from: String,
+        to: String,
+        message: String,
+    },
     /// Mailings › Find Recipient.
     FindRecipient {
         text: String,
@@ -988,6 +997,8 @@ impl Dialog {
             Dialog::SelectTable { .. } => "selectTable",
             Dialog::InsertMergeField { .. } => "insertMergeField",
             Dialog::FindRecipient { .. } => "findRecipient",
+            Dialog::MergeRecords { print: false, .. } => "mergeRecords",
+            Dialog::MergeRecords { .. } => "printRecords",
             Dialog::FieldCode { edit: false, .. } => "fieldCode",
             Dialog::FieldCode { .. } => "editFieldCode",
             Dialog::MergeRule { rule, .. } if rule == "SKIPIF" => "ruleSkipIf",
@@ -1249,6 +1260,13 @@ impl Dialog {
                 Dialog::InsertMergeField { field: fields.first().cloned().unwrap_or_default(), fields }
             }
             "findRecipient" => Dialog::FindRecipient { text: String::new(), message: String::new() },
+            "mergeRecords" | "printRecords" => Dialog::MergeRecords {
+                print: name == "printRecords",
+                choice: 0,
+                from: "1".into(),
+                to: app.session.merge.rows.len().to_string(),
+                message: String::new(),
+            },
             "fieldCode" => Dialog::FieldCode { code: String::new(), edit: false, message: String::new() },
             "editFieldCode" => {
                 let field = wordcraft_engine::cmd::fields::selected(&app.session).into_iter().next()?;
@@ -1446,6 +1464,7 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context) {
         Dialog::SelectTable { .. } => "Select Table",
         Dialog::InsertMergeField { .. } => "Insert Merge Field",
         Dialog::FindRecipient { .. } => "Find Recipient",
+        Dialog::MergeRecords { .. } => "Finish & Merge",
         Dialog::FieldCode { edit: false, .. } => "Field",
         Dialog::FieldCode { .. } => "Edit Field Code",
         Dialog::MergeRule { rule, .. } if rule == "SKIPIF" => "Skip Record If",
@@ -1657,6 +1676,12 @@ pub(crate) fn buttons(ui: &mut Ui, ok: &str) -> (bool, bool) {
     r
 }
 
+/// The Font dialog preview's size: the Size box's points between 6 and 72, else 12. `"NaN"` and
+/// `"inf"` parse as floats too, and a NaN font size trips epaint's glyph assertion (#3663).
+fn preview_size(size: &str) -> f32 {
+    size.trim().parse::<f32>().ok().filter(|pt| pt.is_finite()).unwrap_or(12.0).clamp(6.0, 72.0)
+}
+
 /// The character properties the Font dialog's fields stand for.
 fn font_props(d: &Dialog) -> serde_json::Map<String, Value> {
     let Dialog::Font {
@@ -1784,7 +1809,7 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ..
         } => {
             // Build the sample text format for the preview pane below.
-            let preview_size = size.trim().parse::<f32>().unwrap_or(12.0).clamp(6.0, 72.0);
+            let preview_size = preview_size(size);
             let preview_color = wordcraft_doc::Rgb::parse(color).map(crate::theme::c32).unwrap_or_else(|| ui.visuals().text_color());
             let mut fmt = egui::TextFormat {
                 font_id: egui::FontId::new(preview_size, egui::FontFamily::Proportional),
@@ -2597,7 +2622,11 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 ui.ctx().input_mut(|i| i.events.retain(|e| !swallow_shortcut_text(swallow, e)));
             }
             let r = ui.add(egui::TextEdit::singleline(query).hint_text(tl!("Type a command, e.g. \"insert table\"")).desired_width(380.0));
-            r.request_focus();
+            // Only when it lacks focus: `request_focus` always interrupts IME, and on X11 that
+            // recreates the XIM context, so asking every frame left fcitx taking no keys (#2986).
+            if !r.has_focus() {
+                r.request_focus();
+            }
             let reg = app.session.registry.clone();
             // An empty box suggests a few common commands, as Word's Search does.
             let mut hits: Vec<&wordcraft_engine::CommandSpec> = if query.trim().is_empty() {
@@ -2962,6 +2991,46 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, cancel) = buttons(ui, tl!("Find"));
             if ok && !text.trim().is_empty() {
                 match app.run("mailings.findRecipient", json!({"text": text.trim()})) {
+                    Ok(_) => return true,
+                    Err(e) => *message = e,
+                }
+            }
+            cancel
+        }
+        Dialog::MergeRecords { print, choice, from, to, message } => {
+            ui.radio_value(choice, 0, tl!("All"));
+            ui.radio_value(choice, 1, tl!("Current record"));
+            ui.horizontal(|ui| {
+                ui.radio_value(choice, 2, tl!("From:"));
+                // Typing a number picks the range, as in Word.
+                if ui.add(egui::TextEdit::singleline(from).desired_width(60.0)).changed() {
+                    *choice = 2;
+                }
+                ui.label(tl!("To:"));
+                if ui.add(egui::TextEdit::singleline(to).desired_width(60.0)).changed() {
+                    *choice = 2;
+                }
+            });
+            if !message.is_empty() {
+                ui.label(egui::RichText::new(message.as_str()).small().weak());
+            }
+            let (ok, cancel) = buttons(ui, tl!(if *print { "Print" } else { "OK" }));
+            if ok {
+                let params = match *choice {
+                    0 => Some(json!({"records": "all"})),
+                    1 => Some(json!({"records": "current"})),
+                    _ => match (from.trim().parse::<u64>(), to.trim().parse::<u64>()) {
+                        (Ok(f), Ok(t)) => Some(json!({"from": f, "to": t})),
+                        _ => None,
+                    },
+                };
+                let id = if *print { "mailings.printDocuments" } else { "mailings.finish" };
+                // An empty range is reported here, before Save Changes asks about the document.
+                let run = params.ok_or_else(|| tl!("Enter a number.").to_string()).and_then(|p| {
+                    wordcraft_engine::cmd::mailings::merge_range(&app.session, &p).map_err(|e| e.to_string())?;
+                    app.run(id, p)
+                });
+                match run {
                     Ok(_) => return true,
                     Err(e) => *message = e,
                 }
@@ -3822,7 +3891,10 @@ fn goto_body(app: &mut WordApp, ui: &mut Ui, what: &mut GoToWhat, target: &mut S
         ui.vertical(|ui| match what {
             GoToWhat::Page => {
                 ui.label(tl!("Enter page number:"));
-                ui.add(egui::TextEdit::singleline(target).desired_width(220.0)).request_focus();
+                let r = ui.add(egui::TextEdit::singleline(target).desired_width(220.0));
+                if !r.has_focus() {
+                    r.request_focus();
+                }
                 ui.label(egui::RichText::new(tl!("Type +2 or -1 to move from the page you are on.")).weak());
             }
             GoToWhat::Bookmark => {
@@ -3899,7 +3971,10 @@ fn icons_body(app: &mut WordApp, ui: &mut Ui, query: &mut String, category: &mut
     let t = Tokens::get(ui.ctx());
     ui.set_width(560.0);
     // Typing goes to the search box (never to the document behind the dialog).
-    ui.add(egui::TextEdit::singleline(query).hint_text(tl!("Search icons")).desired_width(560.0)).request_focus();
+    let r = ui.add(egui::TextEdit::singleline(query).hint_text(tl!("Search icons")).desired_width(560.0));
+    if !r.has_focus() {
+        r.request_focus();
+    }
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
@@ -4231,6 +4306,77 @@ mod tests {
         crate::i18n::set_current(crate::i18n::Lang::EN);
     }
 
+    /// #2986: a box that keeps the keyboard asks for focus only while it lacks it. `request_focus`
+    /// always interrupts IME; on X11 that recreates the XIM context, and Search asking every frame
+    /// left fcitx taking no keys at all. Once the box has focus, no frame interrupts, and typing lands;
+    /// after Tab takes the keyboard away, the box takes it back with one reset, not one per frame.
+    #[test]
+    fn boxes_that_keep_focus_do_not_interrupt_ime_every_frame() {
+        fn typed(d: Option<&Dialog>) -> Option<&str> {
+            match d? {
+                Dialog::Commands { query, .. } | Dialog::Icons { query, .. } => Some(query.as_str()),
+                Dialog::Find { goto_target, .. } => Some(goto_target.as_str()),
+                Dialog::Refs(r) => match r.as_ref() {
+                    crate::dialogs_refs::RefsDialog::NewLabel(f) => Some(f.new_label.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        for name in ["commands", "icons", "goto", "newLabel"] {
+            let mut app = app_with("Unchanged document");
+            let dialog = match name {
+                "newLabel" => Dialog::Refs(Box::new(crate::dialogs_refs::RefsDialog::NewLabel(crate::dialogs_refs::CaptionForm::read(&app)))),
+                _ => Dialog::open(name, &mut app).unwrap(),
+            };
+            app.dialog = Some(dialog);
+            let mut h = app_harness(app);
+            // The box takes the keyboard from the page in the first frames.
+            h.run_steps(4);
+            let interrupted =
+                |h: &egui_kittest::Harness<'_, WordApp>| h.output().platform_output.ime.as_ref().map(|i| i.should_interrupt_composition);
+            for frame in 0..6 {
+                h.step();
+                assert_eq!(interrupted(&h), Some(false), "{name}: frame {frame} resets the input method");
+            }
+            for (k, t) in [(egui::Key::A, "a"), (egui::Key::B, "b")] {
+                h.event(key(k));
+                h.event(egui::Event::Text(t.into()));
+                h.step();
+                assert_eq!(interrupted(&h), Some(false), "{name}: typing {t} resets the input method");
+            }
+            assert_eq!(typed(h.state().dialog.as_ref()), Some("ab"), "{name}: the keys reach the box");
+
+            // Tab moves the keyboard to the dialog's next control and the box takes it back. As
+            // egui-winit does, count a reset when IME comes back on or is interrupted while on (each
+            // recreates the XIM context): one or two for the round trip, then none, and the next
+            // key reaches the box.
+            let reset = |h: &egui_kittest::Harness<'_, WordApp>, on: &mut bool| {
+                let ime = h.output().platform_output.ime.as_ref();
+                let reset = ime.is_some_and(|i| !*on || i.should_interrupt_composition);
+                *on = ime.is_some();
+                reset
+            };
+            let mut on = true;
+            h.event(key(egui::Key::Tab));
+            let mut back = 0;
+            for _ in 0..4 {
+                h.step();
+                back += usize::from(reset(&h, &mut on));
+            }
+            assert!((1..=2).contains(&back), "{name}: Tab and back reset the input method {back} times");
+            for frame in 0..4 {
+                h.step();
+                assert!(!reset(&h, &mut on), "{name}: frame {frame} after Tab resets the input method");
+            }
+            h.event(key(egui::Key::C));
+            h.event(egui::Event::Text("c".into()));
+            h.step();
+            assert_eq!(typed(h.state().dialog.as_ref()), Some("abc"), "{name}: the box has the keyboard back after Tab");
+        }
+    }
+
     /// Open the Paragraph dialog and press OK without changing anything.
     fn ok_unchanged(app: &mut WordApp) {
         ok_edit(app, |_| {});
@@ -4297,6 +4443,52 @@ mod tests {
 
     /// #1346: a check box the selected paragraphs differ in shows as neither on nor off; a click
     /// and OK turn it on in all of them, and the other fields they differ in stay as they were.
+    /// #3028: the records dialog refuses a range with no records itself, before Save Changes asks
+    /// about the unsaved document; a good range goes on to that question.
+    #[test]
+    fn merge_records_dialog_checks_the_range_before_asking_to_save() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = app_with("Dear ");
+        let _ = app.run("mailings.recipients", json!({"csv": "Name\nAda\nAlan\nGrace"}));
+        let _ = app.run("text.insert", json!({"text": "unsaved"}));
+        assert!(app.session.dirty);
+        app.dialog = Dialog::open("mergeRecords", &mut app);
+        if let Some(Dialog::MergeRecords { choice, from, to, .. }) = &mut app.dialog {
+            *choice = 2;
+            *from = "3".into();
+            *to = "2".into();
+        }
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "OK").click();
+        for _ in 0..2 {
+            h.step();
+        }
+        let Some(Dialog::MergeRecords { message, .. }) = &h.state().dialog else { panic!("the dialog stays open") };
+        assert!(message.contains("no records from 3 to 2"), "{message}");
+        if let Some(Dialog::MergeRecords { to, .. }) = &mut h.state_mut().dialog {
+            *to = "3".into();
+        }
+        for _ in 0..2 {
+            h.step();
+        }
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "OK").click();
+        for _ in 0..2 {
+            h.step();
+        }
+        assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("saveChanges"));
+        assert!(h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body).contains("unsaved"), "nothing merged yet");
+    }
+
     #[test]
     fn paragraph_dialog_sets_a_mixed_check_box_for_all() {
         use egui_kittest::kittest::{NodeT, Queryable};
@@ -4502,6 +4694,32 @@ mod tests {
         for t in &tops {
             assert!((t - tops[0]).abs() <= 0.5, "the tab strip stays put: {tops:?}");
         }
+    }
+
+    /// #3663: "NaN" in the Font dialog's Size box parses as a float; the preview draws at 12 pt
+    /// instead of a NaN size, which tripped epaint's glyph assertion and closed the app.
+    #[test]
+    fn font_dialog_preview_ignores_a_size_that_is_not_a_number() {
+        for (typed, pt) in [("NaN", 12.0), ("nan", 12.0), ("inf", 12.0), ("-infinity", 12.0), ("10.5", 10.5), ("200", 72.0), ("", 12.0)] {
+            assert_eq!(preview_size(typed), pt, "{typed:?}");
+        }
+        let mut app = app_with("Example");
+        let _ = app.run("select.all", json!({}));
+        app.dialog = Dialog::open("font", &mut app);
+        let Some(Dialog::Font { size, .. }) = &mut app.dialog else { panic!("no font dialog") };
+        *size = "NaN".into();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        assert!(matches!(&h.state().dialog, Some(Dialog::Font { size, .. }) if size == "NaN"), "the dialog stays open");
     }
 
     #[test]
@@ -5025,5 +5243,56 @@ mod tests {
         let pages = &s.layout().pages;
         assert!(pages[0].footer_story.is_none(), "the title page shows no page number");
         assert!(pages[1].footer_story.is_some(), "the next page keeps its number");
+    }
+
+    /// #2701: in the SmartArt Text Pane, Tab demotes and Shift+Tab promotes the focused item, as
+    /// Word's pane does; the row keeps its focus, so the next Tab acts on the same item. An item
+    /// that can't go down a level (the one before it isn't deeper) is left as it is.
+    #[test]
+    fn text_pane_tab_demotes_and_shift_tab_promotes_the_focused_item() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        app.run("insert.smartArt", json!({"layout": "hierarchy"})).unwrap();
+        app.run("smartArt.textPane", json!({"value": true})).unwrap();
+        let levels = |app: &WordApp| {
+            wordcraft_engine::cmd::smart_art::selected_smart_art(&app.session).map(|g| g.items.iter().map(|i| i.level).collect::<Vec<u8>>())
+        };
+        assert_eq!(levels(&app), Some([0, 1, 2, 1, 2, 2].to_vec()), "Lead, Design, Sketches, Build, Code, Tests");
+        let mut h = app_harness(app);
+        h.run_steps(2);
+        // Focus a pane row: the text box with this value (the graphic drawn on the page shows the
+        // same words as shape names, so match by role).
+        let focus_row = |h: &mut egui_kittest::Harness<'static, WordApp>, text: &str| {
+            let node = h
+                .query_all(egui_kittest::kittest::By::new().role(egui::accesskit::Role::TextInput).value(text))
+                .next()
+                .unwrap_or_else(|| panic!("no text box for {text}"));
+            node.focus();
+            h.run_steps(2);
+        };
+        let tab = |h: &mut egui_kittest::Harness<'static, WordApp>, shift: bool| {
+            if shift {
+                h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+            } else {
+                h.key_press(egui::Key::Tab);
+            }
+            h.run_steps(2);
+        };
+        // Focus "Design" (the second top-level item, at level 1): Tab can't demote it, because
+        // the item before it ("Lead") is shallower — Word leaves the level alone.
+        focus_row(&mut h, "Design");
+        assert_eq!(h.state().smart_art_item, Some(1), "the pane remembers the focused row");
+        tab(&mut h, false);
+        assert_eq!(levels(h.state()), Some([0, 1, 2, 1, 2, 2].to_vec()), "Tab on an item that can't go down changes nothing");
+        assert_eq!(h.state().smart_art_item, Some(1), "the row keeps focus after a refused demote");
+        // Focus "Build" (level 1 after the deeper "Sketches"): Tab demotes it and its sub-items,
+        // and the next Tab (the row stayed focused) demotes them again; Shift+Tab promotes back.
+        focus_row(&mut h, "Build");
+        tab(&mut h, false);
+        assert_eq!(levels(h.state()), Some([0, 1, 2, 2, 3, 3].to_vec()), "Tab demotes the focused item");
+        tab(&mut h, false);
+        assert_eq!(levels(h.state()), Some([0, 1, 2, 3, 4, 4].to_vec()), "the same row takes the next Tab");
+        tab(&mut h, true);
+        assert_eq!(levels(h.state()), Some([0, 1, 2, 2, 3, 3].to_vec()), "Shift+Tab promotes them back");
     }
 }

@@ -113,22 +113,34 @@ fn ui_shortcut(key: Key, m: Modifiers) -> Option<(&'static str, Value)> {
     match key {
         Key::Q if alt_only && !cfg!(target_os = "macos") => Some(("ui.dialog", json!({"name": "commands"}))),
         Key::R if mac_cmd_alt => Some(("ui.collapseRibbon", json!({}))),
+        // Ctrl+F1 collapses or expands the ribbon, as in Word for Windows (#1678). Not on macOS,
+        // where Ctrl+F1 is the system's keyboard-access switch.
+        Key::F1 if m.ctrl && !m.alt && !m.shift && !m.mac_cmd && !cfg!(target_os = "macos") => Some(("ui.collapseRibbon", json!({}))),
         _ => None,
     }
 }
 
 /// Find and run the command bound to this key. Returns true if handled.
 fn dispatch(app: &mut WordApp, key: Key, m: Modifiers) -> bool {
-    if let Some((id, params)) = ui_shortcut(key, m) {
+    let reg = app.session.registry.clone();
+    let name = key_name(key);
+    let bound = name.and_then(|n| app.session.keymap.resolve(&reg, &combo(m, n, true)));
+    // Ctrl+F1 collapses the ribbon only when the user hasn't given it to a command (#1678); the
+    // other interface shortcuts (Alt+Q, ⌘⌥R) keep their place ahead of the keymap.
+    if let Some((id, params)) = ui_shortcut(key, m).filter(|_| key != Key::F1 || bound.is_none()) {
         let _ = app.run(id, params);
         return true;
     }
-    let Some(name) = key_name(key) else { return false };
-    let reg = app.session.registry.clone();
-    if let Some(spec) = app.session.keymap.resolve(&reg, &combo(m, name, true)) {
+    if let Some(spec) = bound {
+        // Option+Shift+- types an em dash on macOS; Word's Alt+Shift+- (Collapse) only works in
+        // Outline view, so elsewhere the key stays typing (#1933).
+        if m.alt && !crate::widgets::enabled(app, spec.id) {
+            return false;
+        }
         let _ = app.run(spec.id, json!({}));
         return true;
     }
+    let Some(name) = name else { return false };
     // Shift extends caret movement; Shift+Backspace still erases (#707).
     if m.shift
         && let Some(spec) = app.session.keymap.resolve(&reg, &combo(m, name, false))
@@ -200,6 +212,20 @@ fn is_paste_release(key: Key, modifiers: egui::Modifiers) -> bool {
     (modifiers.command || key == Key::Paste) && !modifiers.alt && !modifiers.shift
 }
 
+/// The modifiers a V release stands for: its own, or, when Mod went up before V and no V press
+/// came (egui-winit keeps Mod+V presses), those held with Mod.
+fn paste_release_modifiers(released: Modifiers, press_seen: bool, held: Option<Modifiers>) -> Modifiers {
+    if released.command || press_seen { released } else { held.unwrap_or(released) }
+}
+
+/// Whether `key` is a Shift, Ctrl, Alt or Super key, whose own presses don't end a Mod+V.
+fn is_modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::ShiftLeft | Key::ShiftRight | Key::ControlLeft | Key::ControlRight | Key::AltLeft | Key::AltRight | Key::SuperLeft | Key::SuperRight
+    )
+}
+
 /// Whether releasing `key` with `modifiers` is Mod+Alt+V (Paste Special).
 fn is_paste_special_release(key: Key, modifiers: egui::Modifiers) -> bool {
     key == Key::V && modifiers.command && modifiers.alt && !modifiers.shift
@@ -217,8 +243,11 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
         // Edit Document button or Escape returns to Print Layout before editing.
         for e in &events {
             match e {
-                egui::Event::Key { key: Key::Escape, pressed: true, .. } => {
-                    let _ = app.run("view.printLayout", json!({}));
+                // Not while a dialog or menu that takes Escape is open.
+                egui::Event::Key { key: Key::Escape, pressed: true, .. } if app.escape_free => {
+                    // Focus or Full Screen first (#1678), then Read Mode.
+                    let id = crate::chrome::Screen::of(&app.session.view).exit_command().unwrap_or("view.printLayout");
+                    let _ = app.run(id, json!({"value": false}));
                     break;
                 }
                 egui::Event::Key { key: Key::PageDown | Key::ArrowRight, pressed: true, modifiers, .. } if modifiers.is_none() => {
@@ -241,7 +270,26 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
     let alt_codes = alt_codes_supported(ctx);
     // `DeleteSurrounding` and the text replacing what it erased arrive in the same frame.
     app.canvas.ime_join_text = None;
+    // Mod held since an earlier frame (its ModifiersChanged went by then).
+    let held = ctx.input(|i| i.modifiers);
+    if held.command {
+        app.canvas.paste_mods = Some(held);
+    }
     for e in events {
+        // Which presses reached the canvas, and the modifiers held with Mod, in event order: Mod
+        // can go down and up within one frame, leaving the frame's modifiers without it.
+        match &e {
+            egui::Event::ModifiersChanged(m) if m.command => app.canvas.paste_mods = Some(*m),
+            egui::Event::Key { key: Key::V | Key::Paste, pressed: true, .. } => app.canvas.v_pressed = true,
+            egui::Event::Key { key, pressed: true, modifiers, .. } if !is_modifier_key(*key) => {
+                app.canvas.paste_mods = modifiers.command.then_some(*modifiers);
+            }
+            egui::Event::WindowFocused(_) => {
+                app.canvas.v_pressed = false;
+                app.canvas.paste_mods = None;
+            }
+            _ => {}
+        }
         // An Alt shortcut (Alt+Shift+D, Alt+F7…) may also send its key's text; it isn't typed.
         match &e {
             egui::Event::Key { pressed: true, .. } => {
@@ -273,8 +321,11 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
         }
         // Desktop: Mod+V with no text on the clipboard sends no paste event, only the key's
         // release; paste the clipboard's picture then (#45). A paste event before the release
-        // means it was text. (The web reads pasted pictures itself.)
+        // means it was text. (The web reads pasted pictures itself.) Mod released before V still
+        // pastes: a release with no V press seen was Mod+V.
         if let egui::Event::Key { key: key @ (Key::V | Key::Paste), pressed: false, modifiers, .. } = &e {
+            let press_seen = std::mem::take(&mut app.canvas.v_pressed);
+            let modifiers = &paste_release_modifiers(*modifiers, press_seen, app.canvas.paste_mods.take());
             let paste_keys = is_paste_release(*key, *modifiers);
             let pasted = std::mem::take(&mut app.canvas.pasted);
             if !pasted && paste_keys && app.session.math.is_none() && app.services.clipboard_picture.is_some() {
@@ -292,13 +343,15 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
             match &e {
                 egui::Event::Text(t) => {
                     let m = ctx.input(|i| i.modifiers);
-                    if !(m.command || t.is_empty() || (m.ctrl && !cfg!(target_os = "macos"))) && t.chars().all(|c| !c.is_control()) {
+                    let is_cmd = if cfg!(target_os = "macos") { m.command } else { (m.command || m.ctrl) && !m.alt };
+                    if !is_cmd && !t.is_empty() && t.chars().all(|c| !c.is_control()) {
                         let _ = app.run("equation.type", json!({"text": t}));
                     }
                     continue;
                 }
                 egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
                     app.canvas.ime_preedit.clear();
+                    app.canvas.ime_preedit_range = None;
                     if !text.is_empty() {
                         let _ = app.run("equation.type", json!({"text": text}));
                     }
@@ -315,7 +368,8 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
         match e {
             egui::Event::Text(t) => {
                 let m = ctx.input(|i| i.modifiers);
-                if m.command || (m.ctrl && !cfg!(target_os = "macos")) {
+                let is_cmd = if cfg!(target_os = "macos") { m.command } else { (m.command || m.ctrl) && !m.alt };
+                if is_cmd {
                     continue;
                 }
                 if t.chars().all(|c| !c.is_control()) && !t.is_empty() {
@@ -328,9 +382,13 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
                 }
             }
             egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { before_chars, after_chars }) => delete_surrounding(app, before_chars, after_chars),
-            egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => app.canvas.ime_preedit = text,
+            egui::Event::Ime(egui::ImeEvent::Preedit { text, active_range_chars }) => {
+                app.canvas.ime_preedit = text;
+                app.canvas.ime_preedit_range = active_range_chars;
+            }
             egui::Event::Ime(egui::ImeEvent::Commit(text)) => {
                 app.canvas.ime_preedit.clear();
+                app.canvas.ime_preedit_range = None;
                 if !text.is_empty() && !crate::dialogs_smart_art::type_into(app, &text) {
                     type_text(app, &text);
                 }
@@ -417,11 +475,14 @@ pub fn canvas_events(app: &mut WordApp, ctx: &egui::Context) {
     }
 }
 
-/// Escape leaves full screen (#980) once nothing nearer took it: a pen, a text box, a header, a
-/// dialog, a menu or a popup, a drag on the page, and in the document (`canvas`) a selection,
-/// which Escape collapses first (`select.collapse`), as in a normal window.
+/// Escape leaves Focus or Full Screen View (#1678), then Full Screen (#980), once nothing nearer
+/// took it: a pen, a text box, a header, a dialog, a menu or a popup, a drag on the page, and in
+/// the document (`canvas`) a selection, which Escape collapses first (`select.collapse`), as in a
+/// normal window.
 fn leave_full_screen(app: &mut WordApp, key: Key, m: Modifiers, canvas: bool) -> bool {
-    if key != Key::Escape || !m.is_none() || !app.session.view.full_screen || !app.escape_free {
+    let screen = crate::chrome::Screen::of(&app.session.view).exit_command();
+    let Some(id) = screen.or(app.session.view.full_screen.then_some("view.fullScreen")) else { return false };
+    if key != Key::Escape || !m.is_none() || !app.escape_free {
         return false;
     }
     let c = &app.canvas;
@@ -431,7 +492,7 @@ fn leave_full_screen(app: &mut WordApp, key: Key, m: Modifiers, canvas: bool) ->
     if canvas && !app.session.sel.is_collapsed() {
         return false;
     }
-    let _ = app.run("view.fullScreen", json!({"value": false}));
+    let _ = app.run(id, json!({"value": false}));
     true
 }
 
@@ -667,6 +728,41 @@ pub fn global_shortcuts(app: &mut WordApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
 
+    /// #1678: Ctrl+F1 collapses or expands the ribbon (not on macOS); plain F1 stays Help's.
+    #[test]
+    fn ctrl_f1_collapses_the_ribbon() {
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        let expect = if cfg!(target_os = "macos") { None } else { Some(("ui.collapseRibbon", json!({}))) };
+        assert_eq!(ui_shortcut(Key::F1, ctrl), expect);
+        assert_eq!(ui_shortcut(Key::F1, Modifiers::NONE), None);
+        assert_eq!(ui_shortcut(Key::F1, Modifiers { shift: true, ..ctrl }), None);
+    }
+
+    /// #1678: a Ctrl+F1 the user binds runs their command instead of collapsing the ribbon.
+    #[test]
+    fn a_bound_ctrl_f1_beats_the_ribbon_toggle() {
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        a.session.keymap = wordcraft_engine::keymap::KeyMap::from_value(&json!({"assigned": {"Mod+F1": "view.focus"}}));
+        assert!(dispatch(&mut a, Key::F1, Modifiers { ctrl: true, command: true, ..Default::default() }));
+        assert!(a.session.view.focus_mode && !a.ui.ribbon_collapsed);
+    }
+
+    /// #1678 review: only Ctrl+F1 gives way to a binding; a user's Alt+Q binding leaves Alt+Q
+    /// opening the command search.
+    #[test]
+    fn a_bound_alt_q_still_opens_command_search() {
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        a.session.keymap = wordcraft_engine::keymap::KeyMap::from_value(&json!({"assigned": {"Alt+Q": "view.focus"}}));
+        assert!(dispatch(&mut a, Key::Q, Modifiers { alt: true, ..Default::default() }));
+        if cfg!(target_os = "macos") {
+            // Option+Q is no interface shortcut on macOS, so the binding runs.
+            assert!(a.session.view.focus_mode);
+        } else {
+            assert!(!a.session.view.focus_mode, "the binding doesn't run");
+            assert!(matches!(a.dialog, Some(crate::dialogs::Dialog::Commands { .. })), "Alt+Q opens the command search");
+        }
+    }
+
     #[test]
     fn shift_backspace_still_erases() {
         assert_eq!(shift_variant_params("text.backspace"), Some(json!({})));
@@ -709,6 +805,99 @@ mod tests {
         assert!(!is_paste_release(Key::V, m(false, false, false)), "a plain V");
         assert!(is_paste_special_release(Key::V, m(true, false, true)), "Mod+Alt+V opens Paste Special");
         assert!(!is_paste_special_release(Key::V, m(true, true, true)) && !is_paste_special_release(Key::V, m(true, false, false)));
+    }
+
+    /// An empty document whose clipboard holds a 4 × 4 picture.
+    fn picture_app() -> WordApp {
+        use crate::paste_picture::ClipboardPicture;
+        let services = crate::Services {
+            clipboard_picture: Some(Box::new(|| Some(ClipboardPicture::Pixels { width: 4, height: 4, rgba: vec![200; 4 * 4 * 4] }))),
+            ..Default::default()
+        };
+        WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), services)
+    }
+
+    /// How many pictures the document holds (the Selection Pane's list).
+    fn pictures(a: &mut WordApp) -> usize {
+        a.session.run("arrange.selectionPane", &json!({})).unwrap().as_array().map(|x| x.len()).unwrap_or(0)
+    }
+
+    /// One canvas frame with `modifiers` held, then `events`.
+    fn mods_frame(ctx: &egui::Context, a: &mut WordApp, modifiers: Modifiers, events: Vec<egui::Event>) {
+        let events = std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect();
+        ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| canvas_events(a, ui.ctx())).drop_without_applying_deltas();
+    }
+
+    /// A press or release of `key` with `modifiers`.
+    fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> egui::Event {
+        egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers }
+    }
+
+    /// Left Ctrl+V with one hand often lets Ctrl up a moment before V. egui-winit keeps the
+    /// Mod+V press, so the canvas sees only Ctrl's release, then V's without Mod: still a paste.
+    #[test]
+    fn mod_v_released_mod_first_pastes_the_clipboard_picture() {
+        let ctx = egui::Context::default();
+        let mut a = picture_app();
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        mods_frame(&ctx, &mut a, ctrl, vec![key_event(Key::ControlLeft, true, ctrl)]);
+        // The Mod+V press: egui-winit sends no event for it.
+        mods_frame(&ctx, &mut a, ctrl, vec![]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::ControlLeft, false, Modifiers::NONE)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // A plain V afterwards (its press arrives) isn't a paste.
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, true, Modifiers::NONE)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // Nor is Ctrl+B, Ctrl up, then a V release whose press never came (focus moved in).
+        mods_frame(&ctx, &mut a, ctrl, vec![key_event(Key::B, true, ctrl)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::ControlLeft, false, Modifiers::NONE), egui::Event::WindowFocused(true)]);
+        mods_frame(&ctx, &mut a, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // Mod+Shift+V released Mod first stays Paste Formatting, not a picture paste.
+        let ctrl_shift = Modifiers { shift: true, ..ctrl };
+        mods_frame(&ctx, &mut a, ctrl_shift, vec![]);
+        mods_frame(&ctx, &mut a, Modifiers::SHIFT, vec![key_event(Key::ControlLeft, false, Modifiers::SHIFT)]);
+        mods_frame(&ctx, &mut a, Modifiers::SHIFT, vec![key_event(Key::V, false, Modifiers::SHIFT)]);
+        assert_eq!(pictures(&mut a), 1);
+
+        // Released V first, as before, still pastes.
+        let mut a = picture_app();
+        mods_frame(&ctx, &mut a, ctrl, vec![]);
+        mods_frame(&ctx, &mut a, ctrl, vec![key_event(Key::V, false, ctrl)]);
+        assert_eq!(pictures(&mut a), 1);
+    }
+
+    /// Ctrl down, the kept Mod+V press, Ctrl up and V up can all arrive in one frame: the frame's
+    /// modifiers no longer have Mod, but the ModifiersChanged events in between did.
+    #[test]
+    fn mod_v_within_one_frame_pastes_the_clipboard_picture() {
+        let ctx = egui::Context::default();
+        let mut a = picture_app();
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        let events = vec![
+            egui::Event::ModifiersChanged(ctrl),
+            key_event(Key::ControlLeft, true, ctrl),
+            egui::Event::ModifiersChanged(Modifiers::NONE),
+            key_event(Key::ControlLeft, false, Modifiers::NONE),
+            key_event(Key::V, false, Modifiers::NONE),
+        ];
+        ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| canvas_events(&mut a, ui.ctx())).drop_without_applying_deltas();
+        assert_eq!(pictures(&mut a), 1);
+    }
+
+    /// A V release keeps its own modifiers unless Mod went up first and no V press arrived.
+    #[test]
+    fn paste_release_modifiers_fall_back_to_those_held_with_mod() {
+        let ctrl = Modifiers { ctrl: true, command: true, ..Default::default() };
+        assert_eq!(paste_release_modifiers(ctrl, false, None), ctrl, "Mod still down");
+        assert_eq!(paste_release_modifiers(Modifiers::NONE, false, Some(ctrl)), ctrl, "Mod up first, press kept by egui-winit");
+        assert_eq!(paste_release_modifiers(Modifiers::NONE, true, Some(ctrl)), Modifiers::NONE, "a plain V's press arrived");
+        assert_eq!(paste_release_modifiers(Modifiers::NONE, false, None), Modifiers::NONE);
     }
 
     #[test]
@@ -796,6 +985,58 @@ mod tests {
         assert_eq!(a.ui.keytips, crate::keytips::Phase::Tabs);
     }
 
+    /// #2388: AltGr (Right Alt on a Polish layout under Wayland) arrives as the Right Alt key
+    /// followed by a modifiers event without Alt (it's Level 3 Shift). That event read as Alt
+    /// let go opened keytips while AltGr was still held, and the next letter went to them
+    /// instead of typing ś, ł, ż. A bare AltGr tap doesn't open keytips either; a Right Alt
+    /// that is Alt (US layout) still does.
+    #[test]
+    fn altgr_types_its_characters_without_keytips() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        let doc_text = |a: &WordApp| a.session.doc.plain_text(wordcraft_doc::StoryRef::Body);
+        let ctx = egui::Context::default();
+        let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
+        let none = Modifiers::NONE;
+        let key = |key, pressed, modifiers| egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers };
+        let frame = |a: &mut WordApp, events: Vec<egui::Event>| {
+            ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                crate::keytips::logic(a, ui.ctx());
+                canvas_events(a, ui.ctx());
+            })
+            .drop_without_applying_deltas();
+        };
+        let altgr_down = || vec![key(Key::AltRight, true, none), egui::Event::ModifiersChanged(none)];
+        let altgr_up = || vec![key(Key::AltRight, false, none), egui::Event::ModifiersChanged(none)];
+        // Held through three letters, one frame per event batch.
+        frame(&mut a, altgr_down());
+        assert_eq!(a.ui.keytips, crate::keytips::Phase::Off, "AltGr down doesn't open keytips");
+        for (k, t) in [(Key::S, "ś"), (Key::L, "ł"), (Key::Z, "ż")] {
+            frame(&mut a, vec![key(k, true, none), egui::Event::Text(t.into())]);
+            frame(&mut a, vec![key(k, false, none)]);
+            assert_eq!(a.ui.keytips, crate::keytips::Phase::Off, "{t}");
+        }
+        frame(&mut a, altgr_up());
+        assert_eq!(doc_text(&a).trim_end(), "śłż");
+        assert_eq!(a.ui.keytips, crate::keytips::Phase::Off);
+        // All in one frame.
+        frame(&mut a, [altgr_down(), vec![key(Key::A, true, none), egui::Event::Text("ą".into()), key(Key::A, false, none)], altgr_up()].concat());
+        assert_eq!(doc_text(&a).trim_end(), "śłżą");
+        assert_eq!(a.ui.keytips, crate::keytips::Phase::Off);
+        // A bare AltGr tap, in two frames or one.
+        frame(&mut a, altgr_down());
+        frame(&mut a, altgr_up());
+        assert_eq!(a.ui.keytips, crate::keytips::Phase::Off, "an AltGr tap isn't an Alt tap");
+        frame(&mut a, [altgr_down(), altgr_up()].concat());
+        assert_eq!(a.ui.keytips, crate::keytips::Phase::Off);
+        // Right Alt that is Alt still opens keytips.
+        let alt = Modifiers { alt: true, ..Default::default() };
+        frame(&mut a, vec![key(Key::AltRight, true, none), egui::Event::ModifiersChanged(alt)]);
+        frame(&mut a, vec![key(Key::AltRight, false, alt), egui::Event::ModifiersChanged(none)]);
+        assert_eq!(a.ui.keytips, crate::keytips::Phase::Tabs);
+    }
+
     fn alt_frame_app() -> (egui::Context, WordApp) {
         let a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
         (egui::Context::default(), a)
@@ -807,6 +1048,17 @@ mod tests {
 
     fn alt_key(key: Key, pressed: bool, repeat: bool) -> egui::Event {
         egui::Event::Key { key, physical_key: Some(key), pressed, repeat, modifiers: Modifiers { alt: true, ..Default::default() } }
+    }
+
+    /// Option+Shift+- types an em dash outside Outline view, where Word's Alt+Shift+- (Collapse)
+    /// can't run, so its shortcut doesn't swallow the character (#1933).
+    #[test]
+    fn disabled_alt_shortcut_leaves_the_typed_character() {
+        let (ctx, mut a) = alt_frame_app();
+        let alt_shift = Modifiers { alt: true, shift: true, ..Default::default() };
+        let key = |pressed| egui::Event::Key { key: Key::Minus, physical_key: Some(Key::Minus), pressed, repeat: false, modifiers: alt_shift };
+        alt_frame(&ctx, &mut a, vec![key(true), egui::Event::Text("\u{2014}".into()), key(false)]);
+        assert_eq!(a.session.doc.plain_text(wordcraft_doc::StoryRef::Body).trim_end(), "\u{2014}");
     }
 
     /// Holding a digit with Alt adds it once: its auto-repeat presses don't (#961).

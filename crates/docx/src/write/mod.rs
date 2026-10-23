@@ -9,6 +9,7 @@ mod math;
 mod props;
 mod sdt;
 mod story;
+pub(crate) use story::written_toc_span;
 mod watermark;
 mod wordart;
 
@@ -115,6 +116,9 @@ pub(crate) struct Writer<'d> {
     used_media: std::collections::BTreeSet<String>,
     /// Bounds writing text boxes inside text boxes (as layout shows them).
     boxes: wordcraft_doc::BoxBudget,
+    /// Text box stories already written: a story shown by many shapes is written once, the other
+    /// shapes get an empty box, so the file doesn't grow as shapes × story size.
+    written_boxes: std::collections::HashSet<u32>,
     /// Charts, diagrams and OLE objects kept from a file: the parts they need.
     embeds: embed::EmbedWriter<'d>,
     /// Linked text boxes: part id → (`wps:txbx`/`wps:linkedTxbx` id, seq; 0 for the box holding
@@ -174,6 +178,7 @@ pub(crate) fn write_parts(doc: &Document, flavor: Flavor) -> Result<Vec<(String,
         inline_controls: Vec::new(),
         used_media: Default::default(),
         boxes: wordcraft_doc::BoxBudget::default(),
+        written_boxes: std::collections::HashSet::new(),
         embeds: embed::EmbedWriter::new(doc),
         txbx_links: doc
             .text_box_chains()
@@ -795,10 +800,13 @@ fn style_xml(w: &mut W, st: &Style, flagged: &[StyleKind]) {
         w.close("w:rPr");
     }
     if let Some(t) = &st.table {
-        if t.borders.is_some() || t.cell_margins.is_some() || t.band_size.is_some() {
+        if t.borders.is_some() || t.cell_margins.is_some() || t.band_size.is_some() || t.col_band_size.is_some() {
             w.open("w:tblPr", &[]);
             if let Some(n) = t.band_size {
-                w.val("w:tblStyleRowBandSize", &n.clamp(1, 1000).to_string());
+                w.val("w:tblStyleRowBandSize", &n.min(1000).to_string());
+            }
+            if let Some(n) = t.col_band_size {
+                w.val("w:tblStyleColBandSize", &n.min(1000).to_string());
             }
             if let Some(b) = &t.borders {
                 props::borders(w, "w:tblBorders", b, Some("w:insideH"), &[]);

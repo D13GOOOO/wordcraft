@@ -104,6 +104,7 @@
 	Color: {color}	Boja: {color}
 	Compress punctuation at the start of a line	Sažmi interpunkciju na početku reda
 	Confirm password:	Potvrdite lozinku:
+	Continue from previous section	Nastavi od prethodnog odeljka
 	Couldn't make WordCraft the default: {error}	WordCraft nije mogao da postane podrazumevana aplikacija: {error}
 	Custom dictionary	Prilagođeni rečnik
 	Dark page (white text on black)	Tamna stranica (beo tekst na crnom)
@@ -158,6 +159,8 @@
 	Opens Settings › Default apps, where you choose WordCraft for .docx and the other document types.	Otvara Podešavanja › Podrazumevane aplikacije, gde birate WordCraft za .docx i druge vrste dokumenata.
 	Overtype	Prepisivanje
 	Overtype (typing replaces the characters after the caret)	Prepisivanje (otkucano zamenjuje znakove posle kursora)
+	Page Number Format	Format broja stranice
+	Page numbering	Numeracija stranica
 	Show alignment guides when moving pictures and shapes	Prikazuj vodilje za poravnanje pri pomeranju slika i oblika
 	Moved objects snap to the page's edges and centre, the margins and other objects. Hold Alt to move freely.	Pomereni objekti se prianjaju uz ivice i sredinu stranice, margine i druge objekte. Držite Alt da biste pomerali slobodno.
 	Page display	Prikaz strane
@@ -426,6 +429,8 @@
 	Edit\nRecipient List	Uredi\nlistu primalaca
 	Edited	Izmenjeno
 	Editing	Uređivanje
+	Editing endnote	Uređivanje endnote
+	Editing footnote	Uređivanje fusnote
 	Editing header/footer	Uređivanje zaglavlja/podnožja
 	Editing — edit the document directly	Uređivanje — menjajte dokument direktno
 	Editor	Urednik
@@ -463,6 +468,9 @@
 	First line:	Prvi red:
 	Fixed Column Width	Fiksna širina kolone
 	Focus	Fokus
+	Full Screen View	Prikaz preko celog ekrana
+	Show the ribbon	Prikaži traku
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Stari tasteri menija: Alt, {keys}. Nastavite da kucate ili pritisnite Esc da otkažete.
 	Font	Font
 	Font Color	Boja fonta
 	Font color:	Boja fonta:
@@ -1307,6 +1315,9 @@
 	{cols}×{rows} Table	Tabela {cols}×{rows}
 	AaBbYyZz	AaBbYyZz ČčĐđ
 	pt	pt
+	cm	cm
+	mm	mm
+	pi	pi
 	Document1	Dokument1
 	Username	Korisničko ime
 	Display name	Ime za prikaz
@@ -1760,6 +1771,12 @@
 	Reading Line Spacing	Proređenost pri čitanju
 	Reading Text Size	Veličina teksta za čitanje
 	English (United Kingdom)	Engleski (Velika Britanija)
+	English (Australia)	Engleski (Australija)
+	English (Canada)	Engleski (Kanada)
+	English (India)	Engleski (Indija)
+	English (Ireland)	Engleski (Irska)
+	English (New Zealand)	Engleski (Novi Zeland)
+	English (South Africa)	Engleski (Južna Afrika)
 	Polish	Poljski
 	Do Not Check Spelling or Grammar	Ne proveravaj pravopis i gramatiku
 
@@ -2226,6 +2243,7 @@
 	Submitting print job…	Slanje zadatka za štampanje…
 	Print job submitted.	Zadatak za štampanje je poslat.
 	Print job submitted: {receipt}	Zadatak za štampanje je poslat: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Zadatak za štampu je poslat: u red za štampu poslato listova: {count}
 	Print failed: the printing worker stopped.	Štampanje nije uspelo: proces štampanja je zaustavljen.
 	Print settings	Podešavanja štampanja
 	Submit print job	Pošalji zadatak za štampanje
@@ -2259,6 +2277,9 @@
 # Reading Mode column widths (#1040)
 	Narrow	Uska
 	Medium	Srednja
+	Dot-dot-dash	Tačka-tačka-crta
+	More Underlines…	Još podvlačenja…
+	Underline Color	Boja podvlačenja
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Spoji ćelije pre deljenja
 	Table size	Veličina tabele
@@ -2298,3 +2319,108 @@
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Unesite veličinu u bilo kojoj jedinici, na primer 5 cm ili 300 px. Druga strana se prilagođava, pa slika zadržava svoje proporcije.
 
 	Import…	Uvezi…
+
+# Personal templates (#2852)
+	Personal	Lični
+	Personal Templates	Lični šabloni
+	Templates you save in your templates folder show up here.	Ovde se prikazuju šabloni koje sačuvate u fascikli šablona.
+	Save as Word Template…	Sačuvaj kao Word šablon…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Čuva .dotx šablon u fascikli šablona. Prikazuje se u Fajl › Novo pod Lični.
+	File locations	Lokacije datoteka
+	User templates:	Korisnički šabloni:
+	Not set	Nije postavljeno
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Fajl › Novo prikazuje .dotx i .dotm šablone odavde pod Lični; Sačuvaj kao Word šablon počinje ovde.
+	Format Shape Pane	Okno „Format oblika“
+	Format Shape	Format oblika
+	Format Shape…	Formatiraj oblik…
+	No fill	Bez popune
+	Solid fill	Jednobojna popuna
+	Gradient fill	Prelivajuća popuna
+	Preset gradients	Unapred zadati prelivi
+	Radial	Radijalni
+	Rectangular	Pravougaoni
+	Path	Putanja
+	Direction	Smer
+	Angle	Ugao
+	Gradient stops	Tačke preliva
+	Add gradient stop	Dodaj tačku preliva
+	Remove gradient stop	Ukloni tačku preliva
+	Rotate with shape	Rotiraj sa oblikom
+	Gradient	Preliv
+	No Gradient	Bez preliva
+	Light Variations	Svetle varijante
+	Dark Variations	Tamne varijante
+	More Gradients…	Još preliva…
+	Select a shape, text box or drawing canvas to format its fill.	Izaberite oblik, okvir za tekst ili platno za crtanje da biste formatirali popunu.
+	Linear Right	Linearni udesno
+	Linear Diagonal - Top Left to Bottom Right	Linearni dijagonalni – gore levo ka dole desno
+	Linear Down	Linearni nadole
+	Linear Diagonal - Top Right to Bottom Left	Linearni dijagonalni – gore desno ka dole levo
+	Linear Left	Linearni ulevo
+	Linear Diagonal - Bottom Right to Top Left	Linearni dijagonalni – dole desno ka gore levo
+	Linear Up	Linearni nagore
+	Linear Diagonal - Bottom Left to Top Right	Linearni dijagonalni – dole levo ka gore desno
+	From Top Left Corner	Iz ugla gore levo
+	From Top Right Corner	Iz ugla gore desno
+	From Bottom Left Corner	Iz ugla dole levo
+	From Bottom Right Corner	Iz ugla dole desno
+	From Center	Iz sredine
+	Soft	Mek
+	Lit from Top	Osvetljen odozgo
+	Deep	Dubok
+	Lit from Bottom	Osvetljen odozdo
+	Center Glow	Sjaj iz sredine
+# File › Home greeting
+	Good morning	Dobro jutro
+	Good afternoon	Dobar dan
+	Good evening	Dobro veče
+	More tabs	Još kartica
+# #3013: Insert Table of Figures
+	Include label and number	Uključi oznaku i broj
+	First Record	Prvi zapis
+	Last Record	Poslednji zapis
+	Go to Record	Idi na zapis
+	Edit Individual Documents…	Uredi pojedinačne dokumente…
+	Print Documents…	Štampaj dokumente…
+	Print Documents	Štampaj dokumente
+	Current record	Trenutni zapis
+	From:	Od:
+	To:	Do:
+	Enter a number.	Unesite broj.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	platno za crtanje ne može da se razgrupiše
+	a drawing canvas can't go inside a text box	platno za crtanje ne može da se stavi u okvir za tekst
+	charts and diagrams can't be moved or resized yet	grafikoni i dijagrami još ne mogu da se pomeraju niti da im se menja veličina
+	no equation at the caret	na mestu kursora nema jednačine
+	not editing an equation	ne uređuje se nijedna jednačina
+	nothing is selected	ništa nije izabrano
+	only in Outline view	samo u prikazu Kontura
+	select a SmartArt graphic first	prvo izaberite SmartArt grafiku
+	select a chart first	prvo izaberite grafikon
+	select a connector first	prvo izaberite liniju za povezivanje
+	select a drawing canvas first	prvo izaberite platno za crtanje
+	select a floating picture or shape first	prvo izaberite plutajuću sliku ili oblik
+	select a group first	prvo izaberite grupu
+	select a picture first	prvo izaberite sliku
+	select a picture or shape first	prvo izaberite sliku ili oblik
+	select a shape first	prvo izaberite oblik
+	select a text box first	prvo izaberite okvir za tekst
+	select a text box linked to another first	prvo izaberite okvir za tekst povezan sa drugim
+	select recipients first	prvo izaberite primaoce
+	select two or more pictures or shapes first (Shift+click)	prvo izaberite dve ili više slika ili oblika (Shift+klik)
+	text boxes can't go inside a text box	okviri za tekst ne mogu da se stave u okvir za tekst
+	the Clipboard pane is empty	okno Ostava je prazno
+	the cursor isn't in a table	kursor nije u tabeli
+	there is nothing to undo	nema šta da se opozove
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	ovaj SmartArt je napravljen u drugom programu: WordCraft ga prikazuje, ali ne može da ga uređuje
+	this chart was made in another program: WordCraft shows it but can't edit it	ovaj grafikon je napravljen u drugom programu: WordCraft ga prikazuje, ali ne može da ga uređuje
+	this text box is already linked: break the link first	ovaj okvir za tekst je već povezan: prvo prekinite vezu
+	leave the equation first	prvo izađite iz jednačine
+	the Spike is empty	sakupljač je prazan
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	grupa sa Word mastilom još ne može da se razgrupiše
+	drop caps can't go in a table	početno slovo ne može u tabelu
+	the document is protected	dokument je zaštićen
+	the paragraph is empty	pasus je prazan
+	the paragraph starts with a space	pasus počinje razmakom
+	Open a document first	Prvo otvorite dokument
