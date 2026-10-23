@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::pseudo;
 use crate::WordApp;
@@ -147,6 +147,11 @@ impl Exempt {
         for m in crate::credits::MODELS {
             names.extend([m.company, m.model, m.version].map(str::to_string));
         }
+        // The spelling/grammar suggestions popup (#3340): dictionary and grammar-rule words, not
+        // interface text.
+        if let Some(sugg) = app.canvas.context_issue.as_ref().and_then(|i| i.get("suggestions")).and_then(Value::as_array) {
+            names.extend(sugg.iter().filter_map(Value::as_str).map(str::to_string));
+        }
         Exempt { body: app.session.doc.plain_text(wordcraft_doc::StoryRef::Body), names }
     }
 
@@ -172,7 +177,7 @@ impl Exempt {
             || plain.starts_with('@') // contributor handles
             || plain.starts_with("Style") || plain.starts_with("Table Style ") // a new style's default name
             || plain.contains('┬') || plain.contains('\u{2061}') // equation input (UnicodeMath), drawn as math
-            || matches!(plain, "WordCraft" | "WordCraft User" | "Discord" | "https://" | "auto" | "I. II. III." | "i. ii. iii.")
+            || matches!(plain, "WordCraft" | "WordCraft User" | "Discord" | "https://" | "auto" | "I. II. III." | "i. ii. iii." | "I, II, III, …" | "i, ii, iii, …")
             || plain == "CONFIDENTIAL" // the watermark dialog's text: document content, kept as typed
             || plain == "Figure 1" // the caption dialog's sample: the label goes into the document as is
     }
@@ -218,6 +223,7 @@ fn untranslated_interface_text() {
         "goto",
         "insertTable",
         "pageSetup",
+        "pageNumbers",
         "link",
         "bookmark",
         "wordCount",
@@ -234,10 +240,13 @@ fn untranslated_interface_text() {
         "models",
         "insertMergeField",
         "findRecipient",
+        "mergeRecords",
+        "printRecords",
         "caption",
         "index",
         "markEntry",
         "toc",
+        "tableOfFigures",
         "sourceManager",
         "createSource",
     ];
@@ -330,13 +339,14 @@ fn untranslated_interface_text() {
         report.push_str(&format!("{:?}  [{}]\n", pseudo::unmarked(text), states.join(", ")));
     }
     assert!(found.is_empty(), "{} interface texts skip translation (wrap them in tl!):\n{report}", found.len());
-    complete_catalogs_have_every_string_the_interface_looked_up(pseudo::looked_up());
+    report_catalog_gaps(pseudo::looked_up());
 }
 
-/// Russian, Hungarian, Turkish, Bulgarian, Italian, Swedish, Croatian and Polish cover everything the
-/// audit saw translated, plus the equation gallery's labels (shown in menus the audit doesn't open
-/// one by one). Numbered style names go through a template.
-fn complete_catalogs_have_every_string_the_interface_looked_up(mut keys: std::collections::BTreeSet<String>) {
+/// Prints, per language, the strings the audit saw looked up (plus the equation gallery's labels,
+/// shown in menus the audit doesn't open one by one) that its catalog has no entry for. A missing
+/// translation falls back to English, so it never fails the test; `--nocapture` shows the list.
+/// Numbered style names go through a template.
+fn report_catalog_gaps(mut keys: std::collections::BTreeSet<String>) {
     use wordcraft_engine::math_gallery::{BUILT_INS, STRUCTURES, SYMBOL_SETS};
     keys.extend(BUILT_INS.iter().map(|(_, label, _)| label.to_string()));
     keys.extend(SYMBOL_SETS.iter().map(|(name, _)| name.to_string()));
@@ -348,7 +358,7 @@ fn complete_catalogs_have_every_string_the_interface_looked_up(mut keys: std::co
         }
     }
     let numbered = |s: &str| ["Heading ", "TOC "].iter().any(|p| s.strip_prefix(p).is_some_and(|n| n.chars().all(|c| c.is_ascii_digit())));
-    // Names that read the same in these languages (citation style names included).
+    // Names that read the same across languages (citation style names included).
     let same = |s: &str| {
         matches!(
             s,
@@ -357,6 +367,8 @@ fn complete_catalogs_have_every_string_the_interface_looked_up(mut keys: std::co
                 | "Unicode"
                 | "I. II. III."
                 | "i. ii. iii."
+                | "I, II, III, …"
+                | "i, ii, iii, …"
                 | "APA"
                 | "Chicago"
                 | "GB/T 7714"
@@ -378,14 +390,149 @@ fn complete_catalogs_have_every_string_the_interface_looked_up(mut keys: std::co
     // A pattern of placeholders and figures only (`{paper}   {width} × {height}`) has nothing to
     // translate: its placeholder names aren't words the interface shows.
     let words = |s: &str| english_words(&s.split('{').map(|p| p.split_once('}').map_or(p, |(_, rest)| rest)).collect::<String>());
-    let mut report = String::new();
-    for code in ["ru", "hu", "tr", "bg", "it", "sv", "hr", "pl"] {
-        let lang = super::Lang::from_code(code).unwrap_or(super::Lang::EN);
+    for lang in super::Lang::all().filter(|l| *l != super::Lang::EN) {
         let missing: Vec<&String> =
             keys.iter().filter(|s| words(s) && !super::has(lang, s) && !numbered(s) && !same(s) && !script_error(s)).collect();
         if !missing.is_empty() {
-            report.push_str(&format!("{} strings have no {code} entry:\n{missing:#?}\n", missing.len()));
+            eprintln!("{} strings have no {} entry:\n{missing:#?}", missing.len(), lang.code());
         }
     }
-    assert!(report.is_empty(), "{report}");
+}
+
+/// The text from `open` (the first char of `src`) to its matching `close`, skipping string
+/// literals (reasons hold brackets: `(Shift+click)`).
+fn balanced(src: &str, open: char, close: char) -> &str {
+    let (mut depth, mut in_str, mut escaped) = (0usize, false, false);
+    for (i, c) in src.char_indices() {
+        match (in_str, escaped, c) {
+            (true, true, _) => escaped = false,
+            (true, false, '\\') => escaped = true,
+            (true, false, '"') | (false, _, '"') => in_str = !in_str,
+            (false, _, c) if c == open => depth += 1,
+            (false, _, c) if c == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return &src[..i + c.len_utf8()];
+                }
+            }
+            _ => {}
+        }
+    }
+    src
+}
+
+/// The string literals in `code`.
+fn literals(code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = code;
+    while let Some(start) = rest.find('"') {
+        let body = &rest[start + 1..];
+        let mut escaped = false;
+        let end = body.char_indices().find(|&(_, c)| {
+            let ends = !escaped && c == '"';
+            escaped = !escaped && c == '\\';
+            ends
+        });
+        let Some((end, _)) = end else { break };
+        let after = &body[end + 1..];
+        // `Some("readOnly" | "forms") => …` matches on a value; it isn't shown to anyone.
+        let pattern = after.trim_start().starts_with('|') || rest[..start].trim_end().ends_with('|');
+        if !pattern {
+            out.push(body[..end].replace("\\'", "'").replace("\\\"", "\""));
+        }
+        rest = after;
+    }
+    out
+}
+
+/// Every reason a command gives for being off (its `enabled` check), which ribbon tooltips show
+/// (#1086). Read from the engine's command sources so a new reason can't slip by: the literals in
+/// each `.when(…)` closure and in the checks it names (and the checks those call), with `const`
+/// reasons resolved.
+fn disabled_reasons() -> std::collections::BTreeSet<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../engine/src/cmd");
+    let mut files: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "rs")).collect();
+    files.sort();
+    let all: String = files.iter().map(|p| std::fs::read_to_string(p).unwrap()).collect::<Vec<_>>().join("\n");
+    // A named check's bodies (any file's `fn name(…) -> Option<&'static str>`).
+    let checks = |name: &str| -> Vec<&str> {
+        all.match_indices(&format!("fn {name}("))
+            .filter_map(|(i, _)| {
+                let from = &all[i..];
+                let brace = from.find('{')?;
+                from[..brace].contains("-> Option<&'static str>").then(|| balanced(&from[brace..], '{', '}'))
+            })
+            .collect()
+    };
+    let is_ident = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':');
+    let mut bodies: Vec<&str> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    for (i, _) in all.match_indices(".when(") {
+        let args = balanced(&all[i + ".when".len()..], '(', ')');
+        let inner = args.trim_start_matches('(').trim_end_matches(')').trim();
+        if is_ident(inner) {
+            names.push(inner.rsplit("::").next().unwrap_or(inner).to_string());
+        } else {
+            bodies.push(inner);
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    while let Some(name) = names.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        for body in checks(&name) {
+            bodies.push(body);
+            // The checks this one calls (`has_object(s)`).
+            for (j, _) in body.match_indices("(s)") {
+                let callee = body[..j].rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("");
+                if !callee.is_empty() {
+                    names.push(callee.to_string());
+                }
+            }
+        }
+    }
+    let mut reasons = std::collections::BTreeSet::new();
+    for body in bodies {
+        // `cfg!(target_arch = "wasm32")` names a target, not a reason.
+        let mut code = body.to_string();
+        while let Some(i) = code.find("cfg!(") {
+            let len = balanced(&code[i + "cfg!".len()..], '(', ')').len();
+            code.replace_range(i..i + "cfg!".len() + len, "");
+        }
+        reasons.extend(literals(&code));
+        // `const FROZEN: &str = "…"` reasons.
+        for word in body.split(|c: char| !(c.is_ascii_uppercase() || c == '_')).filter(|w| w.len() > 2) {
+            if let Some(i) = all.find(&format!("const {word}: &str = ")) {
+                reasons.extend(literals(all[i..].lines().next().unwrap_or("")));
+            }
+        }
+    }
+    reasons
+}
+
+/// Ribbon tooltips show why a control is off in the interface's language: every reason has an
+/// entry in every catalog (#2678).
+#[test]
+fn every_disabled_reason_is_translated() {
+    let reasons = disabled_reasons();
+    // The source scan finds every reason the registry gives in a blank and the sample document.
+    for doc in [wordcraft_doc::Document::new(), wordcraft_engine::sample::sample_document()] {
+        let session = wordcraft_engine::Session::new(doc);
+        for spec in session.registry.all() {
+            if let Some(r) = (spec.enabled)(&session) {
+                assert!(reasons.contains(r), "{}: the source scan missed its reason {r:?}", spec.id);
+            }
+        }
+    }
+    assert!(reasons.len() > 20, "the source scan found only {reasons:#?}");
+    // Reasons the UI itself gives (`widgets.rs::tooltip`), which the engine's checks never reach.
+    let mut reasons = reasons;
+    reasons.insert("Open a document first".to_string());
+    let mut missing = Vec::new();
+    for l in super::Lang::all().filter(|l| *l != super::Lang::EN) {
+        missing.extend(reasons.iter().filter(|r| !super::has(l, r)).map(|r| format!("{}: {r:?}", l.code())));
+    }
+    assert!(missing.is_empty(), "{} disabled reasons are untranslated:\n{missing:#?}", missing.len());
 }

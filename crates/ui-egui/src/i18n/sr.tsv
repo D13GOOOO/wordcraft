@@ -108,6 +108,7 @@
 	Color: {color}	Боја: {color}
 	Compress punctuation at the start of a line	Сажми интерпункцију на почетку реда
 	Confirm password:	Потврдите лозинку:
+	Continue from previous section	Настави од претходног одељка
 	Couldn't make WordCraft the default: {error}	WordCraft није могао да постане подразумевана апликација: {error}
 	Custom dictionary	Прилагођени речник
 	Dark page (white text on black)	Тамна страница (бео текст на црном)
@@ -162,6 +163,8 @@
 	Opens Settings › Default apps, where you choose WordCraft for .docx and the other document types.	Отвара Подешавања › Подразумеване апликације, где бирате WordCraft за .docx и друге врсте докумената.
 	Overtype	Преписивање
 	Overtype (typing replaces the characters after the caret)	Преписивање (откуцано замењује знакове после курсора)
+	Page Number Format	Формат броја странице
+	Page numbering	Нумерација страница
 	Show alignment guides when moving pictures and shapes	Приказуј водиље за поравнање при померању слика и облика
 	Moved objects snap to the page's edges and centre, the margins and other objects. Hold Alt to move freely.	Померени објекти се приањају уз ивице и средину странице, маргине и друге објекте. Држите Alt да бисте померали слободно.
 	Page display	Приказ стране
@@ -430,6 +433,8 @@
 	Edit\nRecipient List	Уреди\nлисту прималаца
 	Edited	Измењено
 	Editing	Уређивање
+	Editing endnote	Уређивање ендноте
+	Editing footnote	Уређивање фусноте
 	Editing header/footer	Уређивање заглавља/подножја
 	Editing — edit the document directly	Уређивање — мењајте документ директно
 	Editor	Уредник
@@ -467,6 +472,9 @@
 	First line:	Први ред:
 	Fixed Column Width	Фиксна ширина колоне
 	Focus	Фокус
+	Full Screen View	Приказ преко целог екрана
+	Show the ribbon	Прикажи траку
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Стари тастери менија: Alt, {keys}. Наставите да куцате или притисните Esc да откажете.
 	Font	Фонт
 	Font Color	Боја фонта
 	Font color:	Боја фонта:
@@ -1311,6 +1319,9 @@
 	{cols}×{rows} Table	Табела {cols}×{rows}
 	AaBbYyZz	AaBbYyZz ЂђЋћ
 	pt	пт
+	cm	цм
+	mm	мм
+	pi	pi
 	Document1	Документ1
 	Username	Корисничко име
 	Display name	Име за приказ
@@ -1764,6 +1775,12 @@
 	Reading Line Spacing	Проређеност при читању
 	Reading Text Size	Величина текста за читање
 	English (United Kingdom)	Енглески (Велика Британија)
+	English (Australia)	Енглески (Аустралија)
+	English (Canada)	Енглески (Канада)
+	English (India)	Енглески (Индија)
+	English (Ireland)	Енглески (Ирска)
+	English (New Zealand)	Енглески (Нови Зеланд)
+	English (South Africa)	Енглески (Јужна Африка)
 	Polish	Пољски
 	Do Not Check Spelling or Grammar	Не проверавај правопис и граматику
 
@@ -2230,6 +2247,7 @@
 	Submitting print job…	Слање задатка за штампање…
 	Print job submitted.	Задатак за штампање је послат.
 	Print job submitted: {receipt}	Задатак за штампање је послат: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Задатак за штампу је послат: у ред за штампу послато листова: {count}
 	Print failed: the printing worker stopped.	Штампање није успело: процес штампања је заустављен.
 	Print settings	Подешавања штампања
 	Submit print job	Пошаљи задатак за штампање
@@ -2263,6 +2281,9 @@
 # Reading Mode column widths (#1040)
 	Narrow	Уска
 	Medium	Средња
+	Dot-dot-dash	Тачка-тачка-црта
+	More Underlines…	Још подвлачења…
+	Underline Color	Боја подвлачења
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Споји ћелије пре дељења
 	Table size	Величина табеле
@@ -2302,3 +2323,108 @@
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Унесите величину у било којој јединици, на пример 5 cm или 300 px. Друга страна се прилагођава, па слика задржава своје пропорције.
 
 	Import…	Увези…
+
+# Personal templates (#2852)
+	Personal	Лични
+	Personal Templates	Лични шаблони
+	Templates you save in your templates folder show up here.	Овде се приказују шаблони које сачувате у фасцикли шаблона.
+	Save as Word Template…	Сачувај као Word шаблон…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Чува .dotx шаблон у фасцикли шаблона. Приказује се у Фајл › Ново под Лични.
+	File locations	Локације датотека
+	User templates:	Кориснички шаблони:
+	Not set	Није постављено
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Фајл › Ново приказује .dotx и .dotm шаблоне одавде под Лични; Сачувај као Word шаблон почиње овде.
+	Format Shape Pane	Окно „Формат облика“
+	Format Shape	Формат облика
+	Format Shape…	Форматирај облик…
+	No fill	Без попуне
+	Solid fill	Једнобојна попуна
+	Gradient fill	Преливајућа попуна
+	Preset gradients	Унапред задати преливи
+	Radial	Радијални
+	Rectangular	Правоугаони
+	Path	Путања
+	Direction	Смер
+	Angle	Угао
+	Gradient stops	Тачке прелива
+	Add gradient stop	Додај тачку прелива
+	Remove gradient stop	Уклони тачку прелива
+	Rotate with shape	Ротирај са обликом
+	Gradient	Прелив
+	No Gradient	Без прелива
+	Light Variations	Светле варијанте
+	Dark Variations	Тамне варијанте
+	More Gradients…	Још прелива…
+	Select a shape, text box or drawing canvas to format its fill.	Изаберите облик, оквир за текст или платно за цртање да бисте форматирали попуну.
+	Linear Right	Линеарни удесно
+	Linear Diagonal - Top Left to Bottom Right	Линеарни дијагонални – горе лево ка доле десно
+	Linear Down	Линеарни надоле
+	Linear Diagonal - Top Right to Bottom Left	Линеарни дијагонални – горе десно ка доле лево
+	Linear Left	Линеарни улево
+	Linear Diagonal - Bottom Right to Top Left	Линеарни дијагонални – доле десно ка горе лево
+	Linear Up	Линеарни нагоре
+	Linear Diagonal - Bottom Left to Top Right	Линеарни дијагонални – доле лево ка горе десно
+	From Top Left Corner	Из угла горе лево
+	From Top Right Corner	Из угла горе десно
+	From Bottom Left Corner	Из угла доле лево
+	From Bottom Right Corner	Из угла доле десно
+	From Center	Из средине
+	Soft	Мек
+	Lit from Top	Осветљен одозго
+	Deep	Дубок
+	Lit from Bottom	Осветљен одоздо
+	Center Glow	Сјај из средине
+# File › Home greeting
+	Good morning	Добро јутро
+	Good afternoon	Добар дан
+	Good evening	Добро вече
+	More tabs	Још картица
+# #3013: Insert Table of Figures
+	Include label and number	Укључи ознаку и број
+	First Record	Први запис
+	Last Record	Последњи запис
+	Go to Record	Иди на запис
+	Edit Individual Documents…	Уреди појединачне документе…
+	Print Documents…	Штампај документе…
+	Print Documents	Штампај документе
+	Current record	Тренутни запис
+	From:	Од:
+	To:	До:
+	Enter a number.	Унесите број.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	платно за цртање не може да се разгрупише
+	a drawing canvas can't go inside a text box	платно за цртање не може да се стави у оквир за текст
+	charts and diagrams can't be moved or resized yet	графикони и дијаграми још не могу да се померају нити да им се мења величина
+	no equation at the caret	на месту курсора нема једначине
+	not editing an equation	не уређује се ниједна једначина
+	nothing is selected	ништа није изабрано
+	only in Outline view	само у приказу Контура
+	select a SmartArt graphic first	прво изаберите SmartArt графику
+	select a chart first	прво изаберите графикон
+	select a connector first	прво изаберите линију за повезивање
+	select a drawing canvas first	прво изаберите платно за цртање
+	select a floating picture or shape first	прво изаберите плутајућу слику или облик
+	select a group first	прво изаберите групу
+	select a picture first	прво изаберите слику
+	select a picture or shape first	прво изаберите слику или облик
+	select a shape first	прво изаберите облик
+	select a text box first	прво изаберите оквир за текст
+	select a text box linked to another first	прво изаберите оквир за текст повезан са другим
+	select recipients first	прво изаберите примаоце
+	select two or more pictures or shapes first (Shift+click)	прво изаберите две или више слика или облика (Shift+клик)
+	text boxes can't go inside a text box	оквири за текст не могу да се ставе у оквир за текст
+	the Clipboard pane is empty	окно Остава је празно
+	the cursor isn't in a table	курсор није у табели
+	there is nothing to undo	нема шта да се опозове
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	овај SmartArt је направљен у другом програму: WordCraft га приказује, али не може да га уређује
+	this chart was made in another program: WordCraft shows it but can't edit it	овај графикон је направљен у другом програму: WordCraft га приказује, али не може да га уређује
+	this text box is already linked: break the link first	овај оквир за текст је већ повезан: прво прекините везу
+	leave the equation first	прво изађите из једначине
+	the Spike is empty	сакупљач је празан
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	група са Word мастилом још не може да се разгрупише
+	drop caps can't go in a table	почетно слово не може у табелу
+	the document is protected	документ је заштићен
+	the paragraph is empty	пасус је празан
+	the paragraph starts with a space	пасус почиње размаком
+	Open a document first	Прво отворите документ

@@ -140,8 +140,11 @@
 	Book Title	Název knihy
 	Bookmark	Záložka
 	Bookmark name:	Název záložky:
+	Continue from previous section	Pokračovat z předchozího oddílu
 	Delete Bookmark	Odstranit záložku
 	Hidden bookmarks	Skryté záložky
+	Page Number Format	Formát čísel stránek
+	Page numbering	Číslování stránek
 	Sort by:	Seřadit podle:
 	Border Painter	Štětec ohraničení
 	Border\nPainter	Štětec\nohraničení
@@ -377,6 +380,8 @@
 	Edit\nRecipient List	Upravit seznam\npříjemců
 	Edited	Upraveno
 	Editing	Úpravy
+	Editing endnote	Úprava vysvětlivky
+	Editing footnote	Úprava poznámky pod čarou
 	Editing header/footer	Úprava záhlaví/zápatí
 	Editing — edit the document directly	Úpravy — přímá úprava dokumentu
 	Editor	Editor
@@ -455,6 +460,9 @@
 	Flip Horizontal	Převrátit vodorovně
 	Flip Vertical	Převrátit svisle
 	Focus	Soustředění
+	Full Screen View	Zobrazení na celou obrazovku
+	Show the ribbon	Zobrazit pás karet
+	Old menu keys: Alt, {keys}. Keep typing, or press Esc to cancel.	Staré klávesy nabídek: Alt, {keys}. Pokračujte v psaní, nebo zrušte klávesou Esc.
 	Follow number with:	Znak za číslem:
 	Font	Písmo
 	Font Color	Barva písma
@@ -1390,6 +1398,9 @@
 	{cols}×{rows} Table	Tabulka {cols}×{rows}
 	AaBbYyZz	AaBbYyZz ČčŘřŽž
 	pt	b.
+	cm	cm
+	mm	mm
+	pi	pi
 	Document1	Dokument1
 	Username	Uživatelské jméno
 	Display name	Zobrazované jméno
@@ -2019,6 +2030,12 @@ preview	Title	Ukázka
 	Do not check spelling or grammar	Nekontrolovat pravopis ani mluvnici
 	Dutch	Nizozemština
 	English (United Kingdom)	Angličtina (Spojené království)
+	English (Australia)	Angličtina (Austrálie)
+	English (Canada)	Angličtina (Kanada)
+	English (India)	Angličtina (Indie)
+	English (Ireland)	Angličtina (Irsko)
+	English (New Zealand)	Angličtina (Nový Zéland)
+	English (South Africa)	Angličtina (Jihoafrická republika)
 	Envelope size:	Velikost obálky:
 	Estonian	Estonština
 	Finnish	Finština
@@ -2601,6 +2618,7 @@ preview	Title	Ukázka
 	Submitting print job…	Odesílání tiskové úlohy…
 	Print job submitted.	Tisková úloha odeslána.
 	Print job submitted: {receipt}	Tisková úloha odeslána: {receipt}
+	Print job submitted: spooled {count} sheet(s)	Tisková úloha odeslána: do tiskové fronty předáno listů: {count}
 	Print failed: the printing worker stopped.	Tisk se nezdařil: proces tisku se zastavil.
 	Print settings	Nastavení tisku
 	Submit print job	Odeslat tiskovou úlohu
@@ -2641,6 +2659,9 @@ preview	Title	Ukázka
 # Reading Mode column widths (#1040)
 	Narrow	Úzká
 	Medium	Střední
+	Dot-dot-dash	Dvojitě čerchované
+	More Underlines…	Další podtržení…
+	Underline Color	Barva podtržení
 # Split Cells and Convert Text to Table (#2592)
 	Merge cells before split	Před rozdělením buňky sloučit
 	Table size	Velikost tabulky
@@ -2691,3 +2712,96 @@ preview	Title	Ukázka
 	Type a size in any unit, such as 5 cm or 300 px. The other side follows, so the picture keeps its proportions.	Zadejte velikost v libovolné jednotce, například 5 cm nebo 300 px. Druhá strana se přizpůsobí, takže obrázek zachová své proporce.
 
 	Import…	Importovat…
+
+# Personal templates (#2852)
+	Personal	Osobní
+	Personal Templates	Osobní šablony
+	Templates you save in your templates folder show up here.	Zde se zobrazí šablony, které uložíte do složky šablon.
+	Save as Word Template…	Uložit jako šablonu Wordu…
+	Saves a .dotx template in your templates folder. It shows up in File › New under Personal.	Uloží šablonu .dotx do vaší složky šablon. Zobrazí se v nabídce Soubor › Nový v části Osobní.
+	File locations	Umístění souborů
+	User templates:	Uživatelské šablony:
+	Not set	Nenastaveno
+	File › New lists the .dotx and .dotm templates here under Personal; Save as Word Template starts here.	Soubor › Nový zobrazuje šablony .dotx a .dotm odsud v části Osobní; Uložit jako šablonu Wordu začíná zde.
+	Format Shape Pane	Podokno Formát obrazce
+	Format Shape	Formát obrazce
+	Format Shape…	Formátovat obrazec…
+	No fill	Bez výplně
+	Solid fill	Plná výplň
+	Gradient fill	Přechodová výplň
+	Preset gradients	Předdefinované přechody
+	Radial	Paprskový
+	Rectangular	Obdélníkový
+	Path	Cesta
+	Direction	Směr
+	Angle	Úhel
+	Gradient stops	Zarážky přechodu
+	Add gradient stop	Přidat zarážku přechodu
+	Remove gradient stop	Odebrat zarážku přechodu
+	Rotate with shape	Otáčet s obrazcem
+	Gradient	Přechod
+	No Gradient	Bez přechodu
+	Light Variations	Světlé varianty
+	Dark Variations	Tmavé varianty
+	More Gradients…	Další přechody…
+	Select a shape, text box or drawing canvas to format its fill.	Vyberte obrazec, textové pole nebo kreslicí plátno a naformátujte jeho výplň.
+	Linear Right	Lineární doprava
+	Linear Diagonal - Top Left to Bottom Right	Lineární úhlopříčný – vlevo nahoře do vpravo dole
+	Linear Down	Lineární dolů
+	Linear Diagonal - Top Right to Bottom Left	Lineární úhlopříčný – vpravo nahoře do vlevo dole
+	Linear Left	Lineární doleva
+	Linear Diagonal - Bottom Right to Top Left	Lineární úhlopříčný – vpravo dole do vlevo nahoře
+	Linear Up	Lineární nahoru
+	Linear Diagonal - Bottom Left to Top Right	Lineární úhlopříčný – vlevo dole do vpravo nahoře
+	From Top Left Corner	Z rohu vlevo nahoře
+	From Top Right Corner	Z rohu vpravo nahoře
+	From Bottom Left Corner	Z rohu vlevo dole
+	From Bottom Right Corner	Z rohu vpravo dole
+	From Center	Ze středu
+	Soft	Jemný
+	Lit from Top	Osvětlený shora
+	Deep	Sytý
+	Lit from Bottom	Osvětlený zdola
+	Center Glow	Záře ze středu
+	More tabs	Další karty
+# #3013: Insert Table of Figures
+	Include label and number	Zahrnout popisek a číslo
+	First Record	První záznam
+	Last Record	Poslední záznam
+	Go to Record	Přejít na záznam
+	Edit Individual Documents…	Upravit jednotlivé dokumenty…
+	Print Documents…	Tisk dokumentů…
+	Print Documents	Tisk dokumentů
+	Current record	Aktuální záznam
+	From:	Od:
+	To:	Do:
+	Enter a number.	Zadejte číslo.
+# Why a ribbon control is off (#2678)
+	a drawing canvas can't be ungrouped	kreslicí plátno nelze oddělit
+	a drawing canvas can't go inside a text box	kreslicí plátno nelze vložit do textového pole
+	charts and diagrams can't be moved or resized yet	grafy a diagramy zatím nelze přesouvat ani měnit jejich velikost
+	no equation at the caret	u kurzoru není žádná rovnice
+	not editing an equation	neupravuje se žádná rovnice
+	only in Outline view	pouze v zobrazení Osnova
+	select a SmartArt graphic first	nejprve vyberte obrázek SmartArt
+	select a chart first	nejprve vyberte graf
+	select a connector first	nejprve vyberte spojnici
+	select a drawing canvas first	nejprve vyberte kreslicí plátno
+	select a floating picture or shape first	nejprve vyberte plovoucí obrázek nebo tvar
+	select a group first	nejprve vyberte skupinu
+	select a picture first	nejprve vyberte obrázek
+	select a shape first	nejprve vyberte tvar
+	select a text box first	nejprve vyberte textové pole
+	select a text box linked to another first	nejprve vyberte textové pole propojené s jiným
+	the Clipboard pane is empty	podokno Schránka je prázdné
+	there is nothing to undo	není co vrátit zpět
+	this SmartArt was made in another program: WordCraft shows it but can't edit it	tento SmartArt byl vytvořen v jiném programu: WordCraft ho zobrazí, ale nemůže ho upravit
+	this chart was made in another program: WordCraft shows it but can't edit it	tento graf byl vytvořen v jiném programu: WordCraft ho zobrazí, ale nemůže ho upravit
+	this text box is already linked: break the link first	toto textové pole už je propojené: nejprve zrušte propojení
+	leave the equation first	nejprve opusťte rovnici
+	the Spike is empty	sběrač je prázdný
+# More reasons a ribbon control is off (#2678)
+	a group holding Word ink can't be ungrouped yet	skupinu s rukopisem z Wordu zatím nelze zrušit
+	drop caps can't go in a table	iniciálu nelze vložit do tabulky
+	the document is protected	dokument je chráněný
+	Open a document first	Nejprve otevřete dokument
