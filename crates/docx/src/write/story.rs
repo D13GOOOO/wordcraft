@@ -1069,6 +1069,9 @@ impl Writer<'_> {
             ShapeKind::ElbowConnector => "bentConnector3",
             ShapeKind::CurvedConnector => "curvedConnector3",
             ShapeKind::Arrow => "rightArrow",
+            ShapeKind::ArrowLeft => "leftArrow",
+            ShapeKind::ArrowUp => "upArrow",
+            ShapeKind::ArrowDown => "downArrow",
             ShapeKind::Star => "star5",
             ShapeKind::Heart => "heart",
         };
