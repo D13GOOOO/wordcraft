@@ -1406,7 +1406,7 @@ impl Session {
     /// [`crate::cmd::protect::Facts`] for the document as it is now, cached per revision.
     fn protect_facts(&self) -> crate::cmd::protect::Facts {
         let key = (self.document_id, self.rev, self.author.clone());
-        let mut cache = self.protect_facts.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.protect_facts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some((k, f)) = cache.as_ref()
             && *k == key
         {
@@ -1519,7 +1519,7 @@ impl Session {
         let mut result = match result {
             Ok(r) => r,
             Err(p) => {
-                let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+                let msg = p.downcast_ref::<&str>().map(ToString::to_string).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
                 Err(CmdError::Failed(format!("{id} panicked: {msg}")))
             }
         };
