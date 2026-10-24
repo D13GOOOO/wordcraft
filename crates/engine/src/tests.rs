@@ -1674,6 +1674,73 @@ fn tables_commands() {
     assert!(s.run("table.merge", &json!({})).is_err());
 }
 
+/// #3931: the page as a command would leave it, laid out without running it on the document:
+/// Insert › Table's grid previews the table it would insert. The document, the caret, the undo
+/// history and Repeat stay as they were.
+#[test]
+fn preview_layout_shows_a_command_without_running_it() {
+    let mut s = Session::new(wordcraft_doc::Document::from_text("Lanterns"));
+    run(&mut s, "caret.docEnd", json!({}));
+    let (doc, sel, rev) = (s.doc.clone(), s.sel.clone(), s.rev());
+    let cells = |l: &wordcraft_layout::DocLayout| l.index.keys().filter(|(st, p)| *st == StoryRef::Body && p.0.len() == 4).count();
+    let (_, _, preview) = s.preview_layout("insert.table", &json!({"rows": 4, "cols": 3})).expect("a table can be inserted here");
+    assert_eq!(cells(&preview), 12, "four rows of three cells");
+    // At the caret: after "Lanterns", the second block.
+    let tables: std::collections::BTreeSet<u32> =
+        preview.index.keys().filter(|(st, p)| *st == StoryRef::Body && p.0.len() == 4).map(|(_, p)| p.0[0]).collect();
+    assert_eq!(tables, [1].into(), "the table goes where the caret is");
+    assert_eq!(s.doc, doc);
+    assert_eq!((&s.sel, s.rev(), s.dirty), (&sel, rev, false));
+    assert!(!s.can_undo() && s.last_command.is_none());
+    assert_eq!(cells(&s.layout()), 0, "the page itself has no table");
+    assert!(s.preview_layout("no.such", &json!({})).is_none());
+}
+
+/// #3931 review: the preview comes back with the document it was laid out from. The table moves
+/// the paragraphs after the caret down a block, so this document would draw the layout's
+/// paragraphs from the wrong blocks, or from none.
+#[test]
+fn preview_layout_comes_with_the_document_it_lays_out() {
+    let mut s = Session::new(wordcraft_doc::Document::from_text("Lanterns\nKites"));
+    run(&mut s, "caret.docStart", json!({}));
+    run(&mut s, "caret.end", json!({}));
+    let (doc, _, preview) = s.preview_layout("insert.table", &json!({"rows": 2, "cols": 2})).expect("a table can be inserted here");
+    for (story, path) in preview.index.keys().filter(|(st, _)| *st == StoryRef::Body) {
+        assert!(doc.para(*story, path).is_some(), "{path:?} names a paragraph of the previewed document");
+    }
+    let kites = preview.index.keys().find(|(st, p)| *st == StoryRef::Body && doc.para(*st, p).is_some_and(|p| p.text == "Kites"));
+    assert!(kites.is_some_and(|(_, p)| p.0.len() == 1 && p.0[0] > 1), "Kites is laid out after the table: {kites:?}");
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "Lanterns\nKites", "the document itself has no table");
+}
+
+/// #3931 review: the word being typed has no spelling squiggle on the preview either, though
+/// the table moves the copy's caret off it and splits its paragraph.
+#[test]
+fn preview_layout_keeps_the_word_being_typed_unmarked() {
+    let mut s = Session::new(wordcraft_doc::Document::from_text("helo"));
+    s.view.proofing = true;
+    run(&mut s, "caret.docEnd", json!({}));
+    run(&mut s, "text.insert", json!({"text": " wrld"}));
+    let marks = |l: &wordcraft_layout::DocLayout, doc: &wordcraft_doc::Document| -> Vec<String> {
+        let text = &doc.para(StoryRef::Body, &wordcraft_doc::Path(vec![0])).unwrap().text;
+        l.pages[0]
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                wordcraft_layout::Placed::Lines { para, path, .. } if path.0 == [0] => {
+                    Some(para.issues.iter().filter(|i| !i.2).map(|i| text[i.0..i.1].to_string()).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let doc = s.doc.clone();
+    assert_eq!(marks(&s.layout(), &doc), ["helo"], "the page itself: only the finished word is marked");
+    let (copy, _, preview) = s.preview_layout("insert.table", &json!({"rows": 2, "cols": 2})).unwrap();
+    assert_eq!(marks(&preview, &copy), ["helo"]);
+}
+
 #[test]
 fn delete_row_on_a_merge_start_promotes_the_cell_below() {
     use wordcraft_doc::props::VMerge;
@@ -6965,6 +7032,10 @@ fn dictionaries_folder_option_is_saved_searched_and_reported() {
         ("pl_PL", POLISH_TEST_AFF, POLISH_TEST_DIC),
         ("pt_BR", PORTUGUESE_TEST_AFF, PORTUGUESE_TEST_DIC),
         ("id_ID", INDONESIAN_TEST_AFF, INDONESIAN_TEST_DIC),
+        // The others the tests install, so reloading from the folder keeps their words.
+        ("it_IT", ITALIAN_TEST_AFF, ITALIAN_TEST_DIC),
+        ("es_ES", SPANISH_TEST_AFF, SPANISH_TEST_DIC),
+        ("es_UY", SPANISH_TEST_AFF, URUGUAYAN_TEST_DIC),
         // #3252: set_dictionaries_folder() now reloads Czech too (it used to leave its cache
         // alone), so a run of this test overlapping czech_proofing_through_the_review_commands
         // would otherwise force a reload that finds no cs_CZ here and empties it mid-test. Same
@@ -6988,6 +7059,11 @@ fn dictionaries_folder_option_is_saved_searched_and_reported() {
     assert_eq!(file("pl"), Some(json!(dir.join("pl_PL.dic").to_string_lossy())));
     assert_eq!(file("pt"), Some(json!(dir.join("pt_BR.dic").to_string_lossy())));
     assert_eq!(file("id"), Some(json!(dir.join("id_ID.dic").to_string_lossy())));
+    // Each Spanish variety reports its own file (Spain, Mexico, Latin America, Uruguay, in order).
+    let spanish: Vec<serde_json::Value> = dicts.iter().filter(|d| d["language"] == "es").map(|d| d["file"].clone()).collect();
+    assert_eq!(spanish.len(), 4);
+    assert_eq!(spanish.first(), Some(&json!(dir.join("es_ES.dic").to_string_lossy())));
+    assert_eq!(spanish.last(), Some(&json!(dir.join("es_UY.dic").to_string_lossy())));
     // Polish text is checked against the folder's dictionary.
     run(&mut s, "document.setText", json!({"text": "rzeka płynie żeka"}));
     run(&mut s, "select.all", json!({}));
@@ -7180,6 +7256,119 @@ fn new_documents_follow_the_regions_english() {
     assert_eq!(s.region_english(), None);
 }
 
+/// A Spanish interface writes new documents in the region's Spanish (#3360): Uruguay's on a
+/// Uruguayan system, Mexico's on a Mexican one, Spain's elsewhere.
+#[test]
+fn new_documents_follow_the_regions_spanish() {
+    let mut s = s();
+    s.system_region = wordcraft_geom::Region::from_tag("es_UY.UTF-8");
+    assert_eq!(s.region_spanish(), "es-UY");
+    // The ISO 639-2 code is Spanish too (CodeRabbit review on #3562).
+    s.system_region = wordcraft_geom::Region::from_tag("spa_MX.UTF-8");
+    assert_eq!(s.region_spanish(), "es-MX");
+    s.system_region = wordcraft_geom::Region::from_tag("es_UY.UTF-8");
+    s.set_editing_language(Some(&s.region_spanish()));
+    assert_eq!(s.doc.styles.default_chr.lang.as_deref(), Some("es-UY"), "the untouched document follows");
+    for (tag, spanish) in [("es-MX", "es-MX"), ("es-419", "es-419"), ("es-ES", "es-ES"), ("en-US", "es-ES"), ("fr-FR", "es-ES"), ("auto", "es-UY")] {
+        run(&mut s, "file.options", json!({"region": tag}));
+        assert_eq!(s.region_spanish(), spanish, "{tag}");
+    }
+}
+
+// Hand-written synthetic fixtures (no system dictionary data): Spain's has `vosotros` forms,
+// Uruguay's has `vos` ones' verbs only (the forms come from the voseo rules).
+const SPANISH_TEST_AFF: &str =
+    "SET UTF-8\nFLAG UTF-8\nTRY aeosrnidlctumpbgvyqhfzjñáéíóú\nMAP 2\nMAP eé\nMAP ií\nREP 2\nREP v b\nREP b v\nSFX S Y 1\nSFX S 0 s [aeiou]\n";
+const SPANISH_TEST_DIC: &str = "10\nesto\nes\nuna\nprueba/S\ndel\ncorrector\ntambién\nhabéis\nvenido\ndecir\n";
+const URUGUAYAN_TEST_DIC: &str = "10\nesto\nes\nuna\nprueba/S\ndel\ncorrector\ntambién\ntener\nvenir\ndecir\n";
+
+fn spanish_test_dictionaries() {
+    use wordcraft_proof::ProofLang;
+    for (lang, dic) in [(ProofLang::Es, SPANISH_TEST_DIC), (ProofLang::EsUy, URUGUAYAN_TEST_DIC)] {
+        wordcraft_proof::es::install_dictionary(lang, SPANISH_TEST_AFF, dic).unwrap();
+    }
+}
+
+/// #3553: Spanish proofing through the same commands as Review, F7, Change and Add to
+/// Dictionary: `prueva` and `corector` are flagged with `prueba` and `corrector` offered.
+#[test]
+fn spanish_proofing_through_the_review_commands() {
+    spanish_test_dictionaries();
+    let mut s = s();
+    run(&mut s, "document.setText", json!({"text": "esto es una prueva del corector. Habéis venido?"}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "review.language", json!({"lang": "es_es", "default": true}));
+    assert_eq!(s.doc.styles.default_chr.lang.as_deref(), Some("es-ES"));
+    let issues = run(&mut s, "review.issues", json!({}));
+    let arr = issues.as_array().unwrap();
+    assert!(arr.iter().all(|i| i["lang"] == "es"), "{issues}");
+    let has = |text: &str, kind: &str, sugg: &str| {
+        arr.iter().any(|i| i["text"] == text && i["kind"] == kind && i["suggestions"].as_array().unwrap().iter().any(|x| x == sugg))
+    };
+    assert!(has("prueva", "spelling", "prueba"), "{issues}");
+    assert!(has("corector", "spelling", "corrector"), "{issues}");
+    assert!(has("Habéis venido?", "grammar", "¿Habéis venido?"), "{issues}");
+    assert_eq!(arr.len(), 3, "{issues}");
+    assert!(arr.iter().any(|i| i["message"] == "Posible error ortográfico"), "{issues}");
+    run(&mut s, "caret.docStart", json!({}));
+    assert_eq!(run(&mut s, "review.spelling", json!({}))["text"], "prueva");
+    run(&mut s, "review.applySuggestion", json!({"text": "prueba"}));
+    assert!(text(&s).starts_with("esto es una prueba del"), "{}", text(&s));
+    run(&mut s, "review.addToDictionary", json!({"word": "corector"}));
+    let left = run(&mut s, "review.issues", json!({}));
+    assert_eq!(left.as_array().unwrap().len(), 1, "{left}");
+}
+
+/// #3562 review: Add to Dictionary and Ignore All get the issue's own text, decomposed (NFD) as
+/// typed; the word is then accepted decomposed and composed, and its issue range was the typed
+/// bytes.
+#[test]
+fn add_and_ignore_all_accept_both_normalization_forms() {
+    spanish_test_dictionaries();
+    let mut s = s();
+    let text = "esto zqanade\u{301}do y zqignora\u{301}do";
+    run(&mut s, "document.setText", json!({"text": text}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "review.language", json!({"lang": "es-ES"}));
+    let issues = run(&mut s, "review.issues", json!({}));
+    let words: Vec<(String, u64)> = issues
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["kind"] == "spelling")
+        .map(|i| (i["text"].as_str().unwrap().to_string(), i["start"]["off"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(words, [("zqanade\u{301}do".to_string(), 5), ("zqignora\u{301}do".to_string(), text.find("zqign").unwrap() as u64)], "{issues}");
+    run(&mut s, "review.addToDictionary", json!({"word": words[0].0}));
+    run(&mut s, "review.ignoreAll", json!({"word": words[1].0}));
+    assert!(run(&mut s, "review.issues", json!({})).as_array().unwrap().is_empty());
+    // The composed spellings are the same words.
+    run(&mut s, "document.setText", json!({"text": "esto zqanadédo y zqignorádo"}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "review.language", json!({"lang": "es-ES"}));
+    assert!(run(&mut s, "review.issues", json!({})).as_array().unwrap().is_empty());
+    wordcraft_proof::remove_word("zqanadédo");
+}
+
+/// Uruguayan Spanish accepts the `vos` forms, imperatives included, that Spain's flags.
+#[test]
+fn uruguayan_spanish_accepts_vos_forms() {
+    spanish_test_dictionaries();
+    let mut s = s();
+    run(&mut s, "document.setText", json!({"text": "Vení, decime qué tenés."}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "review.language", json!({"lang": "es-UY"}));
+    assert_eq!(run(&mut s, "format.state", json!({}))["lang"], "es-UY");
+    let spelling = |s: &mut Session| -> Vec<String> {
+        let issues = run(s, "review.issues", json!({}));
+        issues.as_array().unwrap().iter().filter(|i| i["kind"] == "spelling").filter_map(|i| i["text"].as_str().map(String::from)).collect()
+    };
+    assert_eq!(spelling(&mut s), ["qué"], "only the word the fixture lacks");
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "review.language", json!({"lang": "es-ES"}));
+    assert_eq!(spelling(&mut s), ["Vení", "decime", "qué", "tenés"]);
+}
+
 /// Czech proofing through the same commands as Review, F7, Change and Add to Dictionary.
 #[test]
 fn czech_proofing_through_the_review_commands() {
@@ -7219,10 +7408,11 @@ fn czech_proofing_through_the_review_commands() {
 /// Review › Language and the proofing commands work in Polish end to end: the language makes
 /// the document's words Polish, F7 and the issue list use the Polish dictionary and grammar,
 /// suggestions come from it, and a suggestion fixes the text.
+const ITALIAN_TEST_AFF: &str = "SET UTF-8\nTRY aeiortnsclcaffèéè\nMAP 2\nMAP aà\nMAP eéè\nREP 1\nREP caffe caffè\n";
+const ITALIAN_TEST_DIC: &str = "6\ncasa\ncaffè\nroma\ndisse\ne\nper\n";
+
 fn italian_test_dictionary() {
-    let aff = "SET UTF-8\nTRY aeiortnsclcaffèéè\nMAP 2\nMAP aà\nMAP eéè\nREP 1\nREP caffe caffè\n";
-    let dic = "6\ncasa\ncaffè\nroma\ndisse\ne\nper\n";
-    wordcraft_proof::it::install_dictionary(aff, dic).unwrap();
+    wordcraft_proof::it::install_dictionary(ITALIAN_TEST_AFF, ITALIAN_TEST_DIC).unwrap();
 }
 
 /// Review › Language and the proofing commands work in Italian end to end: the language makes
@@ -7734,6 +7924,37 @@ fn outline_collapse_hides_descendants_and_expand_restores() {
     // Clicking a symbol selects the heading with what is under it.
     run(&mut s, "outline.selectSubtree", json!({"block": 0}));
     assert_eq!(s.selected_text(), "One\na\nTwo\nb");
+}
+
+/// #3621: with thousands of collapsed headings, an Enter above them (which shifts every index)
+/// finds them again without scanning the document once per heading, and a caret move doesn't
+/// redo the matching.
+#[test]
+fn outline_many_collapsed_headings_stay_fast_after_edits() {
+    const N: usize = 8000;
+    let text: Vec<String> = (0..N).flat_map(|i| [format!("Heading {i}"), format!("body {i}")]).collect();
+    let mut d = wordcraft_doc::Document::from_text(&text.join("\n"));
+    for i in 0..N {
+        let p = d.para_mut(StoryRef::Body, &wordcraft_doc::Path::top(2 * i)).unwrap();
+        p.props.style = Some("Heading1".into());
+    }
+    let mut s = Session::new(d);
+    run(&mut s, "view.outline", json!({}));
+    run(&mut s, "outline.showLevel1", json!({}));
+    s.sel = crate::Selection::caret(Pos::body(0, 0));
+    run(&mut s, "outline.collapse", json!({}));
+    let collapsed_texts =
+        |s: &Session| -> Vec<String> { s.view.outline.collapsed.iter().map(|(i, _)| s.doc.body[*i].as_para().unwrap().text.clone()).collect() };
+    let before = collapsed_texts(&s);
+    assert_eq!(before.len(), N, "every heading is collapsed");
+    s.sel = crate::Selection::caret(Pos::body(1, 0));
+    for _ in 0..10 {
+        run(&mut s, "text.newParagraph", json!({}));
+    }
+    for _ in 0..20 {
+        run(&mut s, "caret.right", json!({}));
+    }
+    assert_eq!(collapsed_texts(&s), before, "the same headings stay collapsed");
 }
 
 /// #745: layout keeps a picture's size, so pictures read from HTML, Markdown, ODT or RTF at
