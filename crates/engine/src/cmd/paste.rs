@@ -42,11 +42,12 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
-/// Clipboard text from the params (system clipboard), else WordCraft's own copy.
+/// Clipboard text from the params (system clipboard), else WordCraft's own copy: the text Copy
+/// put on the clipboard, list labels and all (#2015).
 fn clip_text(s: &Session, v: &Value) -> Option<String> {
     match p::str(v, "text") {
         Some(t) => Some(t.replace("\r\n", "\n")),
-        None => s.clipboard.as_ref().map(Fragment::plain_text),
+        None => s.clipboard.as_ref().map(|f| if s.clipboard_text.is_empty() { f.plain_text() } else { s.clipboard_text.clone() }),
     }
 }
 

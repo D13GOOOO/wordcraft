@@ -1115,6 +1115,13 @@ fn copying_a_list_puts_its_numbers_and_bullets_on_the_clipboard() {
     run(&mut s, "select.range", json!({"anchor": Pos::body(3, 0), "focus": Pos::body(4, 7)}));
     run(&mut s, "edit.copy", json!({}));
     assert_eq!(s.clipboard_text, "•\tPoint A\n•\tPoint B");
+
+    // Paste Special › Unformatted Text with no system clipboard text (a command, not the app)
+    // pastes the copy's text as Copy put it: the labels typed out.
+    run(&mut s, "caret.docEnd", json!({}));
+    run(&mut s, "text.newParagraph", json!({}));
+    run(&mut s, "edit.pasteSpecial", json!({"as": "text"}));
+    assert!(text(&s).ends_with("•\tPoint A\n•\tPoint B"), "{:?}", text(&s));
 }
 
 /// #2015: a list paragraph gets its label only when its start is copied with some of it: not one

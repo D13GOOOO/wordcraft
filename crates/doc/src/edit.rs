@@ -694,6 +694,10 @@ impl Document {
             self.paths_between(&a, &b).into_iter().filter(|p| self.para(a.story, p).is_some()).collect()
         };
         let whole_one = a.path != b.path || (a.off == 0 && self.para(a.story, &a.path).is_some_and(|p| b.off >= p.len()));
+        // Part of one paragraph: no label to give.
+        if !whole_one {
+            return f.clipboard_text();
+        }
         let labels = self.body_list_labels();
         let mut labelled = f.clone();
         let mut any = false;
@@ -706,7 +710,7 @@ impl Document {
             let start_copied = !is_first || a.off == 0;
             let reached = !(is_last && b.off == 0 && !is_first);
             let (Block::Para(p), Some(Some((label, level)))) = (blk, labels.get(path.last())) else { continue };
-            if !(start_copied && reached && whole_one) {
+            if !(start_copied && reached) {
                 continue;
             }
             let after = match level.suffix {
