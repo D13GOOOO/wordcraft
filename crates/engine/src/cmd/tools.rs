@@ -195,8 +195,7 @@ impl AutoCorrectPrefs {
             .filter(|(a, _)| !self.removed.iter().any(|r| r == a) && !self.entries.iter().any(|(e, _)| e == a))
             .filter(|(a, _)| self.fractions || !FRACTIONS.contains(a))
             .find(|(a, _)| {
-                *a == word
-                    || (a.chars().all(|c| c.is_lowercase()) && word.to_lowercase() == *a && word.chars().next().is_some_and(char::is_uppercase))
+                *a == word || (a.chars().all(char::is_lowercase) && word.to_lowercase() == *a && word.chars().next().is_some_and(char::is_uppercase))
             })
             .map(|(a, b)| {
                 if *a != word && b.chars().next().is_some_and(char::is_lowercase) {
@@ -249,7 +248,7 @@ impl AutoCorrectPrefs {
         let mut v: Vec<String> = NOT_SENTENCE_END
             .iter()
             .filter(|a| !self.exceptions_removed.iter().any(|r| r.eq_ignore_ascii_case(a)))
-            .map(|a| a.to_string())
+            .map(ToString::to_string)
             .chain(self.exceptions.iter().map(|a| a.to_lowercase()))
             .collect();
         v.sort();
@@ -1028,7 +1027,7 @@ fn prev_token(before: &str) -> String {
 }
 
 /// Turkish, Azerbaijani (and Crimean Tatar) map `i`/`İ` and `ı`/`I` as pairs (#1923).
-fn is_turkic(lang: Option<&str>) -> bool {
+pub(crate) fn is_turkic(lang: Option<&str>) -> bool {
     if wordcraft_proof::ProofLang::from_tag(lang) == wordcraft_proof::ProofLang::Tr {
         return true; // tr, tur, any region, same normalisation as proofing
     }
@@ -1038,7 +1037,7 @@ fn is_turkic(lang: Option<&str>) -> bool {
 }
 
 /// A letter in capitals: `i` → `İ` in Turkic languages, otherwise the Unicode default.
-fn upper_char(c: char, turkic: bool) -> String {
+pub(crate) fn upper_char(c: char, turkic: bool) -> String {
     if turkic && c == 'i' {
         return "\u{130}".to_string();
     }
@@ -1047,7 +1046,7 @@ fn upper_char(c: char, turkic: bool) -> String {
 
 /// A letter in lowercase: `I` → `ı` in Turkic languages. `İ` is always the single letter `i`,
 /// never `i` plus a combining dot.
-fn lower_char(c: char, turkic: bool) -> String {
+pub(crate) fn lower_char(c: char, turkic: bool) -> String {
     match c {
         'I' if turkic => "\u{131}".to_string(),
         '\u{130}' => "i".to_string(),

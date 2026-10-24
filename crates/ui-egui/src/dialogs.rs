@@ -1250,7 +1250,7 @@ impl Dialog {
                         filter: RecipientFilter::from_session(m),
                     }
                 } else {
-                    let fields: Vec<String> = NEW_LIST_FIELDS.iter().map(|f| f.to_string()).collect();
+                    let fields: Vec<String> = NEW_LIST_FIELDS.iter().map(ToString::to_string).collect();
                     let rows = vec![vec![String::new(); fields.len()]];
                     Dialog::RecipientList { fields, rows, message: String::new(), filter: RecipientFilter::default() }
                 }
@@ -4259,11 +4259,34 @@ mod tests {
     #[test]
     fn command_search_respects_turkish_i_pairs_and_keeps_canonical_matches() {
         use egui_kittest::kittest::Queryable;
+        // Turkish casing follows the language code; the labels are fixtures with both I pairs.
+        const LABELS: &str =
+            "\tItalic\tİtalik\n\tHome\tGiriş\n\tFont\tYazı Tipi\n\tTable of Contents\tİçindekiler Tablosu\n\tReferences\tBaşvurular\n";
+        let reg = app_with("").session.registry.clone();
+        let italic = reg.get("format.italic").unwrap();
+        let table = reg.get("insert.table").unwrap();
+        let toc = reg.all().iter().find(|c| c.label == "Table of Contents" && c.location == "References › Table of Contents").unwrap();
+        crate::i18n::set_current(crate::i18n::fixture_lang("tr", LABELS));
+        for query in ["italik", "İTALİK", "YAZI TİPİ", "FORMAT.ITALIC", "ITALIC"] {
+            assert!(command_matches(italic, query), "tr: {query}");
+        }
+        for query in ["içindekiler", "TABLE OF CONTENTS"] {
+            assert!(command_matches(toc, query), "tr: {query}");
+        }
+        for query in ["INSERT", "INSERT.TABLE"] {
+            assert!(command_matches(table, query), "tr: {query}");
+        }
+        assert_eq!(crate::i18n::lowercase("Iİıi"), "ıiıi");
+        // The same labels under another language's code use Unicode's default casing.
+        crate::i18n::set_current(crate::i18n::fixture_lang("x-fixture", LABELS));
+        assert!(!command_matches(italic, "italik"), "İ lowercases to i plus a combining dot");
+        assert_eq!(crate::i18n::lowercase("Iİıi"), "ii\u{307}ıi");
+        crate::i18n::set_current(crate::i18n::Lang::EN);
+
         let mut fonts = false;
         let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(
             move |ui, app: &mut WordApp| {
                 let ctx = ui.ctx().clone();
-                crate::i18n::set_current(crate::i18n::Lang::from_pref(&app.ui.language));
                 if fonts {
                     show(app, &ctx);
                 } else {
@@ -4274,36 +4297,18 @@ mod tests {
             app_with("Unchanged document"),
         );
         let before = serde_json::to_value(&h.state().session.doc).unwrap();
-        for (language, query, expected) in [
-            ("tr", "italik", "İtalik   —   Giriş › Yazı Tipi"),
-            ("tr", "İTALİK", "İtalik   —   Giriş › Yazı Tipi"),
-            ("tr", "içindekiler", "İçindekiler Tablosu   —   Başvurular › İçindekiler Tablosu"),
-            ("tr", "YAZI TİPİ", "İtalik   —   Giriş › Yazı Tipi"),
-            // Dozens of commands match a lone INSERT and the box shows 14, in registry order: the
-            // witness is an early one; Table is checked below, past the box's limit.
-            ("tr", "INSERT", "Bölünemez Boşluk   —   Ekle › Semboller"),
-            ("tr", "INSERT.TABLE", "Tablo   —   Ekle › Tablolar"),
-            ("tr", "FORMAT.ITALIC", "İtalik   —   Giriş › Yazı Tipi"),
-            ("tr", "TABLE OF CONTENTS", "İçindekiler Tablosu   —   Başvurular › İçindekiler Tablosu"),
-            ("en", "ITALIC", "Italic   —   Home › Font"),
-            ("en", "FORMAT.ITALIC", "Italic   —   Home › Font"),
-            ("en", "INSERT.TABLE", "Table   —   Insert › Tables"),
-        ] {
-            h.state_mut().ui.language = language.into();
+        for (query, expected) in
+            [("ITALIC", "Italic   —   Home › Font"), ("FORMAT.ITALIC", "Italic   —   Home › Font"), ("INSERT.TABLE", "Table   —   Insert › Tables")]
+        {
             h.state_mut().dialog = Some(Dialog::Commands { query: query.into(), swallow: false });
             h.run_steps(4);
             assert!(
                 h.query(egui_kittest::kittest::By::new().role(egui::accesskit::Role::Button).label_contains(expected)).is_some(),
-                "{language}: {query}\n{:?}",
+                "{query}\n{:?}",
                 h.query_all_by_role(egui::accesskit::Role::Button).collect::<Vec<_>>()
             );
-            assert_eq!(crate::i18n::lowercase("Iİıi"), if language == "tr" { "ıiıi" } else { "ii\u{307}ıi" });
         }
         assert_eq!(serde_json::to_value(&h.state().session.doc).unwrap(), before, "search does not change the document");
-        crate::i18n::set_current(crate::i18n::Lang::from_pref("tr"));
-        let reg = h.state().session.registry.clone();
-        assert!(command_matches(reg.get("insert.table").unwrap(), "INSERT"), "tr: INSERT finds Table");
-        crate::i18n::set_current(crate::i18n::Lang::EN);
     }
 
     /// #2986: a box that keeps the keyboard asks for focus only while it lacks it. `request_focus`
