@@ -348,11 +348,14 @@ impl AutoCorrectForm {
             "smartQuotes": o.smart_quotes,
             "fractions": o.fractions,
             "ordinals": o.ordinals,
+            "boldItalic": o.bold_italic,
             "dashes": o.dashes,
             "links": o.links,
             "bullets": o.bullets,
             "numbering": o.numbering,
             "borderLines": o.border_lines,
+            "tabIndent": o.tab_indent,
+            "headingStyles": o.heading_styles,
             "autoAddFirstLetter": o.auto_add_first_letter,
             "autoAddInitialCaps": o.auto_add_initial_caps,
         })
@@ -395,12 +398,16 @@ fn autocorrect_ui(app: &mut WordApp, ui: &mut Ui, f: &mut AutoCorrectForm) -> bo
             ui.checkbox(&mut o.smart_quotes, tl!("Smart quotes instead of straight quotes"));
             ui.checkbox(&mut o.fractions, tl!("Fractions (1/2) as fraction characters (½)"));
             ui.checkbox(&mut o.ordinals, tl!("Ordinals (1st) as superscript"));
+            ui.checkbox(&mut o.bold_italic, tl!("*Bold* and _italic_ as real formatting"));
             ui.checkbox(&mut o.dashes, tl!("Hyphens (--) as dashes (—)"));
             ui.checkbox(&mut o.links, tl!("Internet addresses as links"));
             heading(ui, "Apply as you type");
             ui.checkbox(&mut o.bullets, tl!("Automatic bulleted lists"));
             ui.checkbox(&mut o.numbering, tl!("Automatic numbered lists"));
             ui.checkbox(&mut o.border_lines, tl!("Border lines"));
+            ui.checkbox(&mut o.heading_styles, tl!("Built-in Heading styles"));
+            heading(ui, "Automatically as you type");
+            ui.checkbox(&mut o.tab_indent, tl!("Set left- and first-indent with tabs and backspaces"));
         }
         _ => math_tab(ui, f),
     }

@@ -1135,9 +1135,9 @@ fn write_comment_ids(
             },
         };
         used.insert(durable.clone());
-        // A local `w:date` with a zone designator is UTC already; otherwise only the file's own.
+        // Only a known UTC time: `w:date` is local time, often with a `Z` it doesn't mean.
         // Remove date and time on save (#1062): no comment date here either.
-        let utc = if doc.settings.remove_date_time { None } else { c.date_utc.clone().or_else(|| c.date.ends_with('Z').then(|| c.date.clone())) };
+        let utc = if doc.settings.remove_date_time { None } else { c.date_utc.clone() };
         rows.push((pid.clone(), durable, utc));
     }
     let mc = "http://schemas.openxmlformats.org/markup-compatibility/2006";

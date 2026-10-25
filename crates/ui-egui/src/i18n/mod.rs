@@ -32,13 +32,14 @@
 //! - [`get`]: one context's translation only, never the plain row (`spacing`'s "Open").
 //! - [`location`]: a ribbon location such as `Home › Font`, segment by segment.
 //! - [`fmt`]: fill `{name}` placeholders after a lookup; translators may reorder them.
+//! - [`fmt_plain`]: [`fmt`] without bidi isolate marks, for text that goes into the document.
 
 use std::cell::Cell;
 use std::sync::{LazyLock, OnceLock};
 
 use craft_i18n::I18n;
 
-pub use craft_i18n::fmt;
+pub use craft_i18n::{fmt, fmt_plain};
 
 include!(concat!(env!("OUT_DIR"), "/craft_i18n.rs"));
 
