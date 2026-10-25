@@ -1430,9 +1430,10 @@ fn layout_box(
     BoxLayout { items, height: y.max(0.0), floats_bottom, last_top: last_top.max(0.0), table_areas, page_table_wraps }
 }
 
-/// The paragraphs of one text frame stacked one under the other: the top of each in the frame and
-/// the height of their text (the space between two collapses to the larger one unless the
-/// document adds them up).
+/// The paragraphs of one text frame stacked one under the other: the top of each one's text in
+/// the frame and the height of their text (the space between two collapses to the larger one
+/// unless the document adds them up). Each paragraph's top and bottom borders take their room, as
+/// in the flow ([`Edges::own`], the edges it is placed with).
 fn frame_stack(sum_spacing: bool, pls: &[Arc<ParaLayout>]) -> (Vec<f32>, f32) {
     let (mut y, mut prev_after) = (0.0f32, 0.0f32);
     let tops = pls
@@ -1440,8 +1441,9 @@ fn frame_stack(sum_spacing: bool, pls: &[Arc<ParaLayout>]) -> (Vec<f32>, f32) {
         .enumerate()
         .map(|(k, pl)| {
             y += if k == 0 || sum_spacing { pl.rp.space_before } else { (pl.rp.space_before - prev_after).max(0.0) };
-            let top = y;
-            y += pl.height + pl.rp.space_after;
+            let edges = Edges::own(pl, 0, pl.lines.len());
+            let top = y + edges.top;
+            y = top + pl.height + edges.bottom + pl.rp.space_after;
             prev_after = pl.rp.space_after;
             top
         })

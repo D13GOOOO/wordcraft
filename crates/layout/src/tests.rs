@@ -7868,6 +7868,42 @@ fn text_frames_in_a_cell_share_one_frame() {
     assert!((a.x - b.x).abs() < 1.0);
 }
 
+/// In a cell (or header), too, a framed paragraph's borders take their room in the frame: the
+/// next paragraph in it starts below the first one's bottom border and its own top border.
+#[test]
+fn bordered_text_frames_in_a_cell_keep_their_borders_apart() {
+    use wordcraft_doc::props::TextFrame;
+    let gap = |bordered: bool| {
+        let mut d = Document::from_text("Above");
+        let mut t = Table::new(1, 1, 300.0);
+        let fr = TextFrame {
+            x_align: Some("right".into()),
+            h_anchor: "text".into(),
+            v_anchor: "text".into(),
+            wrap: "around".into(),
+            ..Default::default()
+        };
+        let b = Border { space: 1.0, ..Border::single(1.5) };
+        let framed = |s: &str| {
+            let mut p = wordcraft_doc::Paragraph::with_text(s, Default::default());
+            p.props.frame = Some(fr.clone());
+            p.props.space_before = Some(0.0);
+            p.props.space_after = Some(0.0);
+            if bordered {
+                p.props.borders = Some(Borders { top: Some(b), bottom: Some(b), ..Borders::default() });
+            }
+            wordcraft_doc::para_block(p)
+        };
+        t.rows[0].cells[0].blocks = vec![framed("7"), framed("8")];
+        d.insert_block(StoryRef::Body, &Path::top(1), wordcraft_doc::Block::Table(t)).unwrap();
+        let l = lay(&d);
+        let at = |i: u32| l.caret(&Pos { story: StoryRef::Body, path: Path(vec![1, 0, 0, i]), off: 0 }).unwrap();
+        at(1).top - at(0).top
+    };
+    let room = gap(true) - gap(false);
+    assert!((room - 5.0).abs() < 0.05, "the first one's bottom border and the second one's top border: {room}");
+}
+
 /// Text frames in the body (a court form built from them, #2406) go where their frame puts them
 /// on the page; paragraphs with the same frame stack in it, and the text outside it flows as if
 /// the frame weren't there. WordCraft laid every framed paragraph out in line, one under the
@@ -8060,6 +8096,28 @@ fn body_text_frames_at_the_foot_of_the_page_share_one_frame() {
         "at the foot of the text area: {} vs {foot}",
         year.top + year.height
     );
+}
+
+/// A framed paragraph's borders take their room in the frame, as in the flow: on the bottom
+/// margin, its text ends the bottom border's room (distance plus width) above the margin, as Word
+/// draws it (1.5 pt border 1 pt away: 2.4 pt in Word), and the next paragraph in the frame starts
+/// below both borders' room.
+#[test]
+fn a_bordered_frame_at_the_bottom_margin_keeps_its_border_on_the_page() {
+    let b = Border { space: 1.0, ..Border::single(1.5) };
+    let lay_frame = |bordered: bool| {
+        let mut d = framed_doc(&["Title", "City", "2026"], &[1, 2], &body_frame("bottom"));
+        if bordered {
+            d.para_mut(StoryRef::Body, &Path::top(2)).unwrap().props.borders = Some(Borders { top: Some(b), bottom: Some(b), ..Borders::default() });
+        }
+        let l = lay(&d);
+        let at = |i: usize| l.caret(&Pos { story: StoryRef::Body, path: Path::top(i), off: 0 }).unwrap();
+        let (city, year) = (at(1), at(2));
+        (year.top + year.height, year.top - city.top)
+    };
+    let ((plain_end, plain_gap), (end, gap)) = (lay_frame(false), lay_frame(true));
+    assert!((plain_end - end - 2.5).abs() < 0.05, "the bottom border's room below the text: {}", plain_end - end);
+    assert!((gap - plain_gap - 2.5).abs() < 0.05, "the top border's room above the text: {}", gap - plain_gap);
 }
 
 /// A frame at the foot of the page after text that already runs down there would cover it: it
