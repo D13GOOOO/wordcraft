@@ -1,8 +1,8 @@
 //! Design tab: themes, style sets, colours, fonts, paragraph spacing, watermark, page colour, borders.
 
 use serde_json::{Value, json};
-use wordcraft_doc::props::{Border, BorderStyle, Borders, LineSpacing, Rgb, TextColor};
-use wordcraft_doc::{Watermark, styles};
+use wordcraft_doc::props::{Border, BorderStyle, Borders, CharProps, LineSpacing, ParaProps, Rgb, TextColor};
+use wordcraft_doc::{Document, Watermark, styles};
 
 use super::sel_result;
 use crate::{CmdError, CmdResult, CommandSpec, Session, p};
@@ -79,6 +79,7 @@ pub fn specs() -> Vec<CommandSpec> {
             r#"{"kind"?: "box|none", "width"?: pt, "color"?: "RRGGBB", "style"?: "single|double|dotted|dashed|thick|triple|dotDash|wave", "sides"?: {"top"|"left"|"bottom"|"right": {"style"?, "width"?: pt, "color"?: "RRGGBB"} | null} (exactly these sides, instead of `kind`), "applyTo"?: "section|document"}"#,
         ),
         CommandSpec::new("design.setDefault", "Set as Default", "Design › Document Formatting", |s, _| {
+            s.prefs.default_formatting = Some(DefaultFormatting::of(&s.doc));
             s.status = "These settings will be used for new documents.".into();
             sel_result(s)
         })
@@ -90,11 +91,51 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// Design › Set as Default: the document's default paragraph and character formatting and its
+/// theme fonts, kept in the preferences (so they outlast a restart) for new blank documents (#4237).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DefaultFormatting {
+    pub para: ParaProps,
+    pub chr: CharProps,
+    pub major_font: String,
+    pub minor_font: String,
+}
+
+impl Default for DefaultFormatting {
+    fn default() -> Self {
+        DefaultFormatting::of(&Document::new())
+    }
+}
+
+impl DefaultFormatting {
+    pub fn of(doc: &Document) -> Self {
+        DefaultFormatting {
+            para: doc.styles.default_para.clone(),
+            chr: doc.styles.default_chr.clone(),
+            major_font: doc.settings.major_font.clone(),
+            minor_font: doc.settings.minor_font.clone(),
+        }
+    }
+
+    /// Give a new document these defaults: the theme fonts as Design › Fonts sets them (headings
+    /// too), then the default formatting as it was set.
+    pub fn apply(&self, doc: &mut Document) {
+        set_doc_fonts(doc, &self.major_font, &self.minor_font);
+        doc.styles.default_para = self.para.clone();
+        doc.styles.default_chr = self.chr.clone();
+    }
+}
+
 fn set_fonts(s: &mut Session, heading: &str, body: &str) {
-    s.doc.settings.major_font = heading.into();
-    s.doc.settings.minor_font = body.into();
-    s.doc.styles.default_chr.font = Some(body.into());
-    for st in &mut s.doc.styles.styles {
+    set_doc_fonts(&mut s.doc, heading, body);
+}
+
+fn set_doc_fonts(s: &mut Document, heading: &str, body: &str) {
+    s.settings.major_font = heading.into();
+    s.settings.minor_font = body.into();
+    s.styles.default_chr.font = Some(body.into());
+    for st in &mut s.styles.styles {
         if let Some(f) = &st.chr.font
             && (f == styles::HEADING_FONT || st.id.starts_with("Heading") || st.id == "Title")
         {

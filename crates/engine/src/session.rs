@@ -555,6 +555,10 @@ pub struct Prefs {
     /// blank documents and plain text. Older preferences keep following the interface.
     #[serde(deserialize_with = "lenient_default_language")]
     pub default_language: Option<String>,
+    /// Design › Set as Default: the formatting new blank documents start with (#4237); `None`
+    /// keeps the built-in defaults. A damaged saved value reads as `None`.
+    #[serde(deserialize_with = "lenient_default_formatting")]
+    pub default_formatting: Option<crate::cmd::design::DefaultFormatting>,
     /// Typing over a selection replaces it; off, the typed text goes in front of it.
     pub typing_replaces_selection: bool,
     /// The Insert key switches overtype on and off.
@@ -614,6 +618,7 @@ impl Default for Prefs {
             ignore_internet: true,
             detect_language: true,
             default_language: None,
+            default_formatting: None,
             autocorrect: Default::default(),
         }
     }
@@ -631,6 +636,11 @@ impl Prefs {
 }
 
 /// Ignore malformed saved language tags without discarding the other preferences.
+fn lenient_default_formatting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<crate::cmd::design::DefaultFormatting>, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).ok().flatten())
+}
+
 fn lenient_default_language<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
     Ok(value.as_str().and_then(wordcraft_proof::lang::normalize_tag))

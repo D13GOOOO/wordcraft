@@ -10511,3 +10511,31 @@ fn export_png_refuses_a_path_that_is_not_png() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #4237: Design › Set as Default keeps the paragraph spacing and theme fonts for new blank
+/// documents after a restart: they go in the preferences the front end saves and restores.
+#[test]
+fn design_set_as_default_outlasts_a_restart() {
+    use wordcraft_doc::props::LineSpacing;
+    let mut s = s();
+    run(&mut s, "design.paragraphSpacing", json!({"value": "none"}));
+    run(&mut s, "design.themeFonts", json!({"heading": "Georgia", "body": "Verdana"}));
+    run(&mut s, "design.setDefault", json!({}));
+
+    // A restart: a new session with the saved preferences.
+    let saved = serde_json::to_value(&s.prefs).unwrap();
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    s.prefs = serde_json::from_value(saved).unwrap();
+    run(&mut s, "file.new", json!({}));
+    let st = &s.doc.styles;
+    assert_eq!((st.default_para.space_after, st.default_para.line_spacing), (Some(0.0), Some(LineSpacing::Multiple(1.0))));
+    assert_eq!(st.default_chr.font.as_deref(), Some("Verdana"));
+    assert_eq!((s.doc.settings.major_font.as_str(), s.doc.settings.minor_font.as_str()), ("Georgia", "Verdana"));
+
+    // Without it, new documents keep the built-in defaults; a damaged saved value reads as none.
+    let mut s = Session::new(wordcraft_doc::Document::new());
+    run(&mut s, "file.new", json!({}));
+    assert_eq!(s.doc.styles.default_para, wordcraft_doc::Document::new().styles.default_para);
+    let prefs: crate::Prefs = serde_json::from_value(json!({"defaultFormatting": 7})).unwrap();
+    assert!(prefs.default_formatting.is_none());
+}

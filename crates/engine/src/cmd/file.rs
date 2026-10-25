@@ -214,10 +214,13 @@ fn new(s: &mut Session, v: &Value) -> CmdResult {
     sel_result(s)
 }
 
-/// A blank document on the Normal template: the region's paper (#838), written in the editing
-/// language (the templates' text is English).
+/// A blank document on the Normal template: the region's paper (#838), the formatting Design ›
+/// Set as Default saved (#4237), written in the editing language (the templates' text is English).
 fn normal_document(s: &Session) -> Document {
     let mut d = s.blank_document();
+    if let Some(f) = &s.prefs.default_formatting {
+        f.apply(&mut d);
+    }
     if let Some(lang) = s.prefs.default_language.as_ref().or(s.editing_lang.as_ref()) {
         d.styles.default_chr.lang = Some(lang.clone());
     }
