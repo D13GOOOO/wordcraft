@@ -50,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("insert.deleteBookmark", "Delete Bookmark", "Insert › Links", delete_bookmark).params(r#"{"name": string}"#),
         CommandSpec::new("insert.header", "Header", "Insert › Header & Footer", |s, v| header_footer(s, v, true)).params(r#"{"text"?: string, "preset"?: "blank|blankThree|title"}"#),
         CommandSpec::new("insert.footer", "Footer", "Insert › Header & Footer", |s, v| header_footer(s, v, false)).params(r#"{"text"?: string, "preset"?: "blank|blankThree|pageNumber"}"#),
-        CommandSpec::new("insert.pageNumber", "Page Number", "Insert › Header & Footer", page_number).params(r#"{"position"?: "top|bottom|current", "align"?: "left|center|right", "format"?: "x of y"}"#),
+        CommandSpec::new("insert.pageNumber", "Page Number", "Insert › Header & Footer", page_number).params(r#"{"position"?: "top|bottom|current", "align"?: "left|center|right", "format"?: "x of y", "text"?: "Pagina {page} di {pages}"}"#),
         // Pure: going into an existing header/footer changes nothing; one the page doesn't have yet
         // is made by the mutating `insert.createHeader`/`insert.createFooter` (undoable, refused in
         // a protected document).
@@ -813,20 +813,69 @@ fn page_number(s: &mut Session, v: &Value) -> CmdResult {
     let mut para = Paragraph::new().styled(if header { "Header" } else { "Footer" });
     para.props.align = Some(align);
     para.props.tabs = Some(vec![TabStop { pos: 0.0, align: TabAlign::Clear, leader: Default::default() }]);
-    if x_of_y {
-        para.insert_text(0, "Page  of ", &CharProps::default())?;
-        para.insert_object(5, field, &CharProps { bold: Some(true), ..Default::default() })?;
-        let end = para.len();
-        para.insert_object(
-            end,
-            InlineObject::Field { instr: "NUMPAGES".into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() },
-            &CharProps { bold: Some(true), ..Default::default() },
-        )?;
+    let template = match p::str(v, "text") {
+        Some(t) => Some(t.chars().take(MAX_PAGE_TEXT).collect::<String>()),
+        None if x_of_y => {
+            let lang = s.doc.styles.default_chr.lang.as_deref().or(s.editing_lang.as_deref());
+            let (page, of) = page_of_words(lang);
+            Some(format!("{page} {{page}} {of} {{pages}}"))
+        }
+        None => None,
+    };
+    if let Some(template) = template {
+        let bold = CharProps { bold: Some(true), ..Default::default() };
+        let mut rest = template.as_str();
+        while !rest.is_empty() {
+            // The next placeholder (neither is found inside the other).
+            let next = ["{pages}", "{page}"].iter().filter_map(|k| rest.find(k).map(|i| (i, *k))).min_by_key(|(i, _)| *i);
+            let (text, field) = match next {
+                Some((i, k)) => (rest.get(..i).unwrap_or(""), Some((if k == "{pages}" { "NUMPAGES" } else { "PAGE" }, i + k.len()))),
+                None => (rest, None),
+            };
+            if !text.is_empty() {
+                let end = para.len();
+                para.insert_text(end, text, &CharProps::default())?;
+            }
+            let Some((instr, skip)) = field else { break };
+            let end = para.len();
+            let obj = InlineObject::Field { instr: instr.into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() };
+            para.insert_object(end, obj, &bold)?;
+            rest = rest.get(skip..).unwrap_or("");
+        }
     } else {
         para.insert_object(0, field, &CharProps::default())?;
     }
     s.doc.set_story(StoryRef::Part(id), vec![para_block(para)])?;
     Ok(json!({"story": id}))
+}
+
+/// Longest `text` template `insert.pageNumber` takes, in characters.
+const MAX_PAGE_TEXT: usize = 256;
+
+/// "Page" and "of" for a "Page X of Y" footer in the document's language (#4466); English
+/// where the language isn't listed.
+fn page_of_words(lang: Option<&str>) -> (&'static str, &'static str) {
+    match wordcraft_doc::collate::language(lang).as_str() {
+        "it" => ("Pagina", "di"),
+        "fr" => ("Page", "sur"),
+        "de" => ("Seite", "von"),
+        "es" | "pt" => ("Página", "de"),
+        "ca" => ("Pàgina", "de"),
+        "gl" => ("Páxina", "de"),
+        "nl" => ("Pagina", "van"),
+        "ro" => ("Pagina", "din"),
+        "pl" => ("Strona", "z"),
+        "cs" | "sk" => ("Strana", "z"),
+        "sl" => ("Stran", "od"),
+        "hr" | "bs" | "sr" => ("Stranica", "od"),
+        "sv" => ("Sida", "av"),
+        "da" => ("Side", "af"),
+        "nb" | "nn" | "no" => ("Side", "av"),
+        "ru" => ("Страница", "из"),
+        "uk" => ("Сторінка", "з"),
+        "el" => ("Σελίδα", "από"),
+        _ => ("Page", "of"),
+    }
 }
 
 fn date_time(s: &mut Session, v: &Value) -> CmdResult {
@@ -1074,6 +1123,34 @@ pub fn drop_cap_state(s: &Session) -> DropCapState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The footer `insert.pageNumber` writes: its text (fields as their results) and field codes.
+    fn page_footer(s: &mut Session, v: Value) -> (String, Vec<String>) {
+        let id = s.run("insert.pageNumber", &v).unwrap()["story"].as_u64().unwrap() as u32;
+        let para = s.doc.parts[&id].blocks[0].as_para().unwrap().clone();
+        let codes = para.objects.iter().filter_map(|o| if let InlineObject::Field { instr, .. } = o { Some(instr.clone()) } else { None }).collect();
+        (para.plain_text(), codes)
+    }
+
+    /// #4466: "Page X of Y" is written in the document's language, else the editing language,
+    /// and `text` sets the words, with `{page}` and `{pages}` where the fields go.
+    #[test]
+    fn page_x_of_y_follows_the_document_language() {
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        let x_of_y = json!({"format": "x of y"});
+        assert_eq!(page_footer(&mut s, x_of_y.clone()), ("Page 1 of 1".into(), vec!["PAGE".into(), "NUMPAGES".into()]));
+        s.doc.styles.default_chr.lang = Some("it-IT".into());
+        assert_eq!(page_footer(&mut s, x_of_y.clone()).0, "Pagina 1 di 1");
+        s.doc.styles.default_chr.lang = None;
+        s.editing_lang = Some("de-DE".into());
+        assert_eq!(page_footer(&mut s, x_of_y).0, "Seite 1 von 1");
+
+        let (text, codes) = page_footer(&mut s, json!({"text": "{pages} pp. – p. {page}"}));
+        assert_eq!((text.as_str(), codes), ("1 pp. – p. 1", vec!["NUMPAGES".to_string(), "PAGE".into()]));
+        // Hostile templates: nothing but placeholders, broken ones, and a very long one.
+        assert_eq!(page_footer(&mut s, json!({"text": "{page}{pages}{page"})).0, "11{page");
+        assert_eq!(page_footer(&mut s, json!({"text": "é".repeat(10_000)})).0.chars().count(), MAX_PAGE_TEXT);
+    }
 
     /// A 4 × 4 RGB TIFF that says its strips are JPEG (they aren't): its header still reads.
     fn jpeg_strip_tiff() -> Vec<u8> {
