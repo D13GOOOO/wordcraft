@@ -275,6 +275,8 @@ impl Session {
                 ime_state_exhausted: _,
             pending_ime_application_change: _,
             ime_origin: _,
+            // A picked Drawing Canvas member is cleared by a switch, not kept per document.
+            member: _,
             others: _,
             order: _,
             untitled_count: _,
