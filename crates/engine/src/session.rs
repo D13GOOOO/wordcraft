@@ -782,12 +782,13 @@ impl Prefs {
     }
 }
 
-/// Ignore malformed saved language tags without discarding the other preferences.
+/// Drop a damaged saved Set as Default value without discarding the other preferences.
 fn lenient_default_formatting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<crate::cmd::design::DefaultFormatting>, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
     Ok(serde_json::from_value(value).ok().flatten())
 }
 
+/// Ignore malformed saved language tags without discarding the other preferences.
 fn lenient_default_language<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let value = serde_json::Value::deserialize(d)?;
     Ok(value.as_str().and_then(wordcraft_proof::lang::normalize_tag))
