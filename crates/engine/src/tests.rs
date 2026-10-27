@@ -11086,3 +11086,36 @@ fn inspect_marks_page_fields_in_headers_and_footers() {
     assert_eq!(part["text"], "Page 1 of 1");
     assert_eq!(part["fields"], json!([{"code": "PAGE", "result": "1", "perPage": true}, {"code": "NUMPAGES", "result": "1", "perPage": true}]));
 }
+
+/// #4467 review: a STYLEREF in a footer's table cell is listed as per page too (the layout looks
+/// it up on each page), and a part with more fields than `document.inspect` lists says so.
+#[test]
+fn inspect_lists_cell_fields_and_marks_a_cut_list() {
+    use wordcraft_doc::{Block, CharProps, InlineObject, Paragraph, Table, para_block};
+    let field =
+        |instr: &str| InlineObject::Field { instr: instr.into(), result: "x".into(), locked: false, dirty: false, code: false, form: String::new() };
+    let mut s = s();
+    let id = run(&mut s, "insert.pageNumber", json!({}))["story"].as_u64().unwrap();
+    let key = u32::try_from(id).unwrap();
+    let mut cell = Paragraph::new();
+    cell.insert_object(0, field("STYLEREF \"Heading 1\""), &CharProps::default()).unwrap();
+    let mut table = Table::new(1, 1, 200.0);
+    table.rows[0].cells[0].blocks = vec![para_block(cell)];
+    s.doc.parts.get_mut(&key).unwrap().blocks.push(std::sync::Arc::new(Block::Table(table)));
+    let part = |s: &mut Session| {
+        let doc = run(s, "document.inspect", json!({}));
+        doc["parts"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap().clone()
+    };
+    let p = part(&mut s);
+    assert_eq!(p["fields"][1], json!({"code": "STYLEREF \"Heading 1\"", "result": "x", "perPage": true}));
+    assert!(p.get("fieldsTruncated").is_none(), "{p}");
+
+    let mut many = Paragraph::new();
+    for _ in 0..250 {
+        many.insert_object(0, field("AUTHOR"), &CharProps::default()).unwrap();
+    }
+    s.doc.parts.get_mut(&key).unwrap().blocks.push(para_block(many));
+    let p = part(&mut s);
+    assert_eq!(p["fields"].as_array().unwrap().len(), 200);
+    assert_eq!(p["fieldsTruncated"], true);
+}
