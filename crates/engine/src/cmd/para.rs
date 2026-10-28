@@ -270,8 +270,20 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Whether Shading applies to the selected text rather than to paragraphs: a selection inside one
-/// paragraph that isn't all of it (all of it stands for the paragraph, mark included).
+/// paragraph, short of its mark. A selection reaching past the mark ends at the next paragraph's
+/// start, so all of a paragraph's text is still text, except in the last paragraph of its story,
+/// cell or box, where it stands for the paragraph with its mark. A selected object (a text box, a
+/// picture) is its object character, not text.
 fn shades_text(s: &Session) -> bool {
     let (a, b) = s.sel.ordered();
-    a != b && a.story == b.story && a.path == b.path && s.doc.para_at(&a).is_some_and(|p| !(a.off == 0 && b.off >= p.len()))
+    if a == b || a.story != b.story || a.path != b.path {
+        return false;
+    }
+    let Some(p) = s.doc.para_at(&a) else { return false };
+    let object = wordcraft_doc::para::OBJ;
+    if b.off.saturating_sub(a.off) == object.len_utf8() && p.text.get(a.off..b.off).is_some_and(|t| t.starts_with(object)) {
+        return false;
+    }
+    let last = s.doc.next_para(a.story, &a.path).is_none_or(|q| q.parent() != a.path.parent());
+    !(last && a.off == 0 && b.off >= p.len())
 }

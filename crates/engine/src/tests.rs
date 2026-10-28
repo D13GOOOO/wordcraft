@@ -6944,6 +6944,31 @@ fn shading_selected_text_shades_the_text_and_no_color_clears_it() {
         let p = s.doc.para_at(&s.sel.focus).unwrap();
         assert_eq!((p.props.shading, p.props_of_char(0).shading), (orange, None), "whole: {whole}");
     }
+    // All the text of a paragraph that isn't the last is still text: a selection with its mark
+    // would end at the next paragraph's start.
+    let mut s = self::s();
+    run(
+        &mut s,
+        "document.setText",
+        json!({"text": "Word
+More"}),
+    );
+    run(&mut s, "select.text", json!({"text": "Word"}));
+    run(&mut s, "para.shading", json!({"color": "FFA500"}));
+    let p = s.doc.para_at(&s.sel.focus).unwrap();
+    assert_eq!((p.props.shading, p.props_of_char(0).shading), (None, orange));
+    // A selected text box shades its anchor's paragraph, not every line of the box.
+    let mut s = self::s();
+    run(&mut s, "text.insert", json!({"text": "Anchor"}));
+    run(&mut s, "insert.textBox", json!({"text": "Inside"}));
+    let id = s.doc.parts.iter().find(|(_, p)| p.kind == wordcraft_doc::PartKind::TextBox).map(|(id, _)| *id).unwrap();
+    let end = s.doc.text_box_anchor(id).unwrap();
+    let start = wordcraft_doc::Pos { off: end.off - wordcraft_doc::para::OBJ.len_utf8(), ..end.clone() };
+    run(&mut s, "select.range", json!({"anchor": start, "focus": end}));
+    run(&mut s, "para.shading", json!({"color": "FFA500"}));
+    let boxed = s.doc.parts.get(&id).and_then(|p| p.blocks.first()).and_then(|b| b.as_para()).unwrap();
+    assert_eq!(boxed.props_of_char(0).shading, None, "the box's text isn't shaded");
+    assert_eq!(s.doc.para_at(&end).unwrap().props.shading, orange);
 }
 
 /// #2738: Home › Underline › Underline Color sets the underline's own colour and leaves its style
