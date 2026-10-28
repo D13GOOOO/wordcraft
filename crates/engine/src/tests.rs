@@ -6969,6 +6969,23 @@ More"}),
     let boxed = s.doc.parts.get(&id).and_then(|p| p.blocks.first()).and_then(|b| b.as_para()).unwrap();
     assert_eq!(boxed.props_of_char(0).shading, None, "the box's text isn't shaded");
     assert_eq!(s.doc.para_at(&end).unwrap().props.shading, orange);
+    // A selected field is text (its object character isn't a drawing): No Color clears its shading.
+    let mut s = self::s();
+    run(&mut s, "text.insert", json!({"text": "Page "}));
+    run(&mut s, "insert.pageNumber", json!({"position": "current"}));
+    let end = s.sel.focus.clone();
+    let start = wordcraft_doc::Pos { off: end.off - wordcraft_doc::para::OBJ.len_utf8(), ..end.clone() };
+    run(&mut s, "select.range", json!({"anchor": start, "focus": end}));
+    run(&mut s, "para.shading", json!({"color": "FFA500"}));
+    let p = s.doc.para_at(&end).unwrap();
+    assert_eq!((p.props.shading, p.props_of_char(start.off).shading), (None, orange), "the field is shaded");
+    run(&mut s, "para.shading", json!({"color": null}));
+    assert_eq!(s.doc.para_at(&end).unwrap().props_of_char(start.off).shading, None);
+    // Borders and Shading › Apply to: Paragraph shades the paragraph, whatever is selected.
+    run(&mut s, "select.text", json!({"text": "Page"}));
+    run(&mut s, "para.shading", json!({"color": "FFA500", "paragraph": true}));
+    let p = s.doc.para_at(&s.sel.focus).unwrap();
+    assert_eq!((p.props.shading, p.props_of_char(0).shading), (orange, None));
 }
 
 /// #2738: Home › Underline › Underline Color sets the underline's own colour and leaves its style

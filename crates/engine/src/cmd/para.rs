@@ -184,12 +184,15 @@ pub fn specs() -> Vec<CommandSpec> {
             let c = p::str(v, "color").and_then(Rgb::parse);
             // Text selected within one paragraph is shaded itself, as in Word, so No Color takes
             // off a shading a file gave the text (#4685); a caret or paragraphs shade paragraphs.
-            if shades_text(s) {
+            // `paragraph` (Borders and Shading › Apply to: Paragraph) shades the paragraphs anyway.
+            if p::bool(v, "paragraph") != Some(true) && shades_text(s) {
                 return super::format::apply(s, &|x| x.shading = c);
             }
             fmt(s, &|p| p.shading = c)
         })
-        .params(r#"{"color": "RRGGBB" | null}"#),
+        .params(
+            r#"{"color": "RRGGBB" | null, "paragraph"?: bool} (text selected inside one paragraph is shaded itself, as in Word; `paragraph: true` shades the paragraphs instead, as Borders and Shading › Apply to: Paragraph)"#,
+        ),
         CommandSpec::new("para.borders", "Borders", "Home › Paragraph", borders).params(
             r#"{"kind": "bottom|top|left|right|none|all|outside|inside|horizontalLine", "width"?: pt, "color"?: "RRGGBB", "style"?: "single|double|dotted|dashed|thick|triple|dotDash|wave", "sides"?: Sides} where Sides = {"top"|"left"|"bottom"|"right"|"between": {"style"?, "width"?: pt, "color"?: "RRGGBB"} | null}: exactly these sides (others off), instead of `kind`"#,
         ),
@@ -272,16 +275,15 @@ pub fn specs() -> Vec<CommandSpec> {
 /// Whether Shading applies to the selected text rather than to paragraphs: a selection inside one
 /// paragraph, short of its mark. A selection reaching past the mark ends at the next paragraph's
 /// start, so all of a paragraph's text is still text, except in the last paragraph of its story,
-/// cell or box, where it stands for the paragraph with its mark. A selected object (a text box, a
-/// picture) is its object character, not text.
+/// cell or box, where it stands for the paragraph with its mark. A selected picture, shape or text
+/// box is its object character, not text (a field's object character is).
 fn shades_text(s: &Session) -> bool {
     let (a, b) = s.sel.ordered();
     if a == b || a.story != b.story || a.path != b.path {
         return false;
     }
     let Some(p) = s.doc.para_at(&a) else { return false };
-    let object = wordcraft_doc::para::OBJ;
-    if b.off.saturating_sub(a.off) == object.len_utf8() && p.text.get(a.off..b.off).is_some_and(|t| t.starts_with(object)) {
+    if super::objects::object_selection(s).is_some() {
         return false;
     }
     let last = s.doc.next_para(a.story, &a.path).is_none_or(|q| q.parent() != a.path.parent());
