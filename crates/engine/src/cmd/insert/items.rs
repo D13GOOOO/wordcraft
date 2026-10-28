@@ -78,6 +78,8 @@ fn page_of_words(lang: &str) -> Option<(&'static str, &'static str)> {
         "pl" => ("Strona", "z"),
         "cs" | "sk" => ("Strana", "z"),
         "sl" => ("Stran", "od"),
+        // Serbian is written in Cyrillic unless the tag says Latin (`sr-Latn`), as the interface does.
+        "sr" if !lang.split(['-', '_']).any(|t| t.eq_ignore_ascii_case("latn")) => ("Страница", "од"),
         "hr" | "bs" | "sr" => ("Stranica", "od"),
         "sv" => ("Sida", "av"),
         "da" => ("Side", "af"),

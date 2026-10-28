@@ -29,7 +29,14 @@ fn page_x_of_y_follows_the_document_language() {
     assert_eq!(page_footer(&mut s, x_of_y.clone()).0, "Page 1 of 1");
     s.editing_lang = Some("ja-JP".into());
     s.doc.styles.default_chr.lang = Some("zh-CN".into());
-    assert_eq!(page_footer(&mut s, x_of_y).0, "Page 1 of 1");
+    assert_eq!(page_footer(&mut s, x_of_y.clone()).0, "Page 1 of 1");
+    // Serbian keeps its script: Cyrillic unless the tag says Latin.
+    for (lang, words) in
+        [("sr-Cyrl-RS", "Страница 1 од 1"), ("sr", "Страница 1 од 1"), ("sr-Latn-RS", "Stranica 1 od 1"), ("hr-HR", "Stranica 1 od 1")]
+    {
+        s.doc.styles.default_chr.lang = Some(lang.into());
+        assert_eq!(page_footer(&mut s, x_of_y.clone()).0, words, "{lang}");
+    }
 
     let (text, codes) = page_footer(&mut s, json!({"text": "{pages} pp. – p. {page}"}));
     assert_eq!((text.as_str(), codes), ("1 pp. – p. 1", vec!["NUMPAGES".to_string(), "PAGE".into()]));
