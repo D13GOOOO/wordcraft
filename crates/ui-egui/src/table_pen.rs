@@ -100,9 +100,11 @@ pub fn set_pen(app: &mut WordApp, p: &Value) -> Result<Value, String> {
         pen.width = (w as f32).clamp(0.25, 6.0);
     }
     if let Some(v) = p.get("color") {
-        pen.color = match v.as_str() {
-            None | Some("auto") => None,
-            Some(c) => Some(wordcraft_doc::Rgb::parse(c).map(|c| c.hex()).ok_or_else(|| format!("unknown colour `{c}`"))?),
+        pen.color = match v {
+            Value::Null => None,
+            Value::String(c) if c == "auto" => None,
+            Value::String(c) => Some(wordcraft_doc::Rgb::parse(c).map(|c| c.hex()).ok_or_else(|| format!("unknown colour `{c}`"))?),
+            other => return Err(format!("`color` must be \"RRGGBB\", \"auto\" or null, not {other}")),
         };
     }
     app.canvas.table_pen = pen;
@@ -323,7 +325,8 @@ mod tests {
         a.run(&cmd, p).unwrap();
         let red = Pen { style: "double", width: 2.25, color: Some("C00000".into()) };
         assert_eq!(a.canvas.table_pen, red);
-        for junk in [json!({"style": "zigzag"}), json!({"width": "thick"}), json!({"color": "purple"})] {
+        for junk in [json!({"style": "zigzag"}), json!({"width": "thick"}), json!({"color": "purple"}), json!({"color": false}), json!({"color": 12})]
+        {
             assert!(a.run("ui.tablePen", junk.clone()).is_err(), "{junk}");
         }
         assert_eq!(a.canvas.table_pen, red, "refused values change nothing");
