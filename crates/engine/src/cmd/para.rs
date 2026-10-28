@@ -182,6 +182,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .key(if cfg!(target_os = "macos") { "Ctrl+Shift+Right" } else { "Alt+Shift+Right" }),
         CommandSpec::new("para.shading", "Shading", "Home › Paragraph", |s, v| {
             let c = p::str(v, "color").and_then(Rgb::parse);
+            // Text selected within one paragraph is shaded itself, as in Word, so No Color takes
+            // off a shading a file gave the text (#4685); a caret or paragraphs shade paragraphs.
+            if shades_text(s) {
+                return super::format::apply(s, &|x| x.shading = c);
+            }
             fmt(s, &|p| p.shading = c)
         })
         .params(r#"{"color": "RRGGBB" | null}"#),
@@ -262,4 +267,11 @@ pub fn specs() -> Vec<CommandSpec> {
             sel_result(s)
         }),
     ]
+}
+
+/// Whether Shading applies to the selected text rather than to paragraphs: a selection inside one
+/// paragraph that isn't all of it (all of it stands for the paragraph, mark included).
+fn shades_text(s: &Session) -> bool {
+    let (a, b) = s.sel.ordered();
+    a != b && a.story == b.story && a.path == b.path && s.doc.para_at(&a).is_some_and(|p| !(a.off == 0 && b.off >= p.len()))
 }

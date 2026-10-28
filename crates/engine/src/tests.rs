@@ -6917,6 +6917,35 @@ fn colour_commands_take_any_custom_hex() {
     assert_eq!(s.doc.settings.page_color, wordcraft_doc::Rgb::parse("123ABC"));
 }
 
+/// #4685: Home › Paragraph › Shading on text selected inside a paragraph shades that text, as in
+/// Word, so No Color takes off a text shading a file gave it (an orange "highlight" from a .docx is
+/// `w:shd`, which Text Highlight Color › No Color leaves, in Word too). A caret or a whole
+/// paragraph still shades the paragraph.
+#[test]
+fn shading_selected_text_shades_the_text_and_no_color_clears_it() {
+    let orange = wordcraft_doc::Rgb::parse("FFA500");
+    let mut s = s();
+    run(&mut s, "text.insert", json!({"text": "Orange text here"}));
+    run(&mut s, "select.text", json!({"text": "Orange"}));
+    run(&mut s, "para.shading", json!({"color": "FFA500"}));
+    let p = s.doc.para_at(&s.sel.focus).unwrap();
+    assert_eq!((p.props.shading, p.props_of_char(0).shading, p.props_of_char(7).shading), (None, orange, None));
+    // Highlight › No Color doesn't take it off; Shading › No Color does.
+    run(&mut s, "format.highlight", json!({"color": "none"}));
+    assert_eq!(s.doc.para_at(&s.sel.focus).unwrap().props_of_char(0).shading, orange);
+    run(&mut s, "para.shading", json!({"color": null}));
+    assert_eq!(s.doc.para_at(&s.sel.focus).unwrap().props_of_char(0).shading, None);
+    // A caret, or the whole paragraph, shades the paragraph and leaves the text alone.
+    for whole in [false, true] {
+        let mut s = self::s();
+        run(&mut s, "text.insert", json!({"text": "Orange text here"}));
+        run(&mut s, if whole { "select.all" } else { "caret.left" }, json!({}));
+        run(&mut s, "para.shading", json!({"color": "FFA500"}));
+        let p = s.doc.para_at(&s.sel.focus).unwrap();
+        assert_eq!((p.props.shading, p.props_of_char(0).shading), (orange, None), "whole: {whole}");
+    }
+}
+
 /// #2738: Home › Underline › Underline Color sets the underline's own colour and leaves its style
 /// alone; `auto` drops it again. One undo step each, kept through a DOCX round trip, and junk is
 /// a params error that changes nothing.
