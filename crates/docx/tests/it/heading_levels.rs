@@ -39,13 +39,17 @@ fn built_in_heading_styles_have_their_outline_level_without_outline_lvl() {
         <w:style w:type="paragraph" w:styleId="Below"><w:name w:val="Below heading 2"/><w:basedOn w:val="Titolo2"/></w:style>
         <w:style w:type="paragraph" w:customStyle="1" w:styleId="MyHead"><w:name w:val="My heading 3"/><w:basedOn w:val="Normal"/></w:style>
         <w:style w:type="paragraph" w:styleId="Heading10"><w:name w:val="heading 10"/></w:style>
+        <w:style w:type="paragraph" w:customStyle="on" w:styleId="Fake4"><w:name w:val="heading 4"/></w:style>
         <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:pPr><w:outlineLvl w:val="5"/></w:pPr></w:style>"#;
-    let body =
-        ["Heading1", "Titolo2", "Heading9", "Below", "MyHead", "Heading10", "Heading3", "Normal"].iter().map(|s| para(s, "x")).collect::<String>();
+    let body = ["Heading1", "Titolo2", "Heading9", "Below", "MyHead", "Heading10", "Fake4", "Heading3", "Normal"]
+        .iter()
+        .map(|s| para(s, "x"))
+        .collect::<String>();
     let d = wordcraft_docx::read(&package(styles, &body)).unwrap();
     // Heading 1, 2 and 9 by name; a style based on a heading inherits its level; a custom style,
-    // "heading 10" and Normal have none; a level the file gives is kept.
-    let want = vec![Some(0), Some(1), Some(8), Some(1), None, None, Some(5), None];
+    // "heading 10", a custom style named "heading 4" (`w:customStyle="on"`) and Normal have none; a
+    // level the file gives is kept.
+    let want = vec![Some(0), Some(1), Some(8), Some(1), None, None, None, Some(5), None];
     assert_eq!(levels(&d), want);
     // The level survives a save and reopen.
     let again = wordcraft_docx::read(&wordcraft_docx::write(&d).unwrap()).unwrap();

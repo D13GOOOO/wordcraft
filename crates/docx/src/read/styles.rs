@@ -122,7 +122,7 @@ impl Reader<'_> {
                 priority: s.child_val("w:uiPriority").and_then(u32_of),
                 quick: flag(s, "w:qFormat").unwrap_or(false),
                 hidden: flag(s, "w:semiHidden").unwrap_or(false) || flag(s, "w:hidden").unwrap_or(false),
-                builtin: !s.attr("w:customStyle").is_some_and(|v| v == "1" || v == "true"),
+                builtin: !s.attr("w:customStyle").is_some_and(|v| matches!(v.trim(), "1" | "true" | "on")),
                 locked: flag(s, "w:locked").unwrap_or(false),
                 // Only where the writer couldn't tell from the id (it flags the English ids).
                 default: s.attr("w:default").is_some_and(|v| v == "1" || v == "true")
