@@ -76,11 +76,12 @@ impl Pen {
             3 => "\u{be}",
             _ => "",
         };
-        match (whole as u32, frac) {
-            (0, "") => "0 pt".into(),
-            (0, f) => format!("{f} pt"),
-            (w, f) => format!("{w}{f} pt"),
-        }
+        let n = match (whole as u32, frac) {
+            (0, "") => "0".to_string(),
+            (0, f) => f.to_string(),
+            (w, f) => format!("{w}{f}"),
+        };
+        crate::i18n::fmt(tl!("{n} pt"), &[("n", &n)])
     }
 }
 
