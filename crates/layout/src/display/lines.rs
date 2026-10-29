@@ -416,12 +416,24 @@ fn character_backgrounds(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
 }
 
 fn draw_label_and_hyphen(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
+    // A list number goes with its paragraph mark: when the mark is a tracked deletion the number
+    // is drawn as deleted text is, in the deletion's colour and struck through, and not at all
+    // where deletions aren't shown (#4828).
+    let m = &ctx.opts.revisions;
+    let mark_del = ctx.para.and_then(|p| p.mark.del);
+    let moved = mark_del.is_some() && ctx.doc.move_name(mark_del).is_some();
+    let hidden = mark_del.is_some() && (!ctx.opts.markup || m.hides_deletion(moved));
+    let deleted = mark_del.filter(|_| ctx.opts.markup && m.insertions_deletions);
+    let del_color = deleted.map(|r| if moved { m.move_from_color } else { m.delete_color }.unwrap_or_else(|| ctx.authors.color(r)));
+    let del_mark = deleted.map(|_| if moved { m.move_from_mark } else { m.delete_mark });
     if ctx.li == ctx.pl.label_line()
+        && !hidden
         && let Some(label) = &ctx.pl.label
     {
         let gx = ctx.x + label.x;
         for run in &label.runs {
             let Some(style) = ctx.pl.styles.get(run.style as usize) else { continue };
+            let color = del_color.unwrap_or_else(|| ctx.ink(&style.rc.color, None));
             out.push(Draw::Glyphs {
                 face: style.face,
                 size: style.size,
@@ -432,7 +444,7 @@ fn draw_label_and_hyphen(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
                     .flatten()
                     .map(|g| (g.gid, gx + g.dx, ctx.base - style.shift - g.dy))
                     .collect(),
-                color: ctx.ink(&style.rc.color, None),
+                color,
                 alpha: ctx.alpha,
                 synth_bold: style.synth_bold,
                 synth_italic: style.synth_italic,
@@ -442,6 +454,15 @@ fn draw_label_and_hyphen(ctx: &LineContext<'_, '_, '_>, out: &mut Vec<Draw>) {
                 text_bg: None,
                 x_scale: 1.0,
             });
+        }
+        // Struck through once, across the whole number, in its first run's size.
+        if let (Some(color), Some(mark @ (DeleteMark::Strikethrough | DeleteMark::DoubleStrikethrough))) = (del_color, del_mark)
+            && let Some(style) = label.runs.first().and_then(|r| ctx.pl.styles.get(r.style as usize))
+        {
+            let sy = ctx.base - style.shift - style.size * 0.28;
+            let stroke = if mark == DeleteMark::DoubleStrikethrough { Stroke::Double } else { Stroke::Solid };
+            let width = (style.size / 18.0).max(0.5);
+            out.push(Draw::Line { x0: gx, y0: sy, x1: gx + label.width, y1: sy, width, color, stroke, alpha: ctx.alpha, text_bg: None });
         }
     }
     if let Some((style_index, glyph, advance)) = ctx.line.hyphen

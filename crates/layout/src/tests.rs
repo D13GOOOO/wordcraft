@@ -1729,6 +1729,50 @@ fn break_only_list_has_no_label() {
     }
 }
 
+/// #4828: a list item deleted whole (its text and its mark) under Track Changes shows its number
+/// as deleted text, in the deletion's colour and struck through, with markup shown; without
+/// markup the number is drawn no more than the text.
+#[test]
+fn a_deleted_list_items_number_is_drawn_as_deleted_text() {
+    let mut d = Document::from_text("Intro\nChapter two\nBody");
+    d.revisions.push(wordcraft_doc::Revision {
+        kind: wordcraft_doc::RevisionKind::Delete,
+        author: "Ana".into(),
+        date: String::new(),
+        move_name: None,
+    });
+    let id = d.numbering.add_list(wordcraft_doc::ListKind::Numbered);
+    d.format_paragraphs(&Pos::body(1, 0), &Pos::body(1, 3), &|p| p.numbering = Some(wordcraft_doc::props::NumRef { num: id, level: 0 })).unwrap();
+    d.format_range(&Pos::body(1, 0), &Pos::body(1, 11), &|c| c.del = Some(0)).unwrap();
+    d.para_mut(StoryRef::Body, &Path::top(1)).unwrap().mark.del = Some(0);
+    let l = lay(&d);
+    let draws = |markup: bool| display::page_display(&d, &l.pages[0], &display::DisplayOptions { markup, ..Default::default() });
+    let glyph_color = |items: &[display::Draw], want: &str| {
+        items.iter().find_map(|i| match i {
+            display::Draw::Glyphs { text, color, glyphs, .. } if text.contains(want) => Some((*color, glyphs.first().map_or(0.0, |g| g.1))),
+            _ => None,
+        })
+    };
+    let marked = draws(true);
+    let (number, nx) = glyph_color(&marked, "1.").expect("the number is drawn with markup");
+    let (text, _) = glyph_color(&marked, "Chapter").expect("the deleted text is drawn with markup");
+    assert_eq!(number, text, "the number takes the deletion's colour");
+    let struck = marked
+        .iter()
+        .any(|i| matches!(i, display::Draw::Line { x0, x1, y0, y1, .. } if (y0 - y1).abs() < 0.01 && *x0 <= nx + 0.01 && *x1 > nx + 1.0));
+    assert!(struck, "the number is struck through");
+    // Without markup neither the text nor its number is drawn.
+    let plain = draws(false);
+    assert!(glyph_color(&plain, "Chapter").is_none() && glyph_color(&plain, "1.").is_none());
+    // A number whose paragraph mark isn't deleted is drawn as before.
+    let mut kept = Document::from_text("Intro\nChapter two\nBody");
+    let id = kept.numbering.add_list(wordcraft_doc::ListKind::Numbered);
+    kept.format_paragraphs(&Pos::body(1, 0), &Pos::body(1, 3), &|p| p.numbering = Some(wordcraft_doc::props::NumRef { num: id, level: 0 })).unwrap();
+    let kl = lay(&kept);
+    let plain = display::page_display(&kept, &kl.pages[0], &display::DisplayOptions { markup: false, ..Default::default() });
+    assert!(glyph_color(&plain, "1.").is_some());
+}
+
 #[test]
 fn empty_list_paragraph_with_a_hidden_mark_counts_but_shows_nothing() {
     // Word (#3982): a list item whose paragraph mark is hidden, and whose text is empty or hidden
