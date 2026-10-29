@@ -1761,6 +1761,42 @@ fn a_deleted_list_items_number_is_drawn_as_deleted_text() {
         .iter()
         .any(|i| matches!(i, display::Draw::Line { x0, x1, y0, y1, .. } if (y0 - y1).abs() < 0.01 && *x0 <= nx + 0.01 && *x1 > nx + 1.0));
     assert!(struck, "the number is struck through");
+    // The number takes the other deletion marks as its text does.
+    let with_mark = |mark: display::DeleteMark| {
+        let mut o = display::DisplayOptions { markup: true, ..Default::default() };
+        o.revisions.delete_mark = mark;
+        display::page_display(&d, &l.pages[0], &o)
+    };
+    let caret = with_mark(display::DeleteMark::Caret);
+    assert!(glyph_color(&caret, "1.").is_none(), "a caret replaces the number");
+    assert!(caret.iter().any(|i| matches!(i, display::Draw::Line { x1, .. } if (*x1 - nx).abs() < 0.01)), "the caret is where the number was");
+    let bold = with_mark(display::DeleteMark::Bold);
+    assert!(bold.iter().any(|i| matches!(i, display::Draw::Glyphs { text, synth_bold: true, .. } if text.contains("1."))));
+    let hashed = with_mark(display::DeleteMark::Hash);
+    let ids = |items: &[display::Draw], want: &str| {
+        items.iter().find_map(|i| match i {
+            display::Draw::Glyphs { text, glyphs, .. } if text.contains(want) => Some(glyphs.iter().map(|g| g.0).collect::<Vec<_>>()),
+            _ => None,
+        })
+    };
+    let (numbers, hashes) = (ids(&marked, "1.").unwrap(), ids(&hashed, "1.").unwrap());
+    assert!(hashes.len() == numbers.len() && hashes.windows(2).all(|w| w[0] == w[1]) && hashes != numbers, "each character shows as #");
+    let plain_label = |items: &[display::Draw]| {
+        items.iter().any(|i| matches!(i, display::Draw::Line { x0, x1, y0, y1, .. } if (y0 - y1).abs() < 0.01 && *x0 <= nx + 0.01 && *x1 > nx + 1.0))
+    };
+    assert!(!plain_label(&with_mark(display::DeleteMark::ColorOnly)), "colour only: no line through or under the number");
+    // Moved-away text marked (none) is plain, its number too.
+    let mut moved = d.clone();
+    if let Some(r) = moved.revisions.get_mut(0) {
+        r.move_name = Some("move1".into());
+    }
+    let mut o = display::DisplayOptions { markup: true, ..Default::default() };
+    o.revisions.move_from_mark = display::DeleteMark::None;
+    let shown = display::page_display(&moved, &l.pages[0], &o);
+    let (moved_number, _) = glyph_color(&shown, "1.").expect("the moved number is drawn");
+    let (moved_text, _) = glyph_color(&shown, "Chapter").expect("the moved text is drawn");
+    assert_eq!(moved_number, moved_text, "plain, like its text");
+    assert!(!plain_label(&shown));
     // Without markup neither the text nor its number is drawn.
     let plain = draws(false);
     assert!(glyph_color(&plain, "Chapter").is_none() && glyph_color(&plain, "1.").is_none());
