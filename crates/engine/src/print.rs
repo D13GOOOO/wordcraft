@@ -170,6 +170,9 @@ impl Session {
             include_markup: markup.markup,
             comments: markup.comments,
             paper,
+            // Links print nothing, and the spooler can't fit a page with annotations to the
+            // paper: "flatten page annotations before using shrink-to-fit" (#4734).
+            links: false,
             ..Default::default()
         };
         let bytes = wordcraft_pdf::export_layout(&self.doc, &lay, &opts).map_err(|e| CmdError::Failed(e.to_string()))?;
@@ -236,6 +239,22 @@ mod tests {
         assert!(s.print_pdf(&json!({"pages": "9999"})).is_err());
         let r = s.run("file.printPdf", &json!({})).is_err();
         assert!(r, "printPdf needs a path");
+    }
+
+    /// #4734: the print job's PDF has no link annotations, which a printer driver can't fit to the
+    /// paper ("flatten page annotations before using shrink-to-fit"); an exported PDF keeps them.
+    #[test]
+    fn print_pdf_leaves_out_link_annotations() {
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("insert.link", &json!({"url": "https://example.com", "text": "a link"})).unwrap();
+        let lay = s.export_layout();
+        let exported = wordcraft_pdf::export_layout(&s.doc, &lay, &wordcraft_pdf::PdfOptions::default()).unwrap();
+        let annots = |bytes: &[u8]| String::from_utf8_lossy(bytes).contains("/Annots");
+        assert!(annots(&exported), "an exported PDF keeps the link");
+        for params in [json!({}), json!({"paper": "A4"}), json!({"markup": true})] {
+            let (printed, _) = s.print_pdf(&params).unwrap();
+            assert!(!annots(&printed), "{params}");
+        }
     }
 
     /// Scale to paper size (#2108): the PDF goes on the chosen paper; the document keeps its size.
