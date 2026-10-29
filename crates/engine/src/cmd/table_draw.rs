@@ -448,11 +448,12 @@ fn split_rows(s: &mut Session, l: &DocLayout, page: usize, y: f32, (xa, xb): (f3
     finish(s, story, &tp, r + 1, c0)
 }
 
-/// The borders of a cell split in two, `second` a copy of `first`: the second half keeps the far
-/// side (right, or bottom when `across` is false), and the line drawn between them is the pen,
-/// or, without one, the table's own border (nothing set), not a copy of the cell's outer sides.
+/// The borders of a cell split in two, `second` a copy of `first`: the line drawn between them
+/// takes the pen on both halves (right and left, or bottom and top when `across` is false), and
+/// the second half keeps the far side. Without a pen the halves keep the cell's own borders, as
+/// before there was a pen.
 fn split_edges(first: &mut Option<Borders>, second: &mut Option<Borders>, across: bool, pen: Option<Border>) {
-    if first.is_none() && pen.is_none() {
+    if pen.is_none() {
         return;
     }
     let (a, b) = (first.get_or_insert_with(Default::default), second.get_or_insert_with(Default::default));
@@ -853,12 +854,13 @@ mod tests {
         let thin = Border { style: BorderStyle::Single, width: 0.75, color: None, space: 0.0 };
         let t = first_table(&s);
         assert_eq!((side(&t, 0, 1).bottom, side(&t, 1, 1).top), (Some(thin), Some(thin)));
-        // Without a pen nothing is set: the table style draws the line, as before.
+        // Without a pen both halves keep the cell's own borders, as before.
+        let own = side(&first_table(&s), 1, 1);
         let r = cell_rect(&mut s, 1, 1);
         let x = r.x + r.w / 2.0;
         s.run("table.draw", &json!({"page": 0, "x0": x, "y0": r.y + 1.0, "x1": x, "y1": r.bottom() - 1.0})).unwrap();
         let t = first_table(&s);
-        assert_eq!(side(&t, 1, 2).left, None);
+        assert_eq!((side(&t, 1, 1), side(&t, 1, 2)), (own, own));
         // The Borders menu and Border Painter take the pen's style too.
         s.run("table.borders", &json!({"kind": "all", "style": "dashed", "width": 2, "color": "0000FF"})).unwrap();
         let dashed = Border { style: BorderStyle::Dashed, width: 2.0, color: Rgb::parse("0000FF"), space: 0.0 };
@@ -871,8 +873,8 @@ mod tests {
         assert_eq!(pen(&json!({"page": 0, "color": null})), None);
     }
 
-    /// Splitting a cell with its own borders: the far side moves to the second half, and the line
-    /// between them is the pen or nothing (the table's), not a copy of an outer side.
+    /// Splitting a cell with its own borders: the line between the halves takes the pen and the
+    /// far side stays with the second half; without a pen nothing changes.
     #[test]
     fn a_split_cell_hands_its_far_border_to_the_new_half() {
         let outer = Border { style: BorderStyle::Thick, width: 3.0, color: None, space: 0.0 };
@@ -883,9 +885,12 @@ mod tests {
         let (a, b) = (a.unwrap(), b.unwrap());
         assert_eq!((a.left, a.right, b.left, b.right), (Some(outer), Some(pen), Some(pen), Some(outer)));
         let (mut a, mut b) = (own, own);
-        split_edges(&mut a, &mut b, false, None);
+        split_edges(&mut a, &mut b, false, Some(pen));
         let (a, b) = (a.unwrap(), b.unwrap());
-        assert_eq!((a.top, a.bottom, b.top, b.bottom), (Some(outer), None, None, Some(outer)));
+        assert_eq!((a.top, a.bottom, b.top, b.bottom), (Some(outer), Some(pen), Some(pen), Some(outer)));
+        let (mut a, mut b) = (own, own);
+        split_edges(&mut a, &mut b, false, None);
+        assert_eq!((a, b), (own, own), "without a pen the halves keep the cell's borders");
         let (mut a, mut b) = (None, None);
         split_edges(&mut a, &mut b, true, None);
         assert_eq!((a, b), (None, None), "a cell without borders of its own gets none");
