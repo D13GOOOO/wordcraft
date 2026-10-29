@@ -152,7 +152,7 @@ Recipient label generation (#4880) now includes all selected recipients across a
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-28 | trivial | Table Design › Borders: Line Style, Line Weight and Pen Color set the pen Draw Table, the Borders menu and Border Painter draw with (#4589); no ranked gap changed; readiness estimates unchanged |
+| 2026-10-28 | trivial | Table Design › Borders: Line Style, Line Weight and Pen Color set the pen that Draw Table, the Borders menu and Border Painter draw with (#4589); no ranked gap changed; readiness estimates unchanged |
 | 2026-10-29 | trivial | Recipient labels continue across product-sized sheets instead of stopping after the first sheet (#4880). Filtered/sorted order, product geometry and single-label mode retained; readiness estimates unchanged. |
 | 2026-10-22 | trivial | View windows: several open documents and Switch Windows in the engine |
 | 2026-10-25 | trivial | egui 0.37 migration: interface catalogs remain pinned by `craft-i18n.rev` (`9205108…`; 27 languages, English fallback); IME surrounding deletions and composition resets are implemented with regressions, but managed CI passed; native IME acceptance and native-speaker catalog review remain open; no gap or readiness change |
