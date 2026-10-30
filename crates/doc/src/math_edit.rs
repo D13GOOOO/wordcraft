@@ -890,17 +890,22 @@ pub fn build_up(root: &mut Arg, pos: &MathPos, latex: bool) -> Option<MathPos> {
 
 /// Typing that just built an n-ary operator without its operand (`∫_0^1` then Space) goes on in
 /// the empty operand, as after inserting one from the gallery, so what is typed next is
-/// integrated or summed (#4917). Other carets, and moves or Enter that build up, stay put.
+/// integrated or summed (#4917). An operator whose operand ends with another (`∫∫`) leads to the
+/// innermost one. Other carets, and moves or Enter that build up, stay put.
 pub fn into_empty_operand(root: &Arg, pos: &MathPos) -> MathPos {
-    if pos.path.len() < MAX_DEPTH
-        && let Some(a) = arg_at(root, &pos.path)
-        && let Loc::Before(i) = locate(a, pos.off)
+    let mut path = pos.path.clone();
+    let mut off = pos.off;
+    while path.len() < MAX_DEPTH
+        && let Some(a) = arg_at(root, &path)
+        && let Loc::Before(i) = locate(a, off)
         && let Some(k) = i.checked_sub(1)
-        && matches!(a.get(k), Some(MNode::Nary { e, .. }) if e.is_empty())
+        && let Some(MNode::Nary { e, .. }) = a.get(k)
     {
-        let mut path = pos.path.clone();
         path.push((k, 2));
-        return MathPos { path, off: 0 };
+        if e.is_empty() {
+            return MathPos { path, off: 0 };
+        }
+        off = units(e);
     }
     pos.clone()
 }

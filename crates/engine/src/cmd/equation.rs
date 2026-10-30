@@ -339,6 +339,14 @@ fn type_text(s: &mut Session, v: &Value) -> CmdResult {
                 if c == ' ' && changed {
                     continue;
                 }
+            } else if !style.nor && !latex && !c.is_alphanumeric() {
+                // Word corrects `\name` on any character that can't continue it (`\int_`,
+                // `\alpha+`), keeps that character and builds nothing up yet. LaTeX input keeps
+                // its commands (`\sqrt{`).
+                if let Some(p) = me::autocorrect(&mut math.nodes, &pos) {
+                    pos = p;
+                    transformed = true;
+                }
             }
             pos = me::insert_text(&mut math.nodes, &pos, &c.to_string(), style);
         }

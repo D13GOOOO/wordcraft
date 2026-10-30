@@ -587,4 +587,43 @@ fn an_autocorrected_operator_waits_for_its_limits() {
     s.run("edit.undo", &json!({})).unwrap();
     let left = s.doc.para_at(&at).and_then(|p| p.object_at(at.off)).map(|o| o.plain_text().to_string());
     assert_eq!(left.as_deref(), Some(""), "the equation is there, empty");
+    // An operator ending another one's operand (`∫∫`) takes what is typed next.
+    let s = typed(&[r"\int", " ", r"\int", " ", " ", "f"]);
+    let inner = nary_of(&s).and_then(|_| {
+        nodes_of(&s, &s.math.as_ref()?.at)?.iter().find_map(|n| match n {
+            MNode::Nary { e, .. } => match e.as_slice() {
+                [MNode::Nary { e, .. }] => Some(to_linear(e)),
+                _ => None,
+            },
+            _ => None,
+        })
+    });
+    assert_eq!(inner.as_deref(), Some("f"), "f is the inner operator's operand");
+}
+
+#[test]
+fn a_math_name_is_corrected_by_any_character_that_cannot_continue_it() {
+    // Observed in Word for Windows (#4938): `\int_0^1` typed in one go gives ∫ as soon as `_` is
+    // typed, so Space then builds the integral with its limits; `\alpha` + `+` gives α+, and a
+    // letter or digit leaves the name as typed.
+    let typed = |keys: &[&str]| {
+        let mut s = session();
+        s.run("insert.equation", &json!({})).unwrap();
+        for t in keys {
+            s.run("equation.type", &json!({"text": t})).unwrap();
+        }
+        s
+    };
+    let s = typed(&[r"\int_0^1", " ", "x"]);
+    assert_eq!(nary_of(&s), Some(('∫', Some("0".into()), Some("1".into()), "x".into())));
+    let s = typed(&[r"\alpha+\beta\gamma1"]);
+    assert_eq!(linear(&s), r"α+β\gamma1");
+    let s = typed(&[r"\alpha(x)"]);
+    assert_eq!(linear(&s), "α(x)");
+    // LaTeX input keeps its commands until they are built up.
+    let mut s = session();
+    s.run("equation.inputFormat", &json!({"format": "latex"})).unwrap();
+    s.run("insert.equation", &json!({})).unwrap();
+    s.run("equation.type", &json!({"text": r"\alpha+"})).unwrap();
+    assert_eq!(linear(&s), r"\alpha+");
 }
