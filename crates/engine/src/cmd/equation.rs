@@ -326,7 +326,10 @@ fn type_text(s: &mut Session, v: &Value) -> CmdResult {
                     pos = p;
                     changed = true;
                 }
-                if let Some(p) = me::build_up(&mut math.nodes, &pos, latex) {
+                // As in Word, `\int` + Space leaves ∫ waiting for its limits: `_a^b` and then
+                // Space, or Space alone, builds the operator (#4917).
+                let waits = changed && c == ' ' && me::nary_before(&math.nodes, &pos);
+                if !waits && let Some(p) = me::build_up(&mut math.nodes, &pos, latex) {
                     pos = p;
                     changed = true;
                 }

@@ -769,6 +769,22 @@ pub fn autocorrect(root: &mut Arg, pos: &MathPos) -> Option<MathPos> {
     Some(MathPos { path: pos.path, off: pos.off - name.chars().count() })
 }
 
+/// The character just before the caret is an n-ary operator (∫, ∑…) in plain math text, as
+/// AutoCorrect leaves `\int` or `\sum`.
+pub fn nary_before(root: &Arg, pos: &MathPos) -> bool {
+    let pos = clamp(root, pos);
+    let Some(a) = arg_at(root, &pos.path) else { return false };
+    let (i, k) = match locate(a, pos.off) {
+        Loc::Inside(i, k) => (i, k),
+        Loc::Before(i) => match i.checked_sub(1).and_then(|i| a.get(i).map(|n| (i, node_units(n)))) {
+            Some(at) => at,
+            None => return false,
+        },
+    };
+    let Some(MNode::Run(r)) = a.get(i) else { return false };
+    !r.nor && !r.lit && k.checked_sub(1).and_then(|k| r.text.chars().nth(k)).is_some_and(crate::math::is_nary_char)
+}
+
 /// Characters that make typed linear text build up into structures.
 fn builds(s: &str) -> bool {
     s.chars().any(|c| {
@@ -869,7 +885,21 @@ pub fn build_up(root: &mut Arg, pos: &MathPos, latex: bool) -> Option<MathPos> {
     a.splice(start..at, built);
     let out = MathPos { path: pos.path, off: before + new_units };
     tidy(root);
-    Some(clamp(root, &out))
+    let out = clamp(root, &out);
+    // An n-ary operator built without its operand (`∫_0^1` then Space) takes the caret into the
+    // empty operand, as inserting one from the gallery does, so what is typed next is integrated
+    // or summed (#4917).
+    if out.path.len() < MAX_DEPTH
+        && let Some(a) = arg_at(root, &out.path)
+        && let Loc::Before(i) = locate(a, out.off)
+        && let Some(k) = i.checked_sub(1)
+        && matches!(a.get(k), Some(MNode::Nary { e, .. }) if e.is_empty())
+    {
+        let mut path = out.path;
+        path.push((k, 2));
+        return Some(MathPos { path, off: 0 });
+    }
+    Some(out)
 }
 
 /// A top-level `#` numbers the equation: wrap it as a one-row equation array.

@@ -530,3 +530,48 @@ fn equation_delete_surrounding_moves_the_caret_for_a_one_step_delete() {
     assert_eq!(linear(&s), "bc");
     assert_eq!(s.math.as_ref().unwrap().pos, MathPos::new(Vec::new(), 0));
 }
+
+/// The n-ary operator in the equation, with its limits (shown or not) and operand as text.
+fn nary_of(s: &Session) -> Option<(char, Option<String>, Option<String>, String)> {
+    nodes_of(s, &s.math.as_ref()?.at)?.iter().find_map(|n| match n {
+        MNode::Nary { chr, sub_hide, sup_hide, sub, sup, e, .. } => {
+            Some((*chr, (!sub_hide).then(|| to_linear(sub)), (!sup_hide).then(|| to_linear(sup)), to_linear(e)))
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn an_autocorrected_operator_waits_for_its_limits() {
+    // #4917: as in Word, `\int` + Space gives a ∫ that `_x^y` then Space decorates; the
+    // operand typed next goes inside the operator.
+    let typed = |keys: &[&str]| {
+        let mut s = session();
+        s.run("insert.equation", &json!({})).unwrap();
+        for t in keys {
+            s.run("equation.type", &json!({"text": t})).unwrap();
+        }
+        s
+    };
+    let s = typed(&[r"\int", " "]);
+    assert_eq!(linear(&s), "∫", "the operator waits, not yet built");
+    assert!(nary_of(&s).is_none());
+    let s = typed(&[r"\int", " ", "_x^y", " ", "f"]);
+    assert_eq!(nary_of(&s), Some(('∫', Some("x".into()), Some("y".into()), "f".into())));
+    let s = typed(&[r"\sum", " ", "_(k=1)^n", " ", "k"]);
+    assert_eq!(nary_of(&s), Some(('∑', Some("k=1".into()), Some("n".into()), "k".into())));
+    // Only a lower limit.
+    let s = typed(&[r"\prod", " ", "_i", " ", "a"]);
+    assert_eq!(nary_of(&s), Some(('∏', Some("i".into()), None, "a".into())));
+    // Space alone builds it without limits, the caret in its operand.
+    let s = typed(&[r"\int", " ", " ", "x"]);
+    assert_eq!(nary_of(&s), Some(('∫', None, None, "x".into())));
+    // Typing the operand straight after it, as before.
+    let s = typed(&[r"\int", " ", "x", " "]);
+    assert_eq!(nary_of(&s), Some(('∫', None, None, "x".into())));
+    // One undo step takes the whole typing away.
+    let mut s = typed(&[r"\int", " ", "_0^1", " ", "t"]);
+    s.run("equation.exit", &json!({})).unwrap();
+    s.run("edit.undo", &json!({})).unwrap();
+    assert!(linear(&s).is_empty());
+}
