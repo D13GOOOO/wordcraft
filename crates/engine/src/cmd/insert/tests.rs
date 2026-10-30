@@ -45,6 +45,26 @@ fn page_x_of_y_follows_the_document_language() {
     assert_eq!(page_footer(&mut s, json!({"text": "é".repeat(10_000)})).0.chars().count(), MAX_PAGE_TEXT);
 }
 
+/// At the current position `text` and "x of y" go in at the caret too, not just a PAGE field.
+#[test]
+fn page_number_at_the_current_position_takes_the_template() {
+    let at_caret = |v: Value| {
+        let mut s = Session::new(wordcraft_doc::Document::from_text("ab"));
+        s.sel = Selection::caret(Pos::body(0, 1));
+        s.run("insert.pageNumber", &v).unwrap();
+        let para = s.doc.para_at(&Pos::body(0, 0)).unwrap().clone();
+        let codes: Vec<String> =
+            para.objects.iter().filter_map(|o| if let InlineObject::Field { instr, .. } = o { Some(instr.clone()) } else { None }).collect();
+        (para.plain_text(), codes, s.sel.focus.off == para.len() - 1)
+    };
+    let (text, codes, caret_after) = at_caret(json!({"position": "current", "text": "p. {page}/{pages}"}));
+    assert_eq!((text.as_str(), codes), ("ap. 1/1b", vec!["PAGE".to_string(), "NUMPAGES".into()]));
+    assert!(caret_after, "the caret goes after what was inserted");
+    assert_eq!(at_caret(json!({"position": "current", "format": "x of y"})).0, "aPage 1 of 1b");
+    let (text, codes, _) = at_caret(json!({"position": "current"}));
+    assert_eq!((text.as_str(), codes), ("a1b", vec!["PAGE".to_string()]));
+}
+
 /// A 4 × 4 RGB TIFF that says its strips are JPEG (they aren't): its header still reads.
 fn jpeg_strip_tiff() -> Vec<u8> {
     let mut t = Vec::new();

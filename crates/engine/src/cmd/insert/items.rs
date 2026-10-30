@@ -12,19 +12,6 @@ pub(super) fn page_number(s: &mut Session, v: &Value) -> CmdResult {
         _ => Align::Center,
     };
     let x_of_y = p::str(v, "format").is_some_and(|f| f.contains("of"));
-    let field = InlineObject::Field { instr: "PAGE".into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() };
-    if position == "current" {
-        let props = s.typing_props();
-        let at = delete_selection(s)?;
-        let end = s.doc.insert_object(&at, field, &props)?;
-        s.sel = Selection::caret(end);
-        return sel_result(s);
-    }
-    let header = position == "top";
-    let id = hf_part(s, header);
-    let mut para = Paragraph::new().styled(if header { "Header" } else { "Footer" });
-    para.props.align = Some(align);
-    para.props.tabs = Some(vec![TabStop { pos: 0.0, align: TabAlign::Clear, leader: Default::default() }]);
     let template = match p::str(v, "text") {
         Some(t) => Some(t.chars().take(MAX_PAGE_TEXT).collect::<String>()),
         None if x_of_y => {
@@ -35,31 +22,67 @@ pub(super) fn page_number(s: &mut Session, v: &Value) -> CmdResult {
         }
         None => None,
     };
-    if let Some(template) = template {
-        let bold = CharProps { bold: Some(true), ..Default::default() };
-        let mut rest = template.as_str();
-        while !rest.is_empty() {
-            // The next placeholder (neither is found inside the other).
-            let next = ["{pages}", "{page}"].iter().filter_map(|k| rest.find(k).map(|i| (i, *k))).min_by_key(|(i, _)| *i);
-            let (text, field) = match next {
-                Some((i, k)) => (rest.get(..i).unwrap_or(""), Some((if k == "{pages}" { "NUMPAGES" } else { "PAGE" }, i + k.len()))),
-                None => (rest, None),
-            };
+    let pieces = match &template {
+        Some(t) => template_pieces(t),
+        None => vec![("", Some("PAGE"))],
+    };
+    // The numbers of a template are bold; a lone PAGE field takes the text's formatting.
+    let bold = template.is_some();
+    if position == "current" {
+        let props = s.typing_props();
+        let field_props = CharProps { bold: bold.then_some(true).or(props.bold), ..props.clone() };
+        let mut at = delete_selection(s)?;
+        for (text, field) in pieces {
             if !text.is_empty() {
-                let end = para.len();
-                para.insert_text(end, text, &CharProps::default())?;
+                at = s.doc.insert_text(&at, text, &props)?;
             }
-            let Some((instr, skip)) = field else { break };
-            let end = para.len();
-            let obj = InlineObject::Field { instr: instr.into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() };
-            para.insert_object(end, obj, &bold)?;
-            rest = rest.get(skip..).unwrap_or("");
+            if let Some(instr) = field {
+                at = s.doc.insert_object(&at, page_field(instr), &field_props)?;
+            }
         }
-    } else {
-        para.insert_object(0, field, &CharProps::default())?;
+        s.sel = Selection::caret(at);
+        return sel_result(s);
+    }
+    let header = position == "top";
+    let id = hf_part(s, header);
+    let mut para = Paragraph::new().styled(if header { "Header" } else { "Footer" });
+    para.props.align = Some(align);
+    para.props.tabs = Some(vec![TabStop { pos: 0.0, align: TabAlign::Clear, leader: Default::default() }]);
+    let field_props = CharProps { bold: bold.then_some(true), ..Default::default() };
+    for (text, field) in pieces {
+        if !text.is_empty() {
+            let end = para.len();
+            para.insert_text(end, text, &CharProps::default())?;
+        }
+        if let Some(instr) = field {
+            let end = para.len();
+            para.insert_object(end, page_field(instr), &field_props)?;
+        }
     }
     s.doc.set_story(StoryRef::Part(id), vec![para_block(para)])?;
     Ok(json!({"story": id}))
+}
+
+/// A page-number template in order: each piece of text with the field after it, if any
+/// (`{page}` is PAGE, `{pages}` NUMPAGES).
+fn template_pieces(template: &str) -> Vec<(&str, Option<&'static str>)> {
+    let mut out = Vec::new();
+    let mut rest = template;
+    while !rest.is_empty() {
+        // The next placeholder (neither is found inside the other).
+        let next = ["{pages}", "{page}"].iter().filter_map(|k| rest.find(k).map(|i| (i, *k))).min_by_key(|(i, _)| *i);
+        let Some((i, k)) = next else {
+            out.push((rest, None));
+            break;
+        };
+        out.push((rest.get(..i).unwrap_or(""), Some(if k == "{pages}" { "NUMPAGES" } else { "PAGE" })));
+        rest = rest.get(i + k.len()..).unwrap_or("");
+    }
+    out
+}
+
+fn page_field(instr: &str) -> InlineObject {
+    InlineObject::Field { instr: instr.into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() }
 }
 
 /// Longest `text` template `insert.pageNumber` takes, in characters.
