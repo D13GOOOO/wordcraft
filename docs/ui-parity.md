@@ -86,7 +86,7 @@ Labels → New Document with “One label per recipient” includes all filtered
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-28 | trivial | Home › Paragraph › Shading: text selected within part of one paragraph is shaded itself, as in Word, so No Color takes off a text shading a file gave it (#4685) |
+| 2026-10-28 | trivial | Home › Paragraph › Shading: text selected within part of one paragraph is shaded itself, as in Word, so No Color removes text shading imported from a file (#4685) |
 | 2026-10-28 | trivial | Aligned copies retain their locked document coordinate during middle-button scrolling and can start on secondary selected objects; existing Ctrl and Shift selection behavior stays (#4764) |
 | 2026-10-28 | trivial | Ctrl/Command+Shift drags a selected floating object into an axis-aligned copy (#4764); synthetic Linux interaction and persistence controls, native desktop and Word untested; gap/readiness estimates unchanged |
 | 2026-10-29 | trivial | Insert › Shapes lists the basic shapes as a grid of code-drawn icon tiles with accessible names and tooltips, as Word's gallery does, instead of a text list (#4349) |
