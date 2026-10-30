@@ -156,8 +156,20 @@ impl Session {
     }
 
     /// The document as the PDF of a print job `v` describes (see [`plan`]), with the number of
-    /// distinct pages chosen and copies. Does not touch the document.
+    /// distinct pages chosen and copies, as File › Print › Save these pages as PDF keeps it:
+    /// links work. Does not touch the document.
     pub fn print_pdf(&self, v: &Value) -> Result<(Vec<u8>, PrintPlan), CmdError> {
+        self.print_pdf_with(v, true)
+    }
+
+    /// The PDF sent to a printer for job `v`: [`Self::print_pdf`] without link annotations,
+    /// which print nothing, and which a printer driver can't fit to the paper ("flatten page
+    /// annotations before using shrink-to-fit", #4734).
+    pub fn print_job_pdf(&self, v: &Value) -> Result<(Vec<u8>, PrintPlan), CmdError> {
+        self.print_pdf_with(v, false)
+    }
+
+    fn print_pdf_with(&self, v: &Value, links: bool) -> Result<(Vec<u8>, PrintPlan), CmdError> {
         // Print Markup (File › Print) decides whether tracked changes and comments print.
         let markup = crate::cmd::file::export_options(self, v);
         let lay = self.export_layout_with(markup.markup);
@@ -170,9 +182,7 @@ impl Session {
             include_markup: markup.markup,
             comments: markup.comments,
             paper,
-            // Links print nothing, and the spooler can't fit a page with annotations to the
-            // paper: "flatten page annotations before using shrink-to-fit" (#4734).
-            links: false,
+            links,
             ..Default::default()
         };
         let bytes = wordcraft_pdf::export_layout(&self.doc, &lay, &opts).map_err(|e| CmdError::Failed(e.to_string()))?;
@@ -241,19 +251,33 @@ mod tests {
         assert!(r, "printPdf needs a path");
     }
 
-    /// #4734: the print job's PDF has no link annotations, which a printer driver can't fit to the
-    /// paper ("flatten page annotations before using shrink-to-fit"); an exported PDF keeps them.
+    /// #4734: the PDF sent to a printer has no link annotations, which a printer driver can't fit
+    /// to the paper ("flatten page annotations before using shrink-to-fit"). An exported PDF and
+    /// one saved with Save these pages as PDF (`file.printPdf`) keep them.
     #[test]
-    fn print_pdf_leaves_out_link_annotations() {
+    fn only_the_print_job_leaves_out_link_annotations() {
         let mut s = Session::new(wordcraft_doc::Document::new());
         s.run("insert.link", &json!({"url": "https://example.com", "text": "a link"})).unwrap();
         let lay = s.export_layout();
         let exported = wordcraft_pdf::export_layout(&s.doc, &lay, &wordcraft_pdf::PdfOptions::default()).unwrap();
-        let annots = |bytes: &[u8]| String::from_utf8_lossy(bytes).contains("/Annots");
-        assert!(annots(&exported), "an exported PDF keeps the link");
+        let links = |bytes: &[u8]| {
+            let raw = String::from_utf8_lossy(bytes);
+            raw.contains("/Annots") && raw.contains("/Link")
+        };
+        assert!(links(&exported), "an exported PDF keeps the link");
         for params in [json!({}), json!({"paper": "A4"}), json!({"markup": true})] {
-            let (printed, _) = s.print_pdf(&params).unwrap();
-            assert!(!annots(&printed), "{params}");
+            let (job, _) = s.print_job_pdf(&params).unwrap();
+            assert!(!links(&job) && !String::from_utf8_lossy(&job).contains("/Annots"), "{params}");
+            let (saved, _) = s.print_pdf(&params).unwrap();
+            assert!(links(&saved), "{params}");
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = std::env::temp_dir().join(format!("wc-print-links-{}.pdf", std::process::id()));
+            s.run("file.printPdf", &json!({"path": path.to_string_lossy()})).unwrap();
+            let saved = std::fs::read(&path).unwrap();
+            let _ = std::fs::remove_file(&path);
+            assert!(links(&saved), "Save these pages as PDF keeps the link");
         }
     }
 
