@@ -1797,6 +1797,11 @@ fn a_deleted_list_items_number_is_drawn_as_deleted_text() {
     let (moved_text, _) = glyph_color(&shown, "Chapter").expect("the moved text is drawn");
     assert_eq!(moved_number, moved_text, "plain, like its text");
     assert!(!plain_label(&shown));
+    // With markup but deletions hidden in Track Changes Options, the number isn't drawn either.
+    assert!(glyph_color(&with_mark(display::DeleteMark::Hidden), "1.").is_none(), "deletions marked hidden");
+    let mut o = display::DisplayOptions { markup: true, ..Default::default() };
+    o.revisions.insertions_deletions = false;
+    assert!(glyph_color(&display::page_display(&d, &l.pages[0], &o), "1.").is_none(), "insertions and deletions not shown");
     // Without markup neither the text nor its number is drawn.
     let plain = draws(false);
     assert!(glyph_color(&plain, "Chapter").is_none() && glyph_color(&plain, "1.").is_none());
