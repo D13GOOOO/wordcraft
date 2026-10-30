@@ -885,21 +885,24 @@ pub fn build_up(root: &mut Arg, pos: &MathPos, latex: bool) -> Option<MathPos> {
     a.splice(start..at, built);
     let out = MathPos { path: pos.path, off: before + new_units };
     tidy(root);
-    let out = clamp(root, &out);
-    // An n-ary operator built without its operand (`∫_0^1` then Space) takes the caret into the
-    // empty operand, as inserting one from the gallery does, so what is typed next is integrated
-    // or summed (#4917).
-    if out.path.len() < MAX_DEPTH
-        && let Some(a) = arg_at(root, &out.path)
-        && let Loc::Before(i) = locate(a, out.off)
+    Some(clamp(root, &out))
+}
+
+/// Typing that just built an n-ary operator without its operand (`∫_0^1` then Space) goes on in
+/// the empty operand, as after inserting one from the gallery, so what is typed next is
+/// integrated or summed (#4917). Other carets, and moves or Enter that build up, stay put.
+pub fn into_empty_operand(root: &Arg, pos: &MathPos) -> MathPos {
+    if pos.path.len() < MAX_DEPTH
+        && let Some(a) = arg_at(root, &pos.path)
+        && let Loc::Before(i) = locate(a, pos.off)
         && let Some(k) = i.checked_sub(1)
         && matches!(a.get(k), Some(MNode::Nary { e, .. }) if e.is_empty())
     {
-        let mut path = out.path;
+        let mut path = pos.path.clone();
         path.push((k, 2));
-        return Some(MathPos { path, off: 0 });
+        return MathPos { path, off: 0 };
     }
-    Some(out)
+    pos.clone()
 }
 
 /// A top-level `#` numbers the equation: wrap it as a one-row equation array.

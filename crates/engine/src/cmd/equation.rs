@@ -330,7 +330,7 @@ fn type_text(s: &mut Session, v: &Value) -> CmdResult {
                 // Space, or Space alone, builds the operator (#4917).
                 let waits = changed && c == ' ' && me::nary_before(&math.nodes, &pos);
                 if !waits && let Some(p) = me::build_up(&mut math.nodes, &pos, latex) {
-                    pos = p;
+                    pos = me::into_empty_operand(&math.nodes, &p);
                     changed = true;
                 }
                 if changed {

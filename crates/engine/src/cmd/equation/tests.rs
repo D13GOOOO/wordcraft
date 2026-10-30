@@ -569,9 +569,22 @@ fn an_autocorrected_operator_waits_for_its_limits() {
     // Typing the operand straight after it, as before.
     let s = typed(&[r"\int", " ", "x", " "]);
     assert_eq!(nary_of(&s), Some(('∫', None, None, "x".into())));
-    // One undo step takes the whole typing away.
+    // Enter builds the operator and leaves the caret after it; Right builds it and, at the
+    // equation's end, leaves the equation, both as before.
+    let mut s = typed(&[r"\int", " ", "_0^1"]);
+    s.run("equation.enter", &json!({})).unwrap();
+    assert_eq!(nary_of(&s), Some(('∫', Some("0".into()), Some("1".into()), String::new())));
+    assert_eq!(s.math.as_ref().unwrap().pos, MathPos::new(Vec::new(), 1));
+    let mut s = typed(&[r"\int", " ", "_0^1"]);
+    let at = s.math.as_ref().unwrap().at.clone();
+    s.run("equation.move", &json!({"dir": "right"})).unwrap();
+    assert!(s.math.is_none(), "Right at the end leaves the equation");
+    assert!(matches!(nodes_of(&s, &at).as_deref(), Some([MNode::Nary { e, .. }]) if e.is_empty()));
+    // One undo step takes the whole typing away, leaving the empty equation.
     let mut s = typed(&[r"\int", " ", "_0^1", " ", "t"]);
+    let at = s.math.as_ref().unwrap().at.clone();
     s.run("equation.exit", &json!({})).unwrap();
     s.run("edit.undo", &json!({})).unwrap();
-    assert!(linear(&s).is_empty());
+    let left = s.doc.para_at(&at).and_then(|p| p.object_at(at.off)).map(|o| o.plain_text().to_string());
+    assert_eq!(left.as_deref(), Some(""), "the equation is there, empty");
 }
