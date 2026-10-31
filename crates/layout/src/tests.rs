@@ -1700,6 +1700,29 @@ fn lists_get_labels_and_indent() {
 }
 
 #[test]
+fn a_none_level_draws_its_literal_label() {
+    // #4985: numFmt none with the level text `RESPONSE:` and a one-inch hanging indent; Word
+    // draws `RESPONSE:` at the margin and the text an inch in.
+    let mut d = Document::from_text("X");
+    let id = d.numbering.add_list(wordcraft_doc::ListKind::Numbered);
+    let level = wordcraft_doc::numbering::Level {
+        format: wordcraft_doc::section::NumFormat::None,
+        text: "RESPONSE:".into(),
+        indent: 72.0,
+        hanging: 72.0,
+        ..Default::default()
+    };
+    if let Some(num) = d.numbering.nums.iter_mut().find(|n| n.id == id) {
+        num.level_overrides = vec![(0, level)];
+    }
+    d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 1), &|p| p.numbering = Some(wordcraft_doc::props::NumRef { num: id, level: 0 })).unwrap();
+    let l = lay(&d);
+    assert_eq!(labels(&l), vec!["RESPONSE:"]);
+    let x = l.caret(&Pos::body(0, 0)).unwrap().x;
+    assert!((x - 144.0).abs() < 0.5, "the text starts an inch in: {x}");
+}
+
+#[test]
 fn break_only_list_has_no_label() {
     use wordcraft_doc::ListKind;
     for kind in [ListKind::Numbered, ListKind::Bullet] {
