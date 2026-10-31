@@ -599,6 +599,18 @@ fn an_autocorrected_operator_waits_for_its_limits() {
         })
     });
     assert_eq!(inner.as_deref(), Some("f"), "f is the inner operator's operand");
+    // Space after an operator that was already there (from the gallery, its operand left empty)
+    // doesn't send the caret back into it: what is typed next follows the operator.
+    let mut s = session();
+    s.run("insert.equation", &json!({})).unwrap();
+    s.run("equation.insertStructure", &json!({"id": "nary.sumLimits"})).unwrap();
+    s.run("equation.type", &json!({"text": "k"})).unwrap();
+    if let Some(m) = s.math.as_mut() {
+        m.pos = MathPos::new(Vec::new(), 1);
+    }
+    s.run("equation.type", &json!({"text": " x"})).unwrap();
+    assert_eq!(nary_of(&s).map(|n| n.3), Some(String::new()), "the operand stays empty");
+    assert_eq!(s.math.as_ref().unwrap().pos.path, Vec::new(), "the caret stays after the operator");
 }
 
 #[test]

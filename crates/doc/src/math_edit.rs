@@ -785,6 +785,14 @@ pub fn nary_before(root: &Arg, pos: &MathPos) -> bool {
     !r.nor && !r.lit && k.checked_sub(1).and_then(|k| r.text.chars().nth(k)).is_some_and(crate::math::is_nary_char)
 }
 
+/// The node just before the caret is a built n-ary operator.
+pub fn nary_node_before(root: &Arg, pos: &MathPos) -> bool {
+    let pos = clamp(root, pos);
+    let Some(a) = arg_at(root, &pos.path) else { return false };
+    let Loc::Before(i) = locate(a, pos.off) else { return false };
+    i.checked_sub(1).and_then(|i| a.get(i)).is_some_and(|n| matches!(n, MNode::Nary { .. }))
+}
+
 /// Characters that make typed linear text build up into structures.
 fn builds(s: &str) -> bool {
     s.chars().any(|c| {

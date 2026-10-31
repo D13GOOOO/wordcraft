@@ -329,8 +329,11 @@ fn type_text(s: &mut Session, v: &Value) -> CmdResult {
                 // As in Word, `\int` + Space leaves ∫ waiting for its limits: `_a^b` and then
                 // Space, or Space alone, builds the operator (#4917).
                 let waits = changed && c == ' ' && me::nary_before(&math.nodes, &pos);
+                // Only an operator this build-up makes takes the caret: one already there (from
+                // the gallery, say) keeps it after it.
+                let built_before = me::nary_node_before(&math.nodes, &pos);
                 if !waits && let Some(p) = me::build_up(&mut math.nodes, &pos, latex) {
-                    pos = me::into_empty_operand(&math.nodes, &p);
+                    pos = if built_before { p } else { me::into_empty_operand(&math.nodes, &p) };
                     changed = true;
                 }
                 if changed {
