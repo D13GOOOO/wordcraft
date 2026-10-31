@@ -460,8 +460,12 @@ mod tests {
         let id = n.add_list(ListKind::Numbered);
         let lvl = |format, text: &str| Level { format, text: text.into(), ..Level::default() };
         if let Some(num) = n.nums.iter_mut().find(|x| x.id == id) {
-            num.level_overrides =
-                vec![(1, lvl(NumFormat::None, "RESPONSE:")), (2, lvl(NumFormat::None, "%3")), (3, lvl(NumFormat::None, "")), (4, lvl(NumFormat::None, "%1.%5 note"))];
+            num.level_overrides = vec![
+                (1, lvl(NumFormat::None, "RESPONSE:")),
+                (2, lvl(NumFormat::None, "%3")),
+                (3, lvl(NumFormat::None, "")),
+                (4, lvl(NumFormat::None, "%1.%5 note")),
+            ];
         }
         assert!(n.shows_label(id, 1) && n.shows_label(id, 4));
         assert!(!n.shows_label(id, 2) && !n.shows_label(id, 3));

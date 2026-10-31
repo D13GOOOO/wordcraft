@@ -2307,7 +2307,10 @@ fn a_none_level_s_literal_text_is_its_label() {
     let d = wordcraft_docx::read(&bytes).unwrap();
     assert_eq!(label(&d).as_deref(), Some("RESPONSE:"));
     let back = wordcraft_docx::read(&wordcraft_docx::write(&d).unwrap()).unwrap();
-    assert_eq!(back.numbering.level(1, 0).map(|l| (l.format, l.text.as_str(), l.indent, l.hanging)), Some((NumFormat::None, "RESPONSE:", 72.0, 72.0)));
+    assert_eq!(
+        back.numbering.level(1, 0).map(|l| (l.format, l.text.as_str(), l.indent, l.hanging)),
+        Some((NumFormat::None, "RESPONSE:", 72.0, 72.0))
+    );
     assert_eq!(label(&back).as_deref(), Some("RESPONSE:"));
 }
 
