@@ -8402,6 +8402,30 @@ fn text_frames_in_a_cell_share_one_frame() {
     assert!((a.x - b.x).abs() < 1.0);
 }
 
+/// #4986: two header paragraphs with the same frame (18 pt wide, at the margin, exactly 24 pt
+/// lines) share it, one line apart, as in Word, instead of being drawn at one spot.
+#[test]
+fn text_frames_in_a_header_share_one_frame() {
+    use wordcraft_doc::props::{LineSpacing, TextFrame};
+    let mut d = Document::from_text("");
+    let fr = TextFrame { w: Some(18.0), h_anchor: "margin".into(), v_anchor: "margin".into(), wrap: "none".into(), ..Default::default() };
+    let framed = |s: &str| {
+        let mut p = wordcraft_doc::Paragraph::with_text(s, Default::default());
+        p.props.frame = Some(fr.clone());
+        p.props.line_spacing = Some(LineSpacing::Exactly(24.0));
+        p.props.space_before = Some(0.0);
+        p.props.space_after = Some(0.0);
+        wordcraft_doc::para_block(p)
+    };
+    let id = d.add_part(wordcraft_doc::PartKind::Header, vec![framed("1"), framed("2")]);
+    d.last_section.headers.default = Some(id);
+    let l = lay(&d);
+    let at = |i: usize| l.caret_on(&Pos { story: StoryRef::Part(id), path: Path::top(i), off: 0 }, 0).unwrap();
+    let (a, b) = (at(0), at(1));
+    assert!((b.top - a.top - 24.0).abs() < 0.5, "one 24 pt line apart: {} vs {}", a.top, b.top);
+    assert!((a.x - b.x).abs() < 1.0);
+}
+
 /// Text frames in the body (a court form built from them, #2406) go where their frame puts them
 /// on the page; paragraphs with the same frame stack in it, and the text outside it flows as if
 /// the frame weren't there. WordCraft laid every framed paragraph out in line, one under the
